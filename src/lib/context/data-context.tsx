@@ -1,0 +1,321 @@
+'use client'
+
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react'
+import type { Member, Transaction, Ticket, Clinician, Alert, Rock } from '@/lib/types'
+import type { ManualMetrics } from '@/data/mock/manual-metrics'
+import type { SnowflakeExport } from '@/lib/types/snowflake-export'
+import {
+  mockMembers,
+  mockTransactions,
+  mockTickets,
+  mockClinicians,
+  mockAlerts,
+  mockRocks,
+  mockManualMetrics,
+} from '@/data/mock'
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type DataMode = 'demo' | 'actual'
+
+export interface DashboardData {
+  members: Member[]
+  transactions: Transaction[]
+  tickets: Ticket[]
+  clinicians: Clinician[]
+  manualMetrics: ManualMetrics
+  rocks: Rock[]
+  alerts: Alert[]
+  isUsingMockData: boolean
+  dataMode: DataMode
+  lastRefreshed: Record<string, string | null>
+}
+
+interface DataContextValue extends DashboardData {
+  updateSource: (source: string, data: Partial<DashboardData>) => void
+  setLastRefreshed: (source: string, timestamp: string) => void
+  resetToDemo: () => void
+  switchToActual: () => void
+  hasActualData: boolean
+  isLoading: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Storage helpers
+// ---------------------------------------------------------------------------
+
+const STORAGE_KEY = 'tmrw-dashboard-data'
+
+function loadFromStorage(): Partial<DashboardData> | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function saveToStorage(data: Partial<DashboardData>) {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      members: data.members,
+      transactions: data.transactions,
+      tickets: data.tickets,
+      clinicians: data.clinicians,
+      lastRefreshed: data.lastRefreshed,
+      isUsingMockData: data.isUsingMockData,
+      dataMode: data.dataMode,
+    }))
+  } catch {
+    // localStorage full or unavailable
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Default data
+// ---------------------------------------------------------------------------
+
+const defaultData: DashboardData = {
+  members: mockMembers,
+  transactions: mockTransactions,
+  tickets: mockTickets,
+  clinicians: mockClinicians,
+  manualMetrics: mockManualMetrics,
+  rocks: mockRocks,
+  alerts: mockAlerts,
+  isUsingMockData: true,
+  dataMode: 'demo',
+  lastRefreshed: {
+    tableau: '2026-03-05T09:00:00.000Z',
+    hubspot: '2026-03-06T14:30:00.000Z',
+    stripe: '2026-03-07T06:00:00.000Z',
+    zendesk: '2026-03-06T22:15:00.000Z',
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Snowflake daily export (dormant until env vars set)
+// ---------------------------------------------------------------------------
+
+const SNOWFLAKE_EXPORT_URL = process.env.NEXT_PUBLIC_SNOWFLAKE_EXPORT_URL || null
+
+function mapSnowflakeMember(m: SnowflakeExport['members'][number]): Member {
+  return m as unknown as Member
+}
+function mapSnowflakeTransaction(t: SnowflakeExport['transactions'][number]): Transaction {
+  return t as unknown as Transaction
+}
+function mapSnowflakeTicket(t: SnowflakeExport['tickets'][number]): Ticket {
+  return t as unknown as Ticket
+}
+function mapSnowflakeClinician(c: SnowflakeExport['clinicians'][number]): Clinician {
+  return c as unknown as Clinician
+}
+
+const DataContext = createContext<DataContextValue>({
+  ...defaultData,
+  updateSource: () => {},
+  setLastRefreshed: () => {},
+  resetToDemo: () => {},
+  switchToActual: () => {},
+  hasActualData: false,
+  isLoading: true,
+})
+
+export function DataProvider({ children }: { children: ReactNode }) {
+  const [data, setData] = useState<DashboardData>(defaultData)
+  const [isLoading, setIsLoading] = useState(true)
+
+  // Load persisted data on mount — try server first, localStorage fallback
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const res = await fetch('/api/data/latest')
+        if (res.ok) {
+          const sources = await res.json()
+          if (sources && Object.keys(sources).length > 0) {
+            const updates: Partial<DashboardData> = { isUsingMockData: false, lastRefreshed: {} }
+            if (sources.tableau) {
+              updates.members = sources.tableau.data
+              updates.lastRefreshed!.tableau = sources.tableau.timestamp
+            }
+            if (sources.hubspot) {
+              updates.lastRefreshed!.hubspot = sources.hubspot.timestamp
+            }
+            if (sources.stripe) {
+              updates.transactions = sources.stripe.data
+              updates.lastRefreshed!.stripe = sources.stripe.timestamp
+            }
+            if (sources.zendesk) {
+              updates.tickets = sources.zendesk.data
+              updates.lastRefreshed!.zendesk = sources.zendesk.timestamp
+            }
+            if (Object.keys(updates.lastRefreshed || {}).length > 0) {
+              setData(prev => ({
+                ...prev,
+                ...updates,
+                dataMode: 'actual',
+                rocks: prev.rocks,
+                alerts: prev.alerts,
+                manualMetrics: prev.manualMetrics,
+              }))
+              setIsLoading(false)
+              return
+            }
+          }
+        }
+      } catch {
+        // Server unavailable — fall through to localStorage
+      }
+
+      const stored = loadFromStorage()
+      if (stored && !stored.isUsingMockData) {
+        setData((prev) => ({
+          ...prev,
+          ...stored,
+          dataMode: 'actual',
+          rocks: prev.rocks,
+          alerts: prev.alerts,
+          manualMetrics: prev.manualMetrics,
+        }))
+      }
+      setIsLoading(false)
+    }
+
+    loadData()
+  }, [])
+
+  const hasActualData = useMemo(() => {
+    // Check in-memory state first — but only count non-null timestamps when
+    // the dashboard is actually in "actual" mode (demo mode now ships its own
+    // placeholder timestamps for display purposes).
+    if (data.dataMode === 'actual' && Object.values(data.lastRefreshed).some(ts => ts !== null)) return true
+    // Also check localStorage (actual data is preserved there when switching to demo)
+    const stored = loadFromStorage()
+    if (stored?.lastRefreshed && stored?.dataMode === 'actual') {
+      return Object.values(stored.lastRefreshed).some(ts => ts !== null)
+    }
+    return false
+  }, [data.lastRefreshed, data.dataMode])
+
+  const updateSource = useCallback((source: string, incoming: Partial<DashboardData>) => {
+    setData((prev) => {
+      const next = {
+        ...prev,
+        ...incoming,
+        isUsingMockData: false,
+        dataMode: 'actual' as DataMode,
+        lastRefreshed: {
+          ...prev.lastRefreshed,
+          [source]: new Date().toISOString(),
+        },
+      }
+      saveToStorage(next)
+      // Also persist to server (fire-and-forget)
+      fetch('/api/data/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source, data: incoming, timestamp: new Date().toISOString() }),
+      }).catch(() => {})
+      return next
+    })
+  }, [])
+
+  const setLastRefreshed = useCallback((source: string, timestamp: string) => {
+    setData((prev) => {
+      const next = {
+        ...prev,
+        lastRefreshed: { ...prev.lastRefreshed, [source]: timestamp },
+      }
+      saveToStorage(next)
+      return next
+    })
+  }, [])
+
+  const resetToDemo = useCallback(() => {
+    setData({
+      ...defaultData,
+      dataMode: 'demo',
+    })
+    // Don't clear localStorage — preserve actual data for switching back
+  }, [])
+
+  const switchToActual = useCallback(() => {
+    const stored = loadFromStorage()
+    if (stored) {
+      setData(prev => ({
+        ...prev,
+        ...stored,
+        dataMode: 'actual',
+        rocks: prev.rocks,
+        alerts: prev.alerts,
+        manualMetrics: prev.manualMetrics,
+      }))
+    }
+  }, [])
+
+  // Snowflake daily export auto-fetch (dormant until env vars set)
+  const fetchSnowflakeExport = useCallback(async () => {
+    if (!SNOWFLAKE_EXPORT_URL) return
+
+    try {
+      const res = await fetch(SNOWFLAKE_EXPORT_URL, {
+        cache: 'no-store',
+        headers: {
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SNOWFLAKE_TOKEN || ''}`,
+        },
+      })
+
+      if (!res.ok) throw new Error(`Snowflake fetch failed: ${res.status}`)
+
+      const exported: SnowflakeExport = await res.json()
+
+      const members = exported.members.map(mapSnowflakeMember)
+      const transactions = exported.transactions.map(mapSnowflakeTransaction)
+      const tickets = exported.tickets.map(mapSnowflakeTicket)
+      const clinicians = exported.clinicians.map(mapSnowflakeClinician)
+
+      setData(prev => ({
+        ...prev,
+        members,
+        transactions,
+        tickets,
+        clinicians,
+        isUsingMockData: false,
+        dataMode: 'actual',
+        lastRefreshed: exported.meta.sourceFreshness,
+      }))
+
+      saveToStorage({ members, transactions, tickets, clinicians, lastRefreshed: exported.meta.sourceFreshness, isUsingMockData: false, dataMode: 'actual' })
+
+    } catch (err) {
+      console.error('Snowflake export fetch failed:', err)
+      // Fall back to localStorage or mock data
+    }
+  }, [])
+
+  // Auto-fetch on mount if Snowflake URL is configured
+  useEffect(() => {
+    if (SNOWFLAKE_EXPORT_URL) {
+      fetchSnowflakeExport()
+    }
+  }, [fetchSnowflakeExport])
+
+  return (
+    <DataContext.Provider value={{ ...data, updateSource, setLastRefreshed, resetToDemo, switchToActual, hasActualData, isLoading }}>
+      {children}
+    </DataContext.Provider>
+  )
+}
+
+export function useDashboardData() {
+  return useContext(DataContext)
+}
