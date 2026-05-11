@@ -1,0 +1,275 @@
+@import "tailwindcss";
+@source "../../node_modules/@tremor/react/dist/**/*.js";
+
+@theme {
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-serif: 'Crimson Text', Georgia, serif;
+
+  /* Surfaces — INCREASED CONTRAST */
+  --color-dash-bg: #FFFFFF;
+  --color-dash-surface: #FFFFFF;
+  --color-dash-surface-hover: #F7F7F7;
+  --color-dash-surface-alt: #F5F5F5;
+  --color-dash-header: #1A1A1A;
+  --color-dash-sidebar: #F9F9F9;
+
+  /* Borders — STRONGER */
+  --color-dash-border: #D4D4D4;
+  --color-dash-border-subtle: #E5E5E5;
+  --color-dash-border-strong: #A3A3A3;
+
+  /* Text */
+  --color-dash-text: #1A1A1A;
+  --color-dash-text-secondary: #737373;
+  --color-dash-text-muted: #A3A3A3;
+  --color-dash-text-inverse: #FFFFFF;
+
+  /* Brand */
+  --color-dash-red: #8B0000;
+  --color-dash-red-light: #8B000015;
+  --color-dash-black: #1A1A1A;
+
+  /* Status */
+  --color-status-green: #16A34A;
+  --color-status-green-light: #16A34A15;
+  --color-status-amber: #D97706;
+  --color-status-amber-light: #D9770615;
+  --color-status-red: #DC2626;
+  --color-status-red-light: #DC262615;
+  --color-status-grey: #A3A3A3;
+  --color-status-grey-light: #A3A3A315;
+
+  /* Charts */
+  --color-chart-1: #8B0000;
+  --color-chart-2: #2563EB;
+  --color-chart-3: #16A34A;
+  --color-chart-4: #D97706;
+  --color-chart-5: #7C3AED;
+  --color-chart-6: #EC4899;
+  --color-chart-forecast: #8B000040;
+  --color-chart-target: #D97706;
+  --color-chart-comparison: #A3A3A3;
+
+  /* Data Sources */
+  --color-src-tableau: #1A1A1A;
+  --color-src-hubspot: #FF7A59;
+  --color-src-stripe: #635BFF;
+  --color-src-zendesk: #03363D;
+  --color-src-manual: #737373;
+  --color-src-forecast: #8B0000;
+
+  /* Departments */
+  --color-dept-corporate: #78716C;
+  --color-dept-sciences: #D97706;
+  --color-dept-medical: #DC2626;
+  --color-dept-clinical: #EC4899;
+  --color-dept-technology: #2563EB;
+  --color-dept-brand: #7C3AED;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-dash-bg);
+    color: var(--color-dash-text);
+    font-family: var(--font-sans);
+  }
+
+  /* ── Tremor colour overrides ────────────────────────────── */
+  :root {
+    --tremor-brand: #DC2626;
+    --color-rose-500: #DC2626;
+    --color-rose-400: #EF4444;
+    --color-rose-600: #B91C1C;
+    --color-blue-500: #2563EB;
+    --color-blue-400: #3B82F6;
+    --color-emerald-500: #059669;
+    --color-emerald-400: #10B981;
+    --color-amber-500: #D97706;
+    --color-amber-400: #F59E0B;
+    --color-violet-500: #7C3AED;
+    --color-violet-400: #8B5CF6;
+    --color-cyan-500: #0891B2;
+    --color-cyan-400: #06B6D4;
+    --color-slate-500: #64748B;
+    --color-gray-500: #9CA3AF;
+    --color-indigo-500: #4F46E5;
+    --color-indigo-400: #6366F1;
+    --color-fuchsia-500: #C026D3;
+    --color-fuchsia-400: #D946EF;
+    --color-teal-500: #0D9488;
+    --color-teal-400: #14B8A6;
+  }
+
+  /* Tremor chart grid lines */
+  .tremor-CartesianGrid-line {
+    stroke: #E5E5E5 !important;
+  }
+
+  /* Tremor tooltip */
+  .tremor-Tooltip-root {
+    border-color: #D4D4D4 !important;
+    background-color: #FFFFFF !important;
+  }
+
+  /* Tremor chart text */
+  .tremor-Axis-tick text,
+  .tremor-Legend-legendItem span {
+    font-family: var(--font-mono) !important;
+    font-size: 11px !important;
+    fill: #737373 !important;
+  }
+
+  /* ================================================================
+     CHART VISIBILITY OVERRIDES
+     Tremor/Recharts defaults are too subtle on white backgrounds.
+     These overrides force charts to be clearly readable.
+     ================================================================ */
+
+  /* ALL lines — minimum 3px stroke width */
+  .recharts-line-curve,
+  .recharts-area-curve {
+    stroke-width: 3 !important;
+  }
+
+  /* Area fills — increase opacity from ~10% to 25% */
+  .recharts-area-area {
+    fill-opacity: 0.25 !important;
+  }
+
+  /* Bar charts — ensure bars have visible fill */
+  .recharts-bar-rectangle {
+    fill-opacity: 1 !important;
+  }
+
+  .recharts-bar-rectangle rect {
+    rx: 3;
+    ry: 3;
+  }
+
+  /* Dots on lines — make them visible (4px) */
+  .recharts-dot {
+    r: 4 !important;
+    stroke-width: 2 !important;
+  }
+
+  /* Active dot on hover — larger */
+  .recharts-active-dot {
+    r: 6 !important;
+  }
+
+  /* Grid lines — visible but subtle */
+  .recharts-cartesian-grid line {
+    stroke: #E5E5E5 !important;
+    stroke-width: 1 !important;
+  }
+
+  .recharts-cartesian-grid-horizontal line,
+  .recharts-cartesian-grid-vertical line {
+    stroke: #E5E5E5 !important;
+  }
+
+  /* Axis tick labels — JetBrains Mono, visible grey */
+  .recharts-cartesian-axis-tick-value {
+    font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+    font-size: 11px !important;
+    fill: #525252 !important;
+  }
+
+  /* Axis lines */
+  .recharts-cartesian-axis-line {
+    stroke: #D4D4D4 !important;
+  }
+
+  .recharts-text {
+    font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+    font-size: 11px !important;
+    fill: #525252 !important;
+  }
+
+  /* Legend text */
+  .recharts-legend-item-text {
+    font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: #1A1A1A !important;
+  }
+
+  /* Tooltip container — clean white card */
+  .recharts-tooltip-wrapper .recharts-default-tooltip {
+    border: 1px solid #D4D4D4 !important;
+    border-radius: 8px !important;
+    background: #FFFFFF !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1) !important;
+    padding: 10px 14px !important;
+  }
+
+  /* Tooltip label */
+  .recharts-tooltip-label {
+    font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #1A1A1A !important;
+    margin-bottom: 6px !important;
+  }
+
+  /* Tooltip values */
+  .recharts-tooltip-item {
+    font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    padding: 2px 0 !important;
+  }
+
+}
+
+/* ================================================================
+   MOBILE RESPONSIVENESS
+   ================================================================ */
+
+/* Sticky first column for tables on mobile */
+@media (max-width: 767px) {
+  .sticky-first-col th:first-child,
+  .sticky-first-col td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background-color: var(--color-dash-surface);
+    border-right: 1px solid var(--color-dash-border);
+  }
+}
+
+/* Mobile touch optimization */
+@media (max-width: 767px) {
+  button, a, [role="button"] {
+    touch-action: manipulation;
+  }
+
+  html {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .overflow-x-auto {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .overflow-x-auto::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Print styles — hide navigation */
+@media print {
+  nav, header, .mobile-nav, [data-testid="sidebar"] {
+    display: none !important;
+  }
+  main {
+    margin-left: 0 !important;
+    padding: 0 !important;
+  }
+}
