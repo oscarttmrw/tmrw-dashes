@@ -5,9 +5,8 @@ export async function GET() {
   try {
     const supabase = createClient()
     const { data: rows } = await supabase
-      .from('upload_log')
+      .from('priorities_log')
       .select('*')
-      .eq('source', 'priorities')
       .order('uploaded_at', { ascending: false })
       .limit(1)
     if (!rows || rows.length === 0) return NextResponse.json(null)
@@ -21,7 +20,9 @@ export async function POST(request: NextRequest) {
     const { weekOf, priorities } = body
     if (!weekOf || !priorities) return NextResponse.json({ error: 'Missing weekOf or priorities' }, { status: 400 })
     const supabase = createClient()
-    const { error } = await supabase.from('upload_log').insert({ source: 'priorities', record_count: 1, data: { ...priorities, weekOf } })
+    const { error } = await supabase
+      .from('priorities_log')
+      .insert({ week_of: weekOf, data: { ...priorities, weekOf } })
     if (error) throw error
     return NextResponse.json({ success: true, timestamp: new Date().toISOString() })
   } catch (err) {

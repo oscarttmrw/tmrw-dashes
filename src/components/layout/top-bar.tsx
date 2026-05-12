@@ -73,7 +73,7 @@ function downloadFile(content: string, filename: string, mimeType: string) {
 }
 
 export function TopBar({ onCommandBarOpen, onMobileMenuOpen }: TopBarProps) {
-  const { dataMode, resetToDemo, switchToActual, hasActualData } = useDashboardData()
+  const { dataMode } = useDashboardData()
   const [exportOpen, setExportOpen] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
 
@@ -125,41 +125,6 @@ export function TopBar({ onCommandBarOpen, onMobileMenuOpen }: TopBarProps) {
             ⌘K
           </kbd>
         </button>
-
-        {/* Demo / Actual toggle — hidden on smallest mobile */}
-        <div className="hidden sm:flex items-center">
-          <div className="h-5 w-px bg-white/15 mr-2" />
-          <div className="flex items-center rounded-md border border-white/20 p-0.5">
-            <button
-              onClick={() => {
-                if (dataMode === 'actual') resetToDemo()
-              }}
-              className={cn(
-                'rounded px-2 py-0.5 font-mono text-[11px] font-medium transition-colors',
-                dataMode === 'demo'
-                  ? 'bg-white/20 text-white'
-                  : 'text-white/40 hover:text-white/60'
-              )}
-            >
-              Demo
-            </button>
-            <button
-              onClick={() => {
-                if (hasActualData && dataMode === 'demo') switchToActual()
-              }}
-              className={cn(
-                'rounded px-2 py-0.5 font-mono text-[11px] font-medium transition-colors',
-                dataMode === 'actual'
-                  ? 'bg-white/20 text-white'
-                  : hasActualData
-                    ? 'text-white/40 hover:text-white/60'
-                    : 'text-white/20 cursor-not-allowed'
-              )}
-            >
-              Actual
-            </button>
-          </div>
-        </div>
 
         {/* Date — hidden on mobile */}
         <div className="hidden md:flex items-center gap-1.5 px-2 text-sm text-white/60">

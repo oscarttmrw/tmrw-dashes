@@ -7,13 +7,13 @@ import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { DataSourceBadge } from '@/components/dashboard/data-source-badge'
 import { SectionHeading } from '@/components/dashboard/section-heading'
 import { useDashboardData } from '@/lib/context/data-context'
-import { getSchema } from '@/lib/config/data-sources'
+import { getSchema, dataSourceConfigs } from '@/lib/config/data-sources'
 import { processTableauTSV, type TableauMemberRaw } from '@/lib/processors/tableau-processor'
 import { processHubspotCSV } from '@/lib/processors/hubspot-processor'
 import { processStripeCSV } from '@/lib/processors/stripe-processor'
 import { processZendeskCSV } from '@/lib/processors/zendesk-processor'
 import type { Member } from '@/lib/types'
-import { Upload, CheckCircle, AlertTriangle } from 'lucide-react'
+import { Upload, CheckCircle, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react'
 
 function tableauRawToMember(raw: TableauMemberRaw): Member {
   const now = new Date().toISOString()
@@ -118,7 +118,10 @@ const dataSources: DataSourceConfig[] = [
 function UploadCard({ source }: { source: DataSourceConfig }) {
   const { lastRefreshed, updateSource } = useDashboardData()
   const [state, setState] = useState<UploadState>({ status: 'idle' })
+  const [stepsOpen, setStepsOpen] = useState(true)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const config = dataSourceConfigs[source.key]
 
   const lastRefresh = lastRefreshed[source.key]
 
@@ -362,17 +365,54 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
         )}
       </div>
 
-      {/* Note / Export instructions */}
+      {/* Note */}
       {source.note && (
         <p className="mt-2 text-xs italic text-dash-text-muted">{source.note}</p>
       )}
-      {source.exportInstructions && (
-        <p className="mt-2 text-xs text-dash-text-muted">
-          Export:{' '}
-          <span className="font-mono text-dash-text-secondary">
-            {source.exportInstructions}
-          </span>
-        </p>
+
+      {/* Panel A — How to pull this data */}
+      {config && (
+        <div className="mt-4 rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
+          <button
+            type="button"
+            onClick={() => setStepsOpen((o) => !o)}
+            className="flex w-full items-center justify-between"
+          >
+            <span className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
+              How to pull this data
+            </span>
+            {stepsOpen ? (
+              <ChevronUp size={14} className="text-dash-text-secondary" />
+            ) : (
+              <ChevronDown size={14} className="text-dash-text-secondary" />
+            )}
+          </button>
+          {stepsOpen && (
+            <ol className="mt-3 list-decimal list-inside space-y-1">
+              {config.exportSteps.map((step, i) => (
+                <li key={i} className="text-sm text-dash-text">{step}</li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+
+      {/* Panel B — What this data powers */}
+      {config && (
+        <div className="mt-3 rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
+          <p className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
+            What this data powers
+          </p>
+          {config.poweredMetrics.length > 0 ? (
+            <ul className="mt-3 list-disc list-inside space-y-1">
+              {config.poweredMetrics.map((metric, i) => (
+                <li key={i} className="text-sm text-dash-text">{metric}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-dash-text">No metrics mapped yet.</p>
+          )}
+        </div>
       )}
     </div>
   )

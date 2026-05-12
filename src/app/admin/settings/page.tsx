@@ -1,6 +1,51 @@
 'use client'
 
 import { Breadcrumb } from '@/components/layout/breadcrumb'
+import { useDashboardData } from '@/lib/context/data-context'
+
+// ---------------------------------------------------------------------------
+// Demo Mode Section (needs client state)
+// ---------------------------------------------------------------------------
+function DemoModeSection() {
+  const { dataMode, resetToDemo, switchToActual } = useDashboardData()
+  const isDemo = dataMode === 'demo'
+
+  return (
+    <section>
+      <h2 className="mb-4 font-sans text-sm font-semibold uppercase tracking-wider text-dash-text-secondary">
+        Demo Mode
+      </h2>
+      <div className="rounded-lg border border-dash-border bg-dash-surface p-5">
+        <p className="mb-4 text-sm text-dash-text-secondary">
+          Demo mode populates the dashboard with illustrative data. Use it for onboarding and presentations. Turn it off for live operations.
+        </p>
+        <div className="flex items-center gap-4">
+          {/* Toggle switch */}
+          <button
+            role="switch"
+            aria-checked={isDemo}
+            onClick={() => (isDemo ? switchToActual() : resetToDemo())}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-dash-red focus:ring-offset-2 focus:ring-offset-dash-surface ${
+              isDemo ? 'bg-amber-500' : 'bg-dash-border'
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                isDemo ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+          <div>
+            <span className="text-sm font-medium text-dash-text">Demo mode</span>
+            <span className={`ml-2 text-xs font-medium ${isDemo ? 'text-amber-500' : 'text-dash-text-muted'}`}>
+              {isDemo ? 'On' : 'Off'}
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Metric Targets
@@ -48,6 +93,9 @@ export default function SettingsPage() {
           { label: 'Settings' },
         ]}
       />
+
+      {/* Demo Mode */}
+      <DemoModeSection />
 
       {/* Metric Targets */}
       <section>

@@ -7,6 +7,12 @@ export interface CsvSchema {
   strippedColumns: string[];
 }
 
+export interface DataSourceConfig {
+  name: string;
+  exportSteps: string[];
+  poweredMetrics: string[];
+}
+
 export interface UploadResult {
   success: boolean;
   source: DataSourceName;

@@ -1,30 +1,65 @@
--- Upload log: one row per CSV upload, stores processed JSON data
-CREATE TABLE IF NOT EXISTS public.upload_log (
-  id            UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
-  source        TEXT        NOT NULL CHECK (source IN ('tableau', 'hubspot', 'stripe', 'zendesk', 'priorities')),
-  uploaded_at   TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-  record_count  INTEGER     DEFAULT 0,
-  strategy      TEXT        NOT NULL DEFAULT 'full-replace',
-  uploaded_by   UUID        REFERENCES auth.users(id) ON DELETE SET NULL,
-  data          JSONB       NOT NULL DEFAULT '[]'::jsonb
+-- Drop old flat table if it exists
+drop table if exists upload_log cascade;
+
+-- Upload log: metadata only, one row per upload batch
+create table upload_log (
+  id            uuid primary key default gen_random_uuid(),
+  source        text not null,
+  record_count  integer not null default 0,
+  status        text not null default 'pending',  -- pending | complete | failed
+  error         text,
+  uploaded_at   timestamptz not null default now()
 );
 
-CREATE INDEX IF NOT EXISTS upload_log_source_uploaded_at_idx
-  ON public.upload_log (source, uploaded_at DESC);
+-- Per-source data tables, rows reference the batch they came from
+create table tableau_data (
+  id          bigserial primary key,
+  batch_id    uuid not null references upload_log(id) on delete cascade,
+  row_data    jsonb not null,
+  inserted_at timestamptz not null default now()
+);
 
--- Row-level security
-ALTER TABLE public.upload_log ENABLE ROW LEVEL SECURITY;
+create table hubspot_data (
+  id          bigserial primary key,
+  batch_id    uuid not null references upload_log(id) on delete cascade,
+  row_data    jsonb not null,
+  inserted_at timestamptz not null default now()
+);
 
--- Authenticated users can read all uploads
-CREATE POLICY "Authenticated users can read upload_log"
-  ON public.upload_log FOR SELECT
-  TO authenticated
-  USING (true);
+create table stripe_data (
+  id          bigserial primary key,
+  batch_id    uuid not null references upload_log(id) on delete cascade,
+  row_data    jsonb not null,
+  inserted_at timestamptz not null default now()
+);
 
--- Authenticated users can insert their own uploads
-CREATE POLICY "Authenticated users can insert upload_log"
-  ON public.upload_log FOR INSERT
-  TO authenticated
-  WITH CHECK (auth.uid() = uploaded_by);
+create table zendesk_data (
+  id          bigserial primary key,
+  batch_id    uuid not null references upload_log(id) on delete cascade,
+  row_data    jsonb not null,
+  inserted_at timestamptz not null default now()
+);
 
--- Service role bypasses RLS automatically
+-- Priorities stored separately (not file-upload-based)
+create table priorities_log (
+  id          bigserial primary key,
+  week_of     date not null,
+  data        jsonb not null,
+  uploaded_at timestamptz not null default now()
+);
+
+-- Enable RLS on all tables
+alter table upload_log       enable row level security;
+alter table tableau_data     enable row level security;
+alter table hubspot_data     enable row level security;
+alter table stripe_data      enable row level security;
+alter table zendesk_data     enable row level security;
+alter table priorities_log   enable row level security;
+
+-- Service role can do everything
+create policy "service role full access" on upload_log       for all using (true) with check (true);
+create policy "service role full access" on tableau_data     for all using (true) with check (true);
+create policy "service role full access" on hubspot_data     for all using (true) with check (true);
+create policy "service role full access" on stripe_data      for all using (true) with check (true);
+create policy "service role full access" on zendesk_data     for all using (true) with check (true);
+create policy "service role full access" on priorities_log   for all using (true) with check (true);

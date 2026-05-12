@@ -80,6 +80,24 @@ function saveToStorage(data: Partial<DashboardData>) {
 // ---------------------------------------------------------------------------
 
 const defaultData: DashboardData = {
+  members: [],
+  transactions: [],
+  tickets: [],
+  clinicians: [],
+  manualMetrics: mockManualMetrics,
+  rocks: mockRocks,
+  alerts: mockAlerts,
+  isUsingMockData: false,
+  dataMode: 'actual',
+  lastRefreshed: {
+    tableau: null,
+    hubspot: null,
+    stripe: null,
+    zendesk: null,
+  },
+}
+
+const demoData: DashboardData = {
   members: mockMembers,
   transactions: mockTransactions,
   tickets: mockTickets,
@@ -127,7 +145,7 @@ const DataContext = createContext<DataContextValue>({
   resetToDemo: () => {},
   switchToActual: () => {},
   hasActualData: false,
-  isLoading: true,
+  isLoading: false,
 })
 
 export function DataProvider({ children }: { children: ReactNode }) {
@@ -241,25 +259,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const resetToDemo = useCallback(() => {
-    setData({
-      ...defaultData,
-      dataMode: 'demo',
-    })
+    setData(demoData)
     // Don't clear localStorage — preserve actual data for switching back
   }, [])
 
   const switchToActual = useCallback(() => {
     const stored = loadFromStorage()
-    if (stored) {
-      setData(prev => ({
-        ...prev,
-        ...stored,
-        dataMode: 'actual',
-        rocks: prev.rocks,
-        alerts: prev.alerts,
-        manualMetrics: prev.manualMetrics,
-      }))
-    }
+    setData(prev => ({
+      ...defaultData,
+      ...(stored ?? {}),
+      dataMode: 'actual',
+      rocks: prev.rocks,
+      alerts: prev.alerts,
+      manualMetrics: prev.manualMetrics,
+    }))
   }, [])
 
   // Snowflake daily export auto-fetch (dormant until env vars set)
