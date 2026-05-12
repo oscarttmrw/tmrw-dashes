@@ -100,8 +100,8 @@ export async function POST(request: NextRequest) {
     // Validate required columns
     const schema = getSchema(source)
     if (schema && rows.length > 0) {
-      const headers = Object.keys(rows[0])
-      const missing = schema.requiredColumns.filter(col => !headers.includes(col))
+      const headers = Object.keys(rows[0]).map(h => h.toLowerCase().trim())
+      const missing = schema.requiredColumns.filter(col => !headers.includes(col.toLowerCase().trim()))
       if (missing.length > 0) {
         return NextResponse.json(
           { error: `Missing required columns: ${missing.join(', ')}` },

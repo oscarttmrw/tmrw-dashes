@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
@@ -8,6 +8,7 @@ import { DataSourceBadge } from '@/components/dashboard/data-source-badge'
 import { SectionHeading } from '@/components/dashboard/section-heading'
 import { useDashboardData } from '@/lib/context/data-context'
 import { getSchema, dataSourceConfigs } from '@/lib/config/data-sources'
+import { getMetricsPoweredBy } from '@/lib/utils/metric-source'
 import { processTableauTSV, type TableauMemberRaw } from '@/lib/processors/tableau-processor'
 import { processHubspotCSV } from '@/lib/processors/hubspot-processor'
 import { processStripeCSV } from '@/lib/processors/stripe-processor'
@@ -16,6 +17,7 @@ import { processMetaCSV } from '@/lib/processors/meta-processor'
 import { processPelagoniaCSV } from '@/lib/processors/pelagonia-processor'
 import type { Member } from '@/lib/types'
 import { Upload, CheckCircle, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 function tableauRawToMember(raw: TableauMemberRaw): Member {
   const now = new Date().toISOString()
@@ -81,74 +83,42 @@ interface DataSourceConfig {
   recordLabel: string
   columnLabel: string
   note?: string
-  exportInstructions?: string
 }
 
-const dataSources: DataSourceConfig[] = [
-  {
-    key: 'tableau',
-    name: 'TABLEAU',
-    recordLabel: 'members',
-    columnLabel: 'measures',
-    note: 'TSV file with UTF-16 encoding handled automatically',
-  },
-  {
-    key: 'hubspot',
-    name: 'HUBSPOT',
-    recordLabel: 'records',
-    columnLabel: 'columns',
-  },
-  {
-    key: 'stripe',
-    name: 'STRIPE',
-    recordLabel: 'transactions',
-    columnLabel: 'columns',
-  },
-  {
-    key: 'zendesk',
-    name: 'ZENDESK',
-    recordLabel: 'records',
-    columnLabel: 'columns',
-    exportInstructions: 'Admin Center → Account → Tools → Reports → CSV Export',
-  },
-  {
-    key: 'meta',
-    name: 'META FOR BUSINESS',
-    recordLabel: 'ad sets',
-    columnLabel: 'columns',
-  },
-  {
-    key: 'pelagonia',
-    name: 'PELAGONIA (GOHIGHLEVEL)',
-    recordLabel: 'opportunities',
-    columnLabel: 'columns',
-  },
-]
+// Sorted descending by number of metrics powered
+const dataSources: DataSourceConfig[] = (
+  [
+    { key: 'pelagonia', name: 'PELAGONIA (GOHIGHLEVEL)', recordLabel: 'opportunities', columnLabel: 'columns' },
+    { key: 'meta', name: 'META FOR BUSINESS', recordLabel: 'ad sets', columnLabel: 'columns' },
+    { key: 'zendesk', name: 'ZENDESK', recordLabel: 'records', columnLabel: 'columns' },
+    { key: 'hubspot', name: 'HUBSPOT', recordLabel: 'records', columnLabel: 'columns' },
+    { key: 'stripe', name: 'STRIPE', recordLabel: 'transactions', columnLabel: 'columns' },
+    { key: 'tableau', name: 'TABLEAU', recordLabel: 'members', columnLabel: 'measures', note: 'TSV file with UTF-16 encoding handled automatically' },
+  ] as DataSourceConfig[]
+).sort((a, b) => getMetricsPoweredBy(b.key).length - getMetricsPoweredBy(a.key).length)
 
 // ---------------------------------------------------------------------------
 // Upload Card Component
 // ---------------------------------------------------------------------------
 
-function UploadCard({ source }: { source: DataSourceConfig }) {
+function UploadCard({ source, isFileBeingDragged }: { source: DataSourceConfig; isFileBeingDragged: boolean }) {
   const { lastRefreshed, updateSource } = useDashboardData()
   const [state, setState] = useState<UploadState>({ status: 'idle' })
-  const [stepsOpen, setStepsOpen] = useState(true)
+  const [stepsOpen, setStepsOpen] = useState(false)
+  const [metricsOpen, setMetricsOpen] = useState(false)
+  const [isDraggingOver, setIsDraggingOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const config = dataSourceConfigs[source.key]
-
   const lastRefresh = lastRefreshed[source.key]
 
   const readFileContent = useCallback(async (file: File): Promise<string> => {
-    // For Tableau TSV: detect and handle UTF-16LE
     if (source.key === 'tableau') {
       const buffer = await file.arrayBuffer()
       const bytes = new Uint8Array(buffer)
-      // Check for UTF-16 BOM (FF FE)
       if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
         return new TextDecoder('utf-16le').decode(buffer)
       }
-      // Check for UTF-16 BE BOM (FE FF)
       if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
         return new TextDecoder('utf-16be').decode(buffer)
       }
@@ -159,10 +129,8 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
   const validateColumns = useCallback((headers: string[], sourceKey: SourceKey): string[] => {
     const schema = getSchema(sourceKey)
     if (!schema) return []
-    const missing = schema.requiredColumns.filter(
-      (col) => !headers.some((h) => h.trim() === col)
-    )
-    return missing
+    const normalisedHeaders = headers.map(h => h.toLowerCase().trim())
+    return schema.requiredColumns.filter(col => !normalisedHeaders.includes(col.toLowerCase().trim()))
   }, [])
 
   const handleFile = useCallback(async (file: File) => {
@@ -171,7 +139,6 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
     try {
       let content: string
 
-      // XLSX support: convert to CSV first
       if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
         const buffer = await file.arrayBuffer()
         const workbook = XLSX.read(buffer, { type: 'array' })
@@ -182,7 +149,6 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
       }
 
       if (source.key === 'tableau') {
-        // TSV processing
         let text = content
         if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1)
         const lines = text.split(/\r?\n/).filter((l) => l.trim())
@@ -196,7 +162,6 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
           setState({ status: 'error', fileName: file.name, errors: [`Missing columns: ${missing.join(', ')}`] })
           return
         }
-        // Preview
         const previewRows = lines.slice(1, 4).map((l) => l.split('\t').slice(0, 5))
         setState({
           status: 'preview',
@@ -205,8 +170,6 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
           columnCount: headers.length,
           preview: [headers.slice(0, 5), ...previewRows],
         })
-
-        // Process
         setState((prev) => ({ ...prev, status: 'processing' }))
         const rawMembers = processTableauTSV(content)
         const members = rawMembers.map(tableauRawToMember)
@@ -219,7 +182,6 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
           columnCount: headers.length,
         })
       } else {
-        // CSV processing with PapaParse
         Papa.parse(content, {
           header: true,
           skipEmptyLines: true,
@@ -235,7 +197,6 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
               setState({ status: 'error', fileName: file.name, errors: [`Missing columns: ${missing.join(', ')}`] })
               return
             }
-            // Preview
             const previewHeaders = headers.slice(0, 5)
             const previewRows = data.slice(0, 3).map((row) => previewHeaders.map((h) => row[h] || ''))
             setState({
@@ -245,8 +206,6 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
               columnCount: headers.length,
               preview: [previewHeaders, ...previewRows],
             })
-
-            // Process
             setState((prev) => ({ ...prev, status: 'processing' }))
             try {
               if (source.key === 'hubspot') {
@@ -287,12 +246,40 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) handleFile(file)
-    // Reset input so the same file can be re-uploaded
     if (fileRef.current) fileRef.current.value = ''
   }, [handleFile])
 
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDraggingOver(true)
+  }, [])
+
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDraggingOver(false)
+  }, [])
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDraggingOver(false)
+    const file = e.dataTransfer.files[0]
+    if (file) handleFile(file)
+  }, [handleFile])
+
   return (
-    <div className="rounded-lg border border-dash-border bg-dash-surface p-5">
+    <div
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={cn(
+        'rounded-lg border p-5 transition-all duration-150',
+        isDraggingOver
+          ? 'scale-[1.01] border-dashed border-dash-red bg-dash-red-light'
+          : isFileBeingDragged
+          ? 'border-dashed border-dash-border-strong bg-dash-surface'
+          : 'border-dash-border bg-dash-surface'
+      )}
+    >
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="font-sans text-sm font-semibold uppercase tracking-wider text-dash-text">
@@ -335,9 +322,14 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
         </button>
       </div>
 
+      {/* Drop hint when dragging */}
+      {isDraggingOver && (
+        <p className="mt-3 text-center text-xs font-medium text-dash-red">Drop file to upload</p>
+      )}
+
       {/* Status feedback */}
       <div className="mt-4">
-        {state.status === 'idle' && !lastRefresh && (
+        {state.status === 'idle' && !lastRefresh && !isDraggingOver && (
           <p className="text-xs italic text-dash-text-muted">Awaiting first upload</p>
         )}
 
@@ -394,7 +386,7 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
 
       {/* Panel A — How to pull this data */}
       {config && (
-        <div className="mt-4 rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
+        <div className="mt-4 rounded-lg border border-dash-border bg-dash-bg p-4 md:p-5">
           <button
             type="button"
             onClick={() => setStepsOpen((o) => !o)}
@@ -421,18 +413,31 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
 
       {/* Panel B — What this data powers */}
       {config && (
-        <div className="mt-3 rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
-          <p className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-            What this data powers
-          </p>
-          {config.poweredMetrics.length > 0 ? (
-            <ul className="mt-3 list-disc list-inside space-y-1">
-              {config.poweredMetrics.map((metric, i) => (
-                <li key={i} className="text-sm text-dash-text">{metric}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-3 text-sm text-dash-text">No metrics mapped yet.</p>
+        <div className="mt-3 rounded-lg border border-dash-border bg-dash-bg p-4 md:p-5">
+          <button
+            type="button"
+            onClick={() => setMetricsOpen((o) => !o)}
+            className="flex w-full items-center justify-between"
+          >
+            <span className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
+              What this data powers
+            </span>
+            {metricsOpen ? (
+              <ChevronUp size={14} className="text-dash-text-secondary" />
+            ) : (
+              <ChevronDown size={14} className="text-dash-text-secondary" />
+            )}
+          </button>
+          {metricsOpen && (
+            config.poweredMetrics.length > 0 ? (
+              <ul className="mt-3 list-disc list-inside space-y-1">
+                {config.poweredMetrics.map((metric, i) => (
+                  <li key={i} className="text-sm text-dash-text">{metric}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm text-dash-text">No metrics mapped yet.</p>
+            )
           )}
         </div>
       )}
@@ -445,6 +450,37 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
 // ---------------------------------------------------------------------------
 export default function UploadPage() {
   const { dataMode, lastRefreshed } = useDashboardData()
+  const [isFileBeingDragged, setIsFileBeingDragged] = useState(false)
+  const dragCounter = useRef(0)
+
+  useEffect(() => {
+    const onDragEnter = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) {
+        dragCounter.current += 1
+        setIsFileBeingDragged(true)
+      }
+    }
+    const onDragLeave = () => {
+      dragCounter.current -= 1
+      if (dragCounter.current <= 0) {
+        dragCounter.current = 0
+        setIsFileBeingDragged(false)
+      }
+    }
+    const onDrop = () => {
+      dragCounter.current = 0
+      setIsFileBeingDragged(false)
+    }
+
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [])
 
   return (
     <div className="space-y-10">
@@ -481,7 +517,7 @@ export default function UploadPage() {
       <SectionHeading number={1} title="Data Sources" />
       <div className="grid gap-6 lg:grid-cols-2">
         {dataSources.map((src) => (
-          <UploadCard key={src.key} source={src} />
+          <UploadCard key={src.key} source={src} isFileBeingDragged={isFileBeingDragged} />
         ))}
       </div>
     </div>
