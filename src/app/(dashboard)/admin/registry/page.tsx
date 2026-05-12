@@ -1,11 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { SectionHeading } from '@/components/dashboard/section-heading'
 import { StatusDot } from '@/components/dashboard/status-dot'
-import { useDashboardData } from '@/lib/context/data-context'
 import type { Status } from '@/lib/types'
+
+interface UploadSummary {
+  lastUploadedAt: string | null
+  lastUploadedBy: string | null
+  lastPeriodLabel: string | null
+  totalUploads: number
+}
+type UploadMap = Record<string, UploadSummary>
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -120,21 +127,38 @@ const dataSources: DataSource[] = [
     notes: 'Required for Q1 strategic question ("prove it works"). No members have completed retest cycle yet. Data structure TBD.',
   },
   {
-    id: 'meta-ads',
-    name: 'Meta Ads',
-    system: 'Meta Business Manager',
-    connectionMethod: 'not-connected',
+    id: 'meta',
+    name: 'Meta for Business',
+    system: 'Meta Ads Manager',
+    connectionMethod: 'csv-upload',
     futureMethod: 'snowflake-daily',
-    status: 'not-available',
+    status: 'live',
     owner: 'Konstantinos',
-    priority: 'P3',
-    targetDate: '2026-04-30',
+    priority: 'P2',
+    targetDate: null,
     lastSync: null,
-    affectedPages: ['Acquisition', 'Financial'],
-    metricsUnlocked: 0,
-    metricsTotal: 6,
-    dependencies: ['Meta Business Manager admin access', 'Campaign naming convention agreed'],
-    notes: 'Enables real CAC by campaign, ROAS tracking. Becomes P1 when paid spend exceeds $15K/month.',
+    affectedPages: ['Acquisition', 'Marketing', 'Financial'],
+    metricsUnlocked: 8,
+    metricsTotal: 8,
+    dependencies: [],
+    notes: 'Ad spend, impressions, CTR, LPV, conversions, blended CAC. CSV export from Ads Manager.',
+  },
+  {
+    id: 'pelagonia',
+    name: 'Pelagonia (GoHighLevel)',
+    system: 'GoHighLevel CRM',
+    connectionMethod: 'csv-upload',
+    futureMethod: 'snowflake-daily',
+    status: 'live',
+    owner: 'Steph',
+    priority: 'P2',
+    targetDate: null,
+    lastSync: null,
+    affectedPages: ['Acquisition', 'Marketing'],
+    metricsUnlocked: 9,
+    metricsTotal: 9,
+    dependencies: [],
+    notes: 'Opportunities, call bookings, appointment show/no-show rates. CSV export from GoHighLevel pipelines.',
   },
   {
     id: 'google-analytics',
@@ -359,7 +383,33 @@ function sortedSources() {
 // ─── Page ────────────────────────────────────────────────────────────
 
 export default function DataRegistryPage() {
-  const { lastRefreshed } = useDashboardData()
+  const [uploadMap, setUploadMap] = useState<UploadMap>({})
+
+  useEffect(() => {
+    fetch('/api/data/history')
+      .then(r => r.json())
+      .then((rows: Array<{
+        source: string; status: string; uploaded_at: string;
+        uploaded_by: string | null; data_period_label: string | null;
+      }>) => {
+        const map: UploadMap = {}
+        for (const row of rows) {
+          if (!map[row.source]) {
+            // First (latest) complete row wins for display
+            const isComplete = row.status === 'complete'
+            map[row.source] = {
+              lastUploadedAt: isComplete ? row.uploaded_at : null,
+              lastUploadedBy: isComplete ? row.uploaded_by : null,
+              lastPeriodLabel: isComplete ? row.data_period_label : null,
+              totalUploads: 0,
+            }
+          }
+          map[row.source].totalUploads += 1
+        }
+        setUploadMap(map)
+      })
+      .catch(() => {})
+  }, [])
 
   const totalMetrics = dataSources.reduce((s, d) => s + d.metricsTotal, 0)
   const liveMetrics = dataSources.reduce((s, d) => s + d.metricsUnlocked, 0)
@@ -416,14 +466,15 @@ export default function DataRegistryPage() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-dash-border bg-dash-surface-alt">
-                <th className="px-4 py-3 font-semibold text-dash-text-secondary">Source</th>
-                <th className="px-4 py-3 font-semibold text-dash-text-secondary">Status</th>
-                <th className="px-4 py-3 font-semibold text-dash-text-secondary">Method</th>
-                <th className="px-4 py-3 font-semibold text-dash-text-secondary">Owner</th>
-                <th className="px-4 py-3 font-semibold text-dash-text-secondary">Priority</th>
-                <th className="px-4 py-3 font-semibold text-dash-text-secondary">Target</th>
-                <th className="px-4 py-3 text-right font-semibold text-dash-text-secondary">Metrics</th>
-                <th className="px-4 py-3 font-semibold text-dash-text-secondary">Pages</th>
+                <th className="px-4 py-3 text-xs font-semibold text-dash-text-secondary">Source</th>
+                <th className="px-4 py-3 text-xs font-semibold text-dash-text-secondary">Status</th>
+                <th className="px-4 py-3 text-xs font-semibold text-dash-text-secondary">Last upload</th>
+                <th className="px-4 py-3 text-xs font-semibold text-dash-text-secondary">Uploader</th>
+                <th className="px-4 py-3 text-xs font-semibold text-dash-text-secondary">Method</th>
+                <th className="px-4 py-3 text-xs font-semibold text-dash-text-secondary">Owner</th>
+                <th className="px-4 py-3 text-xs font-semibold text-dash-text-secondary">Priority</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-dash-text-secondary">Metrics</th>
+                <th className="px-4 py-3 text-xs font-semibold text-dash-text-secondary">Pages</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-dash-border">
@@ -438,6 +489,24 @@ export default function DataRegistryPage() {
                       <StatusDot status={connectionStatusDot(src.status)} />
                       <span className="text-xs">{connectionStatusLabel(src.status)}</span>
                     </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {uploadMap[src.id]?.lastUploadedAt ? (
+                      <div>
+                        <div className="font-mono text-xs text-dash-text">
+                          {new Date(uploadMap[src.id].lastUploadedAt!).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </div>
+                        {uploadMap[src.id].lastPeriodLabel && (
+                          <div className="text-[10px] text-dash-text-muted">{uploadMap[src.id].lastPeriodLabel}</div>
+                        )}
+                        <div className="text-[10px] text-dash-text-muted">{uploadMap[src.id].totalUploads} upload{uploadMap[src.id].totalUploads !== 1 ? 's' : ''} total</div>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-dash-text-muted">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-dash-text-secondary">
+                    {uploadMap[src.id]?.lastUploadedBy ?? '—'}
                   </td>
                   <td className="px-4 py-3">
                     <div className="text-xs text-dash-text-secondary">
@@ -457,9 +526,6 @@ export default function DataRegistryPage() {
                     <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${priorityColor(src.priority)}`}>
                       {src.priority}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-dash-text-secondary">
-                    {src.targetDate || (src.status === 'live' ? '✓' : '—')}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <span className="font-mono text-xs font-bold text-dash-text">{src.metricsUnlocked}</span>

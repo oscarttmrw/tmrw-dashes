@@ -13,6 +13,7 @@ import {
   RefreshCw,
   FileText,
   Database,
+  ClockIcon,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -36,6 +37,7 @@ export const navigation: NavItem[] = [
   { label: 'Strategy', href: '/strategy', icon: Target, section: 'management' },
   { label: 'Team', href: '/team', icon: UsersRound, section: 'management' },
   { label: 'Data Upload', href: '/admin/upload', icon: Upload, section: 'admin' },
+  { label: 'Upload History', href: '/admin/upload-history', icon: ClockIcon, section: 'admin' },
   { label: 'Data Registry', href: '/admin/registry', icon: Database, section: 'admin' },
   { label: 'Settings', href: '/admin/settings', icon: Settings, section: 'admin' },
 ];

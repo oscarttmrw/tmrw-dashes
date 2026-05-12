@@ -261,12 +261,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
         },
       }
       saveToStorage(next)
-      // Also persist to server (fire-and-forget)
-      fetch('/api/data/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source, data: incoming, timestamp: new Date().toISOString() }),
-      }).catch(() => {})
       return next
     })
   }, [])
