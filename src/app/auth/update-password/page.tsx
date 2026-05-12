@@ -2,25 +2,26 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
 
 export default function UpdatePasswordPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const router = useRouter()
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError('')
     const supabase = createClient()
-    const { error } = await supabase.auth.updateUser({ password })
+    const { error } = await supabase.auth.updateUser({
+      password,
+      data: { onboarded: true },
+    })
     if (error) {
       setError(error.message)
       setLoading(false)
     } else {
-      router.push('/admin/upload')
+      window.location.href = '/'
     }
   }
 

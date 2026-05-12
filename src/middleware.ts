@@ -31,6 +31,16 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // Only redirect to password setup when onboarded is explicitly false.
+  // undefined = legacy/manually-created user → passes through.
+  if (user.user_metadata?.onboarded === false) {
+    if (request.nextUrl.pathname !== '/auth/update-password') {
+      const url = request.nextUrl.clone()
+      url.pathname = '/auth/update-password'
+      return NextResponse.redirect(url)
+    }
+  }
+
   return supabaseResponse
 }
 
