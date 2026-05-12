@@ -33,7 +33,7 @@ export default function UpdatePasswordPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-dash-bg">
       <div className="w-full max-w-sm rounded-lg border border-dash-border bg-dash-surface p-8">
-        <h1 className="mb-6 font-sans text-lg font-semibold text-dash-text">Set new password</h1>
+        <h1 className="mb-6 font-sans text-lg font-semibold text-dash-text">Create your account</h1>
         <form onSubmit={handleUpdate} className="space-y-4">
           <div>
             <label className="mb-1 block text-xs font-medium text-dash-text-secondary">
@@ -67,7 +67,7 @@ export default function UpdatePasswordPage() {
             disabled={!canSubmit}
             className="w-full rounded-md bg-dash-red px-4 py-2 text-sm font-medium text-white hover:bg-dash-red/90 disabled:opacity-50"
           >
-            {loading ? 'Updating…' : 'Update password'}
+            {loading ? 'Creating account…' : 'Create account'}
           </button>
         </form>
       </div>
