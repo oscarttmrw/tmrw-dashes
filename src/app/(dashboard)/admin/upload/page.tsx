@@ -106,6 +106,7 @@ function UploadCard({ source, isFileBeingDragged }: { source: DataSourceConfig; 
   const [state, setState] = useState<UploadState>({ status: 'idle' })
   const [stepsOpen, setStepsOpen] = useState(false)
   const [metricsOpen, setMetricsOpen] = useState(false)
+  const [schemaOpen, setSchemaOpen] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -309,17 +310,6 @@ function UploadCard({ source, isFileBeingDragged }: { source: DataSourceConfig; 
             onChange={onFileChange}
           />
         </label>
-        <button
-          onClick={() => {
-            const schema = getSchema(source.key)
-            if (schema) {
-              alert(`Required columns:\n${schema.requiredColumns.join('\n')}`)
-            }
-          }}
-          className="rounded-md border border-dash-border bg-dash-bg px-3 py-2 text-xs font-medium text-dash-text-secondary transition-colors hover:border-dash-border-strong hover:text-dash-text"
-        >
-          View schema
-        </button>
       </div>
 
       {/* Drop hint when dragging */}
@@ -383,6 +373,36 @@ function UploadCard({ source, isFileBeingDragged }: { source: DataSourceConfig; 
       {source.note && (
         <p className="mt-2 text-xs italic text-dash-text-muted">{source.note}</p>
       )}
+
+      {/* Panel — Required schema */}
+      {(() => {
+        const schema = getSchema(source.key)
+        return schema ? (
+          <div className="mt-4 rounded-lg border border-dash-border bg-dash-bg p-4 md:p-5">
+            <button
+              type="button"
+              onClick={() => setSchemaOpen((o) => !o)}
+              className="flex w-full items-center justify-between"
+            >
+              <span className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
+                Required columns
+              </span>
+              {schemaOpen ? (
+                <ChevronUp size={14} className="text-dash-text-secondary" />
+              ) : (
+                <ChevronDown size={14} className="text-dash-text-secondary" />
+              )}
+            </button>
+            {schemaOpen && (
+              <ul className="mt-3 space-y-1">
+                {schema.requiredColumns.map((col, i) => (
+                  <li key={i} className="font-mono text-xs text-dash-text">{col}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null
+      })()}
 
       {/* Panel A — How to pull this data */}
       {config && (
