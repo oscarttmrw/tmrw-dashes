@@ -5,7 +5,6 @@ import { Breadcrumb } from '@/components/layout/breadcrumb'
 
 export default function InvitePage() {
   const [email, setEmail] = useState('')
-  const [adminPassword, setAdminPassword] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
 
@@ -17,7 +16,7 @@ export default function InvitePage() {
       const res = await fetch('/api/admin/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: adminPassword }),
+        body: JSON.stringify({ email }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -27,7 +26,6 @@ export default function InvitePage() {
         setStatus('success')
         setMessage(`Invite sent to ${email}`)
         setEmail('')
-        setAdminPassword('')
       }
     } catch {
       setStatus('error')
@@ -63,20 +61,6 @@ export default function InvitePage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               placeholder="name@tmrw.health"
-              className="w-full rounded-md border border-dash-border bg-dash-bg px-3 py-2 text-sm text-dash-text placeholder:text-dash-text-muted focus:border-dash-red focus:outline-none focus:ring-1 focus:ring-dash-red"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-dash-text-secondary">
-              Admin password
-            </label>
-            <input
-              type="password"
-              value={adminPassword}
-              onChange={(e) => setAdminPassword(e.target.value)}
-              required
-              placeholder="Required to authorise invite"
               className="w-full rounded-md border border-dash-border bg-dash-bg px-3 py-2 text-sm text-dash-text placeholder:text-dash-text-muted focus:border-dash-red focus:outline-none focus:ring-1 focus:ring-dash-red"
             />
           </div>

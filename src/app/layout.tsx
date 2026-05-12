@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { AppShell } from '@/components/layout/app-shell'
 import { DataProvider } from '@/lib/context/data-context'
 import './globals.css'
 
@@ -29,9 +28,7 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased">
-        <DataProvider>
-          <AppShell>{children}</AppShell>
-        </DataProvider>
+        <DataProvider>{children}</DataProvider>
       </body>
     </html>
   )
