@@ -2,9 +2,6 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Calendar, Download, Search, Menu, FileText, FileDown } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { useDashboardData } from '@/lib/context/data-context'
-
 interface TopBarProps {
   onCommandBarOpen: () => void
   onMobileMenuOpen?: () => void
@@ -73,7 +70,6 @@ function downloadFile(content: string, filename: string, mimeType: string) {
 }
 
 export function TopBar({ onCommandBarOpen, onMobileMenuOpen }: TopBarProps) {
-  const { dataMode } = useDashboardData()
   const [exportOpen, setExportOpen] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
 

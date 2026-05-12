@@ -11,6 +11,7 @@ import { TrendIndicator } from '@/components/dashboard/trend-indicator'
 import { Sparkline } from '@/components/dashboard/sparkline'
 import { MemberDetailPanel } from '@/components/panels/member-detail-panel'
 import { useDashboardData } from '@/lib/context/data-context'
+import { EmptyState } from '@/components/dashboard/empty-state'
 import {
   ResponsiveContainer,
   LineChart as RechartLineChart,
@@ -82,7 +83,7 @@ function MiniTrendCard({
 /*  Page                                                              */
 /* ------------------------------------------------------------------ */
 export default function HomePage() {
-  const { members, rocks, lastRefreshed, dataMode } = useDashboardData()
+  const { members, transactions, tickets, rocks, lastRefreshed, dataMode } = useDashboardData()
   const [selectedMember, setSelectedMember] = useState<Member | null>(null)
 
   const activeMembers = useMemo(
@@ -239,70 +240,96 @@ export default function HomePage() {
       {/* ── 1. Weekly Pulse Strip ────────────────────────────────── */}
       <section>
         <SectionHeading number={1} title="Weekly Pulse" />
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          <PulseCard label="New Registrations" value="12" prev="18" trend={-33} href="/members" />
-          <PulseCard label="Dashboards Published" value="8" prev="5" trend={60} href="/clinical" />
-          <PulseCard label="Churn" value="3.8%" prev="3.6%" trend={5.5} href="/retention" />
-          <PulseCard label="Revenue" value="$5.8K" prev="$6.1K" trend={-5} href="/financial" />
-          <PulseCard label="SLA Breaches" value="2" prev="0" trend={100} href="/support" />
-          <PulseCard label="At-Risk Members" value={String(healthDistribution['at-risk'])} prev="18" trend={28} href="/retention" />
-        </div>
+        {members.length === 0 && dataMode === 'actual' ? (
+          <EmptyState source="Tableau or HubSpot" sourcePath="/admin/upload" className="h-40" />
+        ) : (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            <PulseCard label="New Registrations" value="12" prev="18" trend={-33} href="/members" />
+            <PulseCard label="Dashboards Published" value="8" prev="5" trend={60} href="/clinical" />
+            <PulseCard label="Churn" value="3.8%" prev="3.6%" trend={5.5} href="/retention" />
+            {transactions.length === 0 && dataMode === 'actual' ? (
+              <EmptyState source="Stripe" sourcePath="/admin/upload" className="h-full min-h-[72px]" />
+            ) : (
+              <PulseCard label="Revenue" value="$5.8K" prev="$6.1K" trend={-5} href="/financial" />
+            )}
+            {tickets.length === 0 && dataMode === 'actual' ? (
+              <EmptyState source="Zendesk" sourcePath="/admin/upload" className="h-full min-h-[72px]" />
+            ) : (
+              <PulseCard label="SLA Breaches" value="2" prev="0" trend={100} href="/support" />
+            )}
+            <PulseCard label="At-Risk Members" value={String(healthDistribution['at-risk'])} prev="18" trend={28} href="/retention" />
+          </div>
+        )}
       </section>
 
       {/* ── 2. Active Members vs Plan ────────────────────────────── */}
       <section>
         <SectionHeading number={2} title="Active Members vs Plan" />
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
-          <ResponsiveContainer width="100%" height={256} className="h-48 md:h-64">
-            <RechartLineChart data={memberVsPlanData as object[]} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-              <CartesianGrid {...gridStyle} />
-              <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} tickLine={axisLineStyle} />
-              <YAxis tick={axisTickStyle} axisLine={axisLineStyle} tickLine={axisLineStyle} width={50} />
-              <Tooltip contentStyle={tooltipStyle} />
-              <Legend wrapperStyle={legendStyle} />
-              <Line type="monotone" dataKey="Actual" stroke={TMRW_COLORS.red} strokeWidth={3} dot={lineDot(TMRW_COLORS.red)} activeDot={{ r: 7, fill: TMRW_COLORS.red, stroke: '#fff', strokeWidth: 2 }} />
-              <Line type="monotone" dataKey="Plan" stroke={TMRW_COLORS.grey} strokeWidth={2} strokeDasharray="6 4" dot={{ r: 3, fill: TMRW_COLORS.grey, stroke: '#fff', strokeWidth: 1 }} />
-            </RechartLineChart>
-          </ResponsiveContainer>
-          <div className="mt-3 flex items-center justify-between text-xs">
-            <span className="text-dash-text-secondary">
-              Current: <span className="font-mono font-bold text-dash-text">{activeMembers.length}</span> active members
-            </span>
-            <span className={gapPct <= -10 ? 'font-medium text-status-red' : gapPct <= -5 ? 'text-status-amber' : 'text-status-green'}>
-              {gapPct > 0 ? '+' : ''}{gapPct}% vs plan
-            </span>
+        {members.length === 0 && dataMode === 'actual' ? (
+          <EmptyState source="Tableau or HubSpot" sourcePath="/admin/upload" className="h-64" />
+        ) : (
+          <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
+            <ResponsiveContainer width="100%" height={256} className="h-48 md:h-64">
+              <RechartLineChart data={memberVsPlanData as object[]} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+                <CartesianGrid {...gridStyle} />
+                <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} tickLine={axisLineStyle} />
+                <YAxis tick={axisTickStyle} axisLine={axisLineStyle} tickLine={axisLineStyle} width={50} />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Legend wrapperStyle={legendStyle} />
+                <Line type="monotone" dataKey="Actual" stroke={TMRW_COLORS.red} strokeWidth={3} dot={lineDot(TMRW_COLORS.red)} activeDot={{ r: 7, fill: TMRW_COLORS.red, stroke: '#fff', strokeWidth: 2 }} />
+                <Line type="monotone" dataKey="Plan" stroke={TMRW_COLORS.grey} strokeWidth={2} strokeDasharray="6 4" dot={{ r: 3, fill: TMRW_COLORS.grey, stroke: '#fff', strokeWidth: 1 }} />
+              </RechartLineChart>
+            </ResponsiveContainer>
+            <div className="mt-3 flex items-center justify-between text-xs">
+              <span className="text-dash-text-secondary">
+                Current: <span className="font-mono font-bold text-dash-text">{activeMembers.length}</span> active members
+              </span>
+              <span className={gapPct <= -10 ? 'font-medium text-status-red' : gapPct <= -5 ? 'text-status-amber' : 'text-status-green'}>
+                {gapPct > 0 ? '+' : ''}{gapPct}% vs plan
+              </span>
+            </div>
           </div>
-        </div>
+        )}
       </section>
 
       {/* ── 3. Key Trends — 8 Weeks ──────────────────────────────── */}
       <section>
         <SectionHeading number={3} title="Key Trends — 8 Weeks" />
         <div className="grid grid-cols-1 gap-3 md:gap-4 md:grid-cols-3">
-          <MiniTrendCard
-            label="Pipeline Queue"
-            value={String(stuckMembers.length)}
-            trend={queueTrend}
-            sparkData={queueHistory}
-            href="/clinical"
-            status={stuckMembers.length > 50 ? 'red' : stuckMembers.length > 30 ? 'amber' : 'green'}
-          />
-          <MiniTrendCard
-            label="Monthly Churn"
-            value="3.8%"
-            trend={5.5}
-            sparkData={churnHistory}
-            href="/retention"
-            status="green"
-          />
-          <MiniTrendCard
-            label="Weekly Revenue"
-            value="$5.8K"
-            trend={-5}
-            sparkData={revenueHistory}
-            href="/financial"
-            status="amber"
-          />
+          {members.length === 0 && dataMode === 'actual' ? (
+            <EmptyState source="Tableau or HubSpot" sourcePath="/admin/upload" className="h-40" />
+          ) : (
+            <MiniTrendCard
+              label="Pipeline Queue"
+              value={String(stuckMembers.length)}
+              trend={queueTrend}
+              sparkData={queueHistory}
+              href="/clinical"
+              status={stuckMembers.length > 50 ? 'red' : stuckMembers.length > 30 ? 'amber' : 'green'}
+            />
+          )}
+          {members.length === 0 && dataMode === 'actual' ? null : (
+            <MiniTrendCard
+              label="Monthly Churn"
+              value="3.8%"
+              trend={5.5}
+              sparkData={churnHistory}
+              href="/retention"
+              status="green"
+            />
+          )}
+          {transactions.length === 0 && dataMode === 'actual' ? (
+            <EmptyState source="Stripe" sourcePath="/admin/upload" className="h-40" />
+          ) : (
+            <MiniTrendCard
+              label="Weekly Revenue"
+              value="$5.8K"
+              trend={-5}
+              sparkData={revenueHistory}
+              href="/financial"
+              status="amber"
+            />
+          )}
         </div>
       </section>
 

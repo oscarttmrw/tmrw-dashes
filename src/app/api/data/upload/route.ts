@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
     batchId = logRow.id
 
     // Write rows using the appropriate strategy
-    await applyWriteStrategy(supabase, source, batchId, rows)
+    await applyWriteStrategy(supabase, source, batchId!, rows)
 
     // Mark complete
     await supabase

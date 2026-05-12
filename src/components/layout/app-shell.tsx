@@ -9,6 +9,20 @@ import { TopBar } from './top-bar'
 import { NorthStarBar } from './north-star-bar'
 import { CommandBar } from './command-bar'
 import { cn } from '@/lib/utils'
+import { useDashboardData } from '@/lib/context/data-context'
+
+function DemoBanner() {
+  const { dataMode, switchToActual } = useDashboardData()
+  if (dataMode !== 'demo') return null
+  return (
+    <div className="sticky top-0 z-40 bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 text-center text-xs font-medium text-amber-600">
+      Demo mode active — showing illustrative data.{' '}
+      <button onClick={switchToActual} className="underline hover:no-underline">
+        Turn off
+      </button>
+    </div>
+  )
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -52,6 +66,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onCommandBarOpen={() => setCommandBarOpen(true)}
           onMobileMenuOpen={() => setMobileMenuOpen(true)}
         />
+        <DemoBanner />
         {/* North Star bar — hidden on mobile */}
         <div className="hidden md:block">
           <NorthStarBar />
