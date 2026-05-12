@@ -861,7 +861,7 @@ export default function ClinicalPage() {
           </div>
 
           <ResponsiveContainer width="100%" height={224} className="h-44 md:h-56">
-            <RechartLineChart data={capacityData}>
+            <RechartLineChart data={capacityData as object[]}>
               <CartesianGrid {...gridStyle} />
               <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} />
               <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={50} />
@@ -907,7 +907,7 @@ export default function ClinicalPage() {
               />
             </div>
             <ResponsiveContainer width="100%" height={192} className="h-36 md:h-48">
-              <RechartLineChart data={timePerMemberData}>
+              <RechartLineChart data={timePerMemberData as object[]}>
                 <CartesianGrid {...gridStyle} />
                 <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} />
                 <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={40} />
@@ -927,7 +927,7 @@ export default function ClinicalPage() {
               New vs Returning Member Time (Hours)
             </h3>
             <ResponsiveContainer width="100%" height={192} className="h-36 md:h-48">
-              <RechartLineChart data={newVsReturning}>
+              <RechartLineChart data={newVsReturning as object[]}>
                 <CartesianGrid {...gridStyle} />
                 <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} />
                 <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={40} />
@@ -945,7 +945,7 @@ export default function ClinicalPage() {
             Cost per Case by Clinician (at $70/hr)
           </h3>
           <ResponsiveContainer width="100%" height={192} className="h-36 md:h-48">
-            <RechartLineChart data={costTrendData}>
+            <RechartLineChart data={costTrendData as object[]}>
               <CartesianGrid {...gridStyle} />
               <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} />
               <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={40} tickFormatter={(v) => `$${v}`} />

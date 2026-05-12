@@ -352,7 +352,7 @@ export default function RetentionPage() {
               />
             </div>
             <ResponsiveContainer width="100%" height={288} className="h-56 md:h-72">
-              <RechartLineChart data={cohortData}>
+              <RechartLineChart data={cohortData as object[]}>
                 <CartesianGrid {...gridStyle} />
                 <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} />
                 <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={40} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
@@ -438,7 +438,7 @@ export default function RetentionPage() {
               />
             </div>
             <ResponsiveContainer width="100%" height={224} className="h-44 md:h-56">
-              <RechartBarChart data={churnData}>
+              <RechartBarChart data={churnData as object[]}>
                 <CartesianGrid {...gridProps} />
                 <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} />
                 <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={40} tickFormatter={(v) => `${v}%`} />
@@ -805,7 +805,7 @@ export default function RetentionPage() {
               />
             </div>
             <ResponsiveContainer width="100%" height={224} className="h-44 md:h-56">
-              <RechartBarChart data={revenueData}>
+              <RechartBarChart data={revenueData as object[]}>
                 <CartesianGrid {...gridProps} />
                 <XAxis dataKey="tenure" tick={axisTickStyle} axisLine={axisLineStyle} />
                 <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={48} tickFormatter={(v) => `$${v}`} />

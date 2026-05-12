@@ -503,7 +503,7 @@ export default function FinancialPage() {
         <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-3">
           <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5 lg:col-span-2">
             <ResponsiveContainer width="100%" height={256} className="h-48 md:h-64">
-              <RechartBarChart data={revenueByPeriod}>
+              <RechartBarChart data={revenueByPeriod as object[]}>
                 <CartesianGrid {...gridProps} />
                 <XAxis dataKey="period" tick={axisTickStyle} axisLine={axisLineStyle} />
                 <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={50} tickFormatter={(v) => `$${(v / 1000).toFixed(1)}K`} />
@@ -562,7 +562,7 @@ export default function FinancialPage() {
         </div>
         <div className="mb-4">
           <ResponsiveContainer width="100%" height={192} className="h-48">
-            <RechartBarChart data={netMrrChange}>
+            <RechartBarChart data={netMrrChange as object[]}>
               <CartesianGrid {...gridProps} />
               <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} />
               <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={50} tickFormatter={(v) => `$${v.toLocaleString()}`} />
@@ -664,7 +664,7 @@ export default function FinancialPage() {
         <SectionHeading number={5} title="Actual vs Forecast" />
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
           <ResponsiveContainer width="100%" height={288} className="h-56 md:h-72">
-            <RechartLineChart data={actualVsForecast} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+            <RechartLineChart data={actualVsForecast as object[]} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
               <CartesianGrid {...gridStyle} />
               <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} tickLine={axisLineStyle} />
               <YAxis tick={axisTickStyle} axisLine={axisLineStyle} tickLine={axisLineStyle} width={60} tickFormatter={(v) => `$${(v / 1000).toFixed(1)}K`} />
@@ -727,7 +727,7 @@ export default function FinancialPage() {
             Failure Reason Trend
           </h3>
           <ResponsiveContainer width="100%" height={256} className="h-48 md:h-64">
-            <RechartBarChart data={failureReasonTrend}>
+            <RechartBarChart data={failureReasonTrend as object[]}>
               <CartesianGrid {...gridProps} />
               <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} />
               <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={30} />

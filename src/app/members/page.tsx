@@ -496,7 +496,7 @@ export default function AcquisitionPage() {
             />
           </div>
           <ResponsiveContainer width="100%" height={288} className="h-56 md:h-72">
-            <RechartBarChart data={acqMixData}>
+            <RechartBarChart data={acqMixData as object[]}>
               <CartesianGrid {...gridProps} />
               <XAxis dataKey={acqMixIndex} tick={axisTickStyle} axisLine={axisLineStyle} />
               <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={40} />

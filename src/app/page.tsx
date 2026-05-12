@@ -254,7 +254,7 @@ export default function HomePage() {
         <SectionHeading number={2} title="Active Members vs Plan" />
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
           <ResponsiveContainer width="100%" height={256} className="h-48 md:h-64">
-            <RechartLineChart data={memberVsPlanData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+            <RechartLineChart data={memberVsPlanData as object[]} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
               <CartesianGrid {...gridStyle} />
               <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} tickLine={axisLineStyle} />
               <YAxis tick={axisTickStyle} axisLine={axisLineStyle} tickLine={axisLineStyle} width={50} />

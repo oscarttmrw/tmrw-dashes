@@ -436,7 +436,7 @@ export default function SupportPage() {
             />
           </div>
           <ResponsiveContainer width="100%" height={224} className="h-44 md:h-56">
-            <RechartBarChart data={journeyStageData}>
+            <RechartBarChart data={journeyStageData as object[]}>
               <CartesianGrid {...gridProps} />
               <XAxis dataKey="stage" tick={axisTickStyle} axisLine={axisLineStyle} />
               <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={40} />

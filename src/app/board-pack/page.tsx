@@ -169,7 +169,7 @@ export default function BoardPackPage() {
         </div>
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
           <ResponsiveContainer width="100%" height={288} className="h-56 md:h-72">
-            <RechartBarChart data={revenueActualVsForecast}>
+            <RechartBarChart data={revenueActualVsForecast as object[]}>
               <CartesianGrid {...gridProps} />
               <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineStyle} />
               <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={48} tickFormatter={(v) => `$${(v / 1000).toFixed(1)}K`} />
