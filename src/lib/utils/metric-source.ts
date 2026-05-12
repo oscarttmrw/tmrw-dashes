@@ -14,6 +14,7 @@ const metricDisplayNames: Record<string, string> = {
   'biomarker-improvement': 'Biomarker Improvement',
   'bio-age-delta': 'Biological Age Delta',
   'cac-by-channel': 'CAC by Channel',
+  'blended-cac': 'Blended CAC',
   'platform-uptime': 'Platform Uptime',
   'nps': 'NPS',
   'avg-resolution-time': 'Avg Resolution Time',
@@ -23,6 +24,22 @@ const metricDisplayNames: Record<string, string> = {
   'sequence-completion': 'Sequence Completion',
   'website-conversion': 'Website Conversion',
   'supplement-delivery': 'Supplement Delivery',
+  'total-ad-spend': 'Total Ad Spend',
+  'impressions': 'Impressions',
+  'ctr': 'CTR',
+  'landing-page-views': 'Landing Page Views',
+  'cost-per-lpv': 'Cost per LPV',
+  'conversions': 'Conversions (Meta)',
+  'cost-per-conversion': 'Cost per Conversion',
+  'opportunities-opened': 'Opportunities Opened',
+  'open-opportunity-value': 'Open Opportunity Value',
+  'won-opportunities': 'Won Opportunities',
+  'won-opportunity-value': 'Won Opportunity Value',
+  'calls-booked': 'Calls Booked',
+  'showed-appointments': 'Showed Appointments',
+  'no-show-appointments': 'No-Show Appointments',
+  'upcoming-appointments': 'Upcoming Appointments',
+  'show-rate': 'Show Rate',
 }
 
 /**
@@ -35,6 +52,8 @@ export function getMetricsPoweredBy(source: string): string[] {
     hubspot: ['hubspot', 'hubspot-marketing'],
     stripe: ['stripe'],
     zendesk: ['zendesk'],
+    meta: ['meta'],
+    pelagonia: ['pelagonia'],
   }
   const ids = registryIds[source] ?? []
   const matched: string[] = []
@@ -65,4 +84,23 @@ export const metricSourceMap: Record<string, { sources: string[]; registryId: st
   'sequence-completion': { sources: ['HubSpot Marketing'], registryId: ['hubspot-marketing'] },
   'website-conversion': { sources: ['Google Analytics'], registryId: ['google-analytics'] },
   'supplement-delivery': { sources: ['Supplement Fulfilment'], registryId: ['supplement-fulfilment'] },
+  // Meta for Business
+  'total-ad-spend': { sources: ['Meta for Business'], registryId: ['meta'] },
+  'impressions': { sources: ['Meta for Business'], registryId: ['meta'] },
+  'ctr': { sources: ['Meta for Business'], registryId: ['meta'] },
+  'landing-page-views': { sources: ['Meta for Business'], registryId: ['meta'] },
+  'cost-per-lpv': { sources: ['Meta for Business'], registryId: ['meta'] },
+  'conversions': { sources: ['Meta for Business'], registryId: ['meta'] },
+  'cost-per-conversion': { sources: ['Meta for Business'], registryId: ['meta'] },
+  'blended-cac': { sources: ['Meta for Business', 'HubSpot'], registryId: ['meta', 'hubspot'] },
+  // Pelagonia (GoHighLevel)
+  'opportunities-opened': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },
+  'open-opportunity-value': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },
+  'won-opportunities': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },
+  'won-opportunity-value': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },
+  'calls-booked': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },
+  'showed-appointments': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },
+  'no-show-appointments': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },
+  'upcoming-appointments': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },
+  'show-rate': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },
 }

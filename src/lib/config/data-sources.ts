@@ -115,6 +115,46 @@ export const tableauSchema: CsvSchema = {
   strippedColumns: [],
 };
 
+export const metaSchema: CsvSchema = {
+  source: 'meta',
+  requiredColumns: [
+    'Ad Set Name',
+    'Amount Spent (AUD)',
+    'Impressions',
+    'Clicks (All)',
+    'Reporting Starts',
+    'Reporting Ends',
+  ],
+  optionalColumns: [
+    'Campaign Name',
+    'Landing Page Views',
+    'Cost per Landing Page View (AUD)',
+    'Results',
+    'Cost per Result (AUD)',
+    'CTR (All)',
+  ],
+  strippedColumns: [],
+};
+
+export const pelagoniaSchema: CsvSchema = {
+  source: 'pelagonia',
+  requiredColumns: [
+    'Opportunity ID',
+    'Stage',
+    'Value',
+    'Contact ID',
+    'Created At',
+  ],
+  optionalColumns: [
+    'Won At',
+    'Calls Booked',
+    'Appointment Status',
+    'Pipeline',
+    'Owner',
+  ],
+  strippedColumns: [],
+};
+
 /**
  * All schemas indexed by source name for easy lookup.
  */
@@ -123,6 +163,8 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   stripe: stripeSchema,
   zendesk: zendeskSchema,
   tableau: tableauSchema,
+  meta: metaSchema,
+  pelagonia: pelagoniaSchema,
 };
 
 /**
@@ -187,5 +229,30 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
       'Drop the downloaded .xlsx file into the upload zone below.',
     ],
     poweredMetrics: getMetricsPoweredBy('zendesk'),
+  },
+  meta: {
+    name: 'Meta for Business',
+    exportSteps: [
+      'Log in to business.facebook.com and open Ads Manager.',
+      'Select the ad account for TMRW.',
+      'Set your date range in the top-right date picker.',
+      'Click the Columns dropdown → Customise columns. Add: Ad Set Name, Amount Spent, Impressions, Clicks (All), Landing Page Views, Cost per Landing Page View, Results, Cost per Result, CTR (All), Reporting Starts, Reporting Ends.',
+      'Click the Export button (top right) → Export Table Data → .csv.',
+      'Drop the downloaded file into the upload zone below.',
+    ],
+    poweredMetrics: getMetricsPoweredBy('meta'),
+  },
+  pelagonia: {
+    name: 'Pelagonia (GoHighLevel)',
+    exportSteps: [
+      'Log in to your GoHighLevel account.',
+      'Navigate to CRM → Pipelines (or Opportunities).',
+      'Select the relevant pipeline for TMRW.',
+      'Click the Export icon or use the bulk export option.',
+      'Ensure the export includes: Opportunity ID, Stage, Value, Contact ID, Created At, plus optional fields Won At, Calls Booked, Appointment Status.',
+      'Save as CSV.',
+      'Drop the file into the upload zone below.',
+    ],
+    poweredMetrics: getMetricsPoweredBy('pelagonia'),
   },
 };

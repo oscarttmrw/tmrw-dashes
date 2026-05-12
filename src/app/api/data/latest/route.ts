@@ -6,6 +6,8 @@ const SOURCE_TABLE: Record<string, string> = {
   hubspot: 'hubspot_data',
   stripe: 'stripe_data',
   zendesk: 'zendesk_data',
+  meta: 'meta_data',
+  pelagonia: 'pelagonia_data',
 }
 
 export async function GET() {

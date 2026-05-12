@@ -12,6 +12,8 @@ import { processTableauTSV, type TableauMemberRaw } from '@/lib/processors/table
 import { processHubspotCSV } from '@/lib/processors/hubspot-processor'
 import { processStripeCSV } from '@/lib/processors/stripe-processor'
 import { processZendeskCSV } from '@/lib/processors/zendesk-processor'
+import { processMetaCSV } from '@/lib/processors/meta-processor'
+import { processPelagoniaCSV } from '@/lib/processors/pelagonia-processor'
 import type { Member } from '@/lib/types'
 import { Upload, CheckCircle, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react'
 
@@ -61,7 +63,7 @@ function tableauRawToMember(raw: TableauMemberRaw): Member {
 // Types
 // ---------------------------------------------------------------------------
 
-type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk'
+type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta' | 'pelagonia'
 
 interface UploadState {
   status: 'idle' | 'validating' | 'preview' | 'processing' | 'success' | 'error'
@@ -108,6 +110,18 @@ const dataSources: DataSourceConfig[] = [
     recordLabel: 'records',
     columnLabel: 'columns',
     exportInstructions: 'Admin Center → Account → Tools → Reports → CSV Export',
+  },
+  {
+    key: 'meta',
+    name: 'META FOR BUSINESS',
+    recordLabel: 'ad sets',
+    columnLabel: 'columns',
+  },
+  {
+    key: 'pelagonia',
+    name: 'PELAGONIA (GOHIGHLEVEL)',
+    recordLabel: 'opportunities',
+    columnLabel: 'columns',
   },
 ]
 
@@ -247,6 +261,14 @@ function UploadCard({ source }: { source: DataSourceConfig }) {
                 const tickets = processZendeskCSV(data)
                 updateSource('zendesk', { tickets })
                 setState({ status: 'success', fileName: file.name, resultCount: tickets.length, rowCount: data.length, columnCount: headers.length })
+              } else if (source.key === 'meta') {
+                const metaAds = processMetaCSV(data)
+                updateSource('meta', { metaAds })
+                setState({ status: 'success', fileName: file.name, resultCount: metaAds.length, rowCount: data.length, columnCount: headers.length })
+              } else if (source.key === 'pelagonia') {
+                const pelagoniaOpportunities = processPelagoniaCSV(data)
+                updateSource('pelagonia', { pelagoniaOpportunities })
+                setState({ status: 'success', fileName: file.name, resultCount: pelagoniaOpportunities.length, rowCount: data.length, columnCount: headers.length })
               }
             } catch (err) {
               setState({ status: 'error', fileName: file.name, errors: [`Processing error: ${err instanceof Error ? err.message : String(err)}`] })

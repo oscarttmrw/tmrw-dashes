@@ -1,4 +1,4 @@
-export type DataSourceName = 'hubspot' | 'stripe' | 'zendesk' | 'tableau' | 'manual';
+export type DataSourceName = 'hubspot' | 'stripe' | 'zendesk' | 'tableau' | 'meta' | 'pelagonia' | 'manual';
 
 export interface CsvSchema {
   source: DataSourceName;

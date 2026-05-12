@@ -3,13 +3,15 @@ import { createServiceClient as createClient } from '@/lib/supabase/service'
 import { getSchema } from '@/lib/config/data-sources'
 import { fullReplaceStrategy, appendStrategy, dateRangeReplaceStrategy, upsertStrategy } from '@/lib/upload-strategies'
 
-type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk'
+type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta' | 'pelagonia'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
   tableau: 'tableau_data',
   hubspot: 'hubspot_data',
   stripe: 'stripe_data',
   zendesk: 'zendesk_data',
+  meta: 'meta_data',
+  pelagonia: 'pelagonia_data',
 }
 
 // Which write strategy to apply per source
@@ -23,9 +25,12 @@ async function applyWriteStrategy(
   switch (source) {
     case 'tableau':
     case 'hubspot':
+    case 'pelagonia':
       return fullReplaceStrategy(supabase, table, batchId, rows)
     case 'stripe':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created')
+    case 'meta':
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'Reporting Starts')
     case 'zendesk':
       return upsertStrategy(supabase, table, batchId, rows, 'ID')
   }

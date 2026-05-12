@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react'
 import type { Member, Transaction, Ticket, Clinician, Alert, Rock } from '@/lib/types'
+import type { MetaAdRow } from '@/lib/types/meta'
+import type { PelagoniaRow } from '@/lib/types/pelagonia'
 import type { ManualMetrics } from '@/data/mock/manual-metrics'
 import type { SnowflakeExport } from '@/lib/types/snowflake-export'
 import {
@@ -25,6 +27,8 @@ export interface DashboardData {
   transactions: Transaction[]
   tickets: Ticket[]
   clinicians: Clinician[]
+  metaAds: MetaAdRow[]
+  pelagoniaOpportunities: PelagoniaRow[]
   manualMetrics: ManualMetrics
   rocks: Rock[]
   alerts: Alert[]
@@ -40,6 +44,7 @@ interface DataContextValue extends DashboardData {
   switchToActual: () => void
   hasActualData: boolean
   isLoading: boolean
+  derivedCAC: number | null
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +71,8 @@ function saveToStorage(data: Partial<DashboardData>) {
       transactions: data.transactions,
       tickets: data.tickets,
       clinicians: data.clinicians,
+      metaAds: data.metaAds,
+      pelagoniaOpportunities: data.pelagoniaOpportunities,
       lastRefreshed: data.lastRefreshed,
       isUsingMockData: data.isUsingMockData,
       dataMode: data.dataMode,
@@ -84,6 +91,8 @@ const defaultData: DashboardData = {
   transactions: [],
   tickets: [],
   clinicians: [],
+  metaAds: [],
+  pelagoniaOpportunities: [],
   manualMetrics: mockManualMetrics,
   rocks: mockRocks,
   alerts: mockAlerts,
@@ -94,6 +103,8 @@ const defaultData: DashboardData = {
     hubspot: null,
     stripe: null,
     zendesk: null,
+    meta: null,
+    pelagonia: null,
   },
 }
 
@@ -102,6 +113,8 @@ const demoData: DashboardData = {
   transactions: mockTransactions,
   tickets: mockTickets,
   clinicians: mockClinicians,
+  metaAds: [],
+  pelagoniaOpportunities: [],
   manualMetrics: mockManualMetrics,
   rocks: mockRocks,
   alerts: mockAlerts,
@@ -112,6 +125,8 @@ const demoData: DashboardData = {
     hubspot: '2026-03-06T14:30:00.000Z',
     stripe: '2026-03-07T06:00:00.000Z',
     zendesk: '2026-03-06T22:15:00.000Z',
+    meta: null,
+    pelagonia: null,
   },
 }
 
@@ -146,6 +161,7 @@ const DataContext = createContext<DataContextValue>({
   switchToActual: () => {},
   hasActualData: false,
   isLoading: false,
+  derivedCAC: null,
 })
 
 export function DataProvider({ children }: { children: ReactNode }) {
@@ -175,6 +191,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
             if (sources.zendesk) {
               updates.tickets = sources.zendesk.data
               updates.lastRefreshed!.zendesk = sources.zendesk.timestamp
+            }
+            if (sources.meta) {
+              updates.metaAds = sources.meta.data
+              updates.lastRefreshed!.meta = sources.meta.timestamp
+            }
+            if (sources.pelagonia) {
+              updates.pelagoniaOpportunities = sources.pelagonia.data
+              updates.lastRefreshed!.pelagonia = sources.pelagonia.timestamp
             }
             if (Object.keys(updates.lastRefreshed || {}).length > 0) {
               setData(prev => ({
@@ -322,8 +346,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   }, [fetchSnowflakeExport])
 
+  // Derived CAC: total Meta spend / new members from HubSpot (fallback to null if either missing)
+  const derivedCAC = useMemo((): number | null => {
+    if (!data.metaAds.length || !data.members.length) return null
+    const totalSpend = data.metaAds.reduce((sum, row) => sum + (row.spend ?? 0), 0)
+    const newMembers = data.members.filter(m => m.type === 'Customer').length
+    if (totalSpend === 0 || newMembers === 0) return null
+    return Math.round(totalSpend / newMembers)
+  }, [data.metaAds, data.members])
+
   return (
-    <DataContext.Provider value={{ ...data, updateSource, setLastRefreshed, resetToDemo, switchToActual, hasActualData, isLoading }}>
+    <DataContext.Provider value={{ ...data, updateSource, setLastRefreshed, resetToDemo, switchToActual, hasActualData, isLoading, derivedCAC }}>
       {children}
     </DataContext.Provider>
   )

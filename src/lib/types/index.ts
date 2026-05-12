@@ -54,3 +54,6 @@ export type {
   UploadResult,
   RefreshLog,
 } from './data-sources';
+
+export type { MetaAdRow } from './meta';
+export type { PelagoniaRow } from './pelagonia';
