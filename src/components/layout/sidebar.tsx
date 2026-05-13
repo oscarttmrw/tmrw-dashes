@@ -61,8 +61,33 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <div className="mx-3 my-2 border-t border-dash-border-subtle" />
             )}
             {grouped[section]?.map((item) => {
-              const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
+              const isActive = !item.disabled && (pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href)))
               const Icon = item.icon
+
+              if (item.disabled) {
+                const tooltip = item.disabledReason ?? 'Coming soon'
+                return (
+                  <div
+                    key={item.href}
+                    aria-disabled="true"
+                    title={tooltip}
+                    className={cn(
+                      'group relative flex cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-dash-text-muted opacity-60 select-none'
+                    )}
+                  >
+                    <Icon size={16} className="shrink-0" strokeWidth={1.5} />
+                    {!collapsed && (
+                      <>
+                        <span className="line-through decoration-dash-text-muted/40">{item.label}</span>
+                        <span className="ml-auto rounded-full border border-dash-border px-1.5 py-px font-mono text-[9px] uppercase tracking-wider text-dash-text-muted">
+                          WIP
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )
+              }
+
               return (
                 <Link
                   key={item.href}
