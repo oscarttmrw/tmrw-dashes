@@ -217,14 +217,33 @@ export function toTransaction(row: Record<string, any>): Transaction {
     customer_email: row.customer_email ?? null,
   };
 
+  const amountDollars = charge.amount / 100;
+  const outcome = mapOutcome(row.status ?? '');
+  const status: Transaction['status'] =
+    outcome === 'authorized' ? 'succeeded' :
+    outcome === 'declined' ? 'failed' : 'disputed';
+  const created = row.created ?? '';
+
   return {
+    id: charge.id,
+    created,
+    amount: amountDollars,
+    amountRefunded: 0,
+    currency: charge.currency.toLowerCase(),
+    convertedAmount: amountDollars,
+    convertedCurrency: charge.currency.toLowerCase(),
+    status,
+    declineReason: row.failure_message ?? null,
+    fee: 0,
+    refundedDate: null,
+    invoiceId: charge.invoice_id ?? null,
+    captured: outcome === 'authorized',
+
     chargeId: charge.id,
     memberId: row.metadata_member_id ?? null,
-    createdAt: row.created ?? '',
-    amount: charge.amount / 100, // Stripe amounts are in cents
-    currency: charge.currency.toUpperCase(),
+    createdAt: created,
     type: classifyCharge(charge),
-    outcome: mapOutcome(row.status ?? ''),
+    outcome,
     failureReason: row.failure_message ?? null,
     cardCountry: row.card_country ?? '',
     cardBrand: row.card_brand ?? '',

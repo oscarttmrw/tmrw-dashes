@@ -73,7 +73,7 @@ function tableauRawToMember(raw: TableauMemberRaw): Member {
 
 const DATE_COL: Partial<Record<string, string>> = {
   meta: 'day',
-  stripe: 'created',
+  stripe: 'created date (utc)',
   zendesk: 'created at',
   hubspot: 'created at',
   pelagonia: 'created at',

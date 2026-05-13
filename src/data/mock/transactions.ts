@@ -121,18 +121,37 @@ function generateTransaction(index: number): Transaction {
     ? `MBR-${String(1 + Math.floor(rand() * 300)).padStart(3, '0')}`
     : null;
 
+  const chargeId = generateChargeId(index);
+  const created = txDates[index];
+  const status: Transaction['status'] =
+    outcome === 'authorized' ? 'succeeded' :
+    outcome === 'declined' ? 'failed' : 'disputed';
+  const isRecurring = type === 'foundations-membership';
+
   return {
-    chargeId: generateChargeId(index),
-    memberId,
-    createdAt: txDates[index],
+    id: chargeId,
+    created,
     amount,
-    currency: 'AUD',
+    amountRefunded: 0,
+    currency: 'aud',
+    convertedAmount: amount,
+    convertedCurrency: 'aud',
+    status,
+    declineReason: failureReason,
+    fee: 0,
+    refundedDate: null,
+    invoiceId: isRecurring ? `in_${chargeId.slice(3)}` : null,
+    captured: outcome === 'authorized',
+
+    chargeId,
+    memberId,
+    createdAt: created,
     type,
     outcome,
     failureReason,
     cardCountry,
     cardBrand,
-    isRecurring: type === 'foundations-membership',
+    isRecurring,
   };
 }
 

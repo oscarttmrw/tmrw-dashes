@@ -27,7 +27,7 @@ async function applyWriteStrategy(
     case 'pelagonia':
       return fullReplaceStrategy(supabase, table, batchId, rows)
     case 'stripe':
-      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created')
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'Created date (UTC)')
     case 'meta':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'Day')
     case 'zendesk':

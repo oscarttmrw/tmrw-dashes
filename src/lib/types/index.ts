@@ -9,7 +9,7 @@ export type { Clinician } from './clinician';
 
 export type { Ticket } from './ticket';
 
-export type { Transaction } from './transaction';
+export type { Transaction, TransactionStatus } from './transaction';
 
 export type {
   Status,
