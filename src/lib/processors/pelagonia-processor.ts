@@ -1,4 +1,43 @@
 import type { PelagoniaRow } from '@/lib/types/pelagonia'
+import { num, tsIso, txt, type ProcessorResult } from './_canonical-helpers'
+
+export function processPelagoniaToCanonical(data: Record<string, unknown>[]): ProcessorResult {
+  const validRows: Record<string, unknown>[] = []
+  const errors: { rowIndex: number; reason: string }[] = []
+
+  data.forEach((row, i) => {
+    const lc = Object.fromEntries(
+      Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
+    )
+
+    const opportunityId = txt(lc['opportunity id'])
+    const appointmentDate = tsIso(lc['appointment date'])
+    const calendar = txt(lc['calendar'] ?? lc['calendar name'])
+    const recordId = opportunityId ?? txt(lc['appointment id']) ?? txt(lc['contact id'])
+
+    if (!recordId) {
+      errors.push({ rowIndex: i, reason: `Row ${i}: missing record id (Opportunity ID / Appointment ID)` })
+      return
+    }
+
+    const recordType = appointmentDate || calendar ? 'appointment' : 'opportunity'
+
+    validRows.push({
+      pelagonia_record_id: recordId,
+      record_type: recordType,
+      pelagonia_created_at: tsIso(lc['created at']),
+      appointment_date: appointmentDate,
+      status: txt(lc['stage'] ?? lc['appointment status'] ?? lc['status']),
+      pipeline_stage: txt(lc['stage'] ?? lc['pipeline stage'] ?? lc['pipeline']),
+      calendar_name: calendar,
+      source: txt(lc['source']),
+      assigned_user: txt(lc['owner'] ?? lc['assigned user']),
+      value: num(lc['value']),
+    })
+  })
+
+  return { validRows, errors }
+}
 
 function parseNum(value: string | undefined): number {
   if (!value || value.trim() === '' || value.trim() === '-') return 0

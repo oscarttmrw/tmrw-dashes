@@ -1,4 +1,44 @@
 import type { Ticket } from '@/lib/types';
+import { int, tsIso, txt, type ProcessorResult } from './_canonical-helpers';
+
+export function processZendeskToCanonical(data: Record<string, unknown>[]): ProcessorResult {
+  const validRows: Record<string, unknown>[] = [];
+  const errors: { rowIndex: number; reason: string }[] = [];
+
+  data.forEach((row, i) => {
+    const lc = Object.fromEntries(
+      Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
+    );
+    const ticketId = txt(lc['id']);
+    if (!ticketId) {
+      errors.push({ rowIndex: i, reason: `Row ${i}: missing ticket ID` });
+      return;
+    }
+    validRows.push({
+      zendesk_ticket_id: ticketId,
+      zendesk_created_at: tsIso(lc['created at']),
+      status: txt(lc['status']),
+      priority: txt(lc['priority']),
+      assignee: txt(lc['assignee']),
+      group_name: txt(lc['group']),
+      subject: txt(lc['subject']),
+      first_reply_time_minutes: int(
+        lc['first reply time in minutes']
+        ?? lc['first reply time (in minutes)']
+        ?? lc['first reply time (min)']
+      ),
+      full_resolution_time_minutes: int(
+        lc['full resolution time in minutes within business hours']
+        ?? lc['full resolution time in minutes']
+        ?? lc['full resolution time (in minutes)']
+        ?? lc['full resolution time (min)']
+      ),
+      satisfaction_score: int(lc['satisfaction score']),
+    });
+  });
+
+  return { validRows, errors };
+}
 
 const PII_COLUMNS = [
   'Requester',

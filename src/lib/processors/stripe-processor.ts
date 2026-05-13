@@ -1,4 +1,54 @@
 import type { Transaction } from '@/lib/types';
+import { num, tsIso, txt, bool, type ProcessorResult } from './_canonical-helpers';
+
+function normalizeStripeStatus(raw: unknown): string | null {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (!s) return null;
+  if (s === 'paid' || s === 'succeeded') return 'succeeded';
+  if (s === 'refunded') return 'refunded';
+  if (s === 'failed') return 'failed';
+  if (s === 'disputed') return 'disputed';
+  if (s === 'pending') return 'pending';
+  return s;
+}
+
+export function processStripeToCanonical(data: Record<string, unknown>[]): ProcessorResult {
+  const validRows: Record<string, unknown>[] = [];
+  const errors: { rowIndex: number; reason: string }[] = [];
+
+  data.forEach((row, i) => {
+    const lc = Object.fromEntries(
+      Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
+    );
+    const chargeId = txt(lc['id'] ?? lc['charge_id']);
+    if (!chargeId) {
+      errors.push({ rowIndex: i, reason: `Row ${i}: missing charge id` });
+      return;
+    }
+    const createdAt = tsIso(lc['created date (utc)'] ?? lc['created']);
+    if (!createdAt) {
+      errors.push({ rowIndex: i, reason: `Row ${i}: invalid or missing created date` });
+      return;
+    }
+    validRows.push({
+      stripe_charge_id: chargeId,
+      created_at: createdAt,
+      amount: num(lc['amount']),
+      amount_refunded: num(lc['amount refunded'] ?? lc['amount_refunded']),
+      currency: txt(lc['currency']),
+      captured: bool(lc['captured']),
+      converted_amount: num(lc['converted amount'] ?? lc['converted_amount']),
+      converted_currency: txt(lc['converted currency'] ?? lc['converted_currency']),
+      decline_reason: txt(lc['decline reason'] ?? lc['failure_message'] ?? lc['decline_reason']),
+      fee: num(lc['fee']),
+      refunded_date: tsIso(lc['refunded date (utc)'] ?? lc['refunded_date']),
+      status: normalizeStripeStatus(lc['status']),
+      invoice_id: txt(lc['invoice id'] ?? lc['invoice_id']),
+    });
+  });
+
+  return { validRows, errors };
+}
 
 const REQUIRED_COLUMNS = [
   'charge_id',
