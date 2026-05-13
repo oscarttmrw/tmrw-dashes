@@ -177,28 +177,46 @@ export function DataProvider({ children }: { children: ReactNode }) {
           const sources = await res.json()
           if (sources && Object.keys(sources).length > 0) {
             const updates: Partial<DashboardData> = { isUsingMockData: false, lastRefreshed: {} }
+            // Defensive: /api/data/latest now returns canonical row arrays under each
+            // source key plus a top-level `lastRefresh` map. Older shape was
+            // `{ tableau: { data: [...], timestamp }, ... }`. Coerce both shapes
+            // and never let `undefined` reach state arrays (would crash useMemo).
+            const refreshMap = (sources.lastRefresh ?? {}) as Record<string, string | null>
+            const dataOf = (v: unknown): unknown[] => {
+              if (Array.isArray(v)) return v
+              if (v && typeof v === 'object' && Array.isArray((v as { data?: unknown }).data)) {
+                return (v as { data: unknown[] }).data
+              }
+              return []
+            }
+            const tsOf = (k: string, v: unknown): string | null => {
+              if (v && typeof v === 'object' && !Array.isArray(v) && 'timestamp' in v) {
+                return ((v as { timestamp?: string | null }).timestamp) ?? null
+              }
+              return refreshMap[k] ?? null
+            }
             if (sources.tableau) {
-              updates.members = sources.tableau.data
-              updates.lastRefreshed!.tableau = sources.tableau.timestamp
+              updates.members = dataOf(sources.tableau) as typeof updates.members
+              updates.lastRefreshed!.tableau = tsOf('tableau', sources.tableau)
             }
             if (sources.hubspot) {
-              updates.lastRefreshed!.hubspot = sources.hubspot.timestamp
+              updates.lastRefreshed!.hubspot = tsOf('hubspot', sources.hubspot)
             }
             if (sources.stripe) {
-              updates.transactions = sources.stripe.data
-              updates.lastRefreshed!.stripe = sources.stripe.timestamp
+              updates.transactions = dataOf(sources.stripe) as typeof updates.transactions
+              updates.lastRefreshed!.stripe = tsOf('stripe', sources.stripe)
             }
             if (sources.zendesk) {
-              updates.tickets = sources.zendesk.data
-              updates.lastRefreshed!.zendesk = sources.zendesk.timestamp
+              updates.tickets = dataOf(sources.zendesk) as typeof updates.tickets
+              updates.lastRefreshed!.zendesk = tsOf('zendesk', sources.zendesk)
             }
             if (sources.meta) {
-              updates.metaAds = sources.meta.data
-              updates.lastRefreshed!.meta = sources.meta.timestamp
+              updates.metaAds = dataOf(sources.meta) as typeof updates.metaAds
+              updates.lastRefreshed!.meta = tsOf('meta', sources.meta)
             }
             if (sources.pelagonia) {
-              updates.pelagoniaOpportunities = sources.pelagonia.data
-              updates.lastRefreshed!.pelagonia = sources.pelagonia.timestamp
+              updates.pelagoniaOpportunities = dataOf(sources.pelagonia) as typeof updates.pelagoniaOpportunities
+              updates.lastRefreshed!.pelagonia = tsOf('pelagonia', sources.pelagonia)
             }
             if (Object.keys(updates.lastRefreshed || {}).length > 0) {
               setData(prev => ({
@@ -342,9 +360,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   // Derived CAC: total Meta spend / new members from HubSpot (fallback to null if either missing)
   const derivedCAC = useMemo((): number | null => {
-    if (!data.metaAds.length || !data.members.length) return null
-    const totalSpend = data.metaAds.reduce((sum, row) => sum + (row.spend ?? 0), 0)
-    const newMembers = data.members.filter(m => m.type === 'Customer').length
+    const metaAds = data.metaAds ?? []
+    const members = data.members ?? []
+    if (!metaAds.length || !members.length) return null
+    const totalSpend = metaAds.reduce((sum, row) => sum + (row.spend ?? 0), 0)
+    const newMembers = members.filter(m => m.type === 'Customer').length
     if (totalSpend === 0 || newMembers === 0) return null
     return Math.round(totalSpend / newMembers)
   }, [data.metaAds, data.members])
