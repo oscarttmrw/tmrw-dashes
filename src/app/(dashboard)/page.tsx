@@ -122,6 +122,9 @@ export default function DashboardPage() {
     derivedCAC,
     lastRefreshed,
     dataMode,
+    loading,
+    error,
+    refresh,
   } = useDashboardData()
 
   /* ── Section 1: Headline Growth ── */
@@ -257,6 +260,26 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 md:space-y-10">
       <Breadcrumb items={[{ label: 'Dashboard' }]} />
+
+      {error && (
+        <div className="flex items-center justify-between rounded-lg border border-status-red/30 bg-status-red/5 px-4 py-3">
+          <p className="font-sans text-sm text-status-red">
+            Could not load dashboard data: {error}
+          </p>
+          <button
+            onClick={() => { refresh() }}
+            className="ml-4 rounded border border-status-red/40 px-3 py-1 font-sans text-xs text-status-red hover:bg-status-red/10"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {loading && !error && (
+        <div className="rounded-lg border border-dash-border bg-dash-bg/60 px-4 py-3">
+          <p className="font-sans text-sm text-dash-text-muted">Loading latest data…</p>
+        </div>
+      )}
 
       {dataMode === 'demo' && (
         <div className="rounded-lg border border-status-amber/30 bg-status-amber/5 px-4 py-3">
