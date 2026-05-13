@@ -2,69 +2,81 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 type Row = Record<string, unknown>
 
-// Inserts all rows with batch_id. Used for append-only sources (Stripe charges).
+function withBatch(rows: Row[], batchId: string): Row[] {
+  return rows.map(r => ({ ...r, batch_id: batchId }))
+}
+
+// Simple insert. Used for append-only sources.
 export async function appendStrategy(
   supabase: SupabaseClient,
   table: string,
   batchId: string,
   rows: Row[]
 ): Promise<void> {
-  const records = rows.map(r => ({ batch_id: batchId, row_data: r }))
-  const { error } = await supabase.from(table).insert(records)
+  if (rows.length === 0) return
+  const { error } = await supabase.from(table).insert(withBatch(rows, batchId))
   if (error) throw error
 }
 
-// Deletes ALL existing rows then inserts fresh. Used when source is always a full export (Tableau, HubSpot).
+// Deletes ALL existing rows then inserts fresh. Used for Tableau, HubSpot.
 export async function fullReplaceStrategy(
   supabase: SupabaseClient,
   table: string,
   batchId: string,
   rows: Row[]
 ): Promise<void> {
-  const { error: delErr } = await supabase.from(table).delete().neq('id', 0)
+  const { error: delErr } = await supabase
+    .from(table)
+    .delete()
+    .not('id', 'is', null)
   if (delErr) throw delErr
-  const records = rows.map(r => ({ batch_id: batchId, row_data: r }))
-  if (records.length > 0) {
-    const { error } = await supabase.from(table).insert(records)
-    if (error) throw error
-  }
+  if (rows.length === 0) return
+  const { error } = await supabase.from(table).insert(withBatch(rows, batchId))
+  if (error) throw error
 }
 
-// Deletes rows whose row_data->>'created' falls within the upload date range, then inserts.
-// Used for Stripe where you upload a date-range slice.
+// Deletes rows in the upload's date range, then inserts. Used for Stripe, Meta, Pelagonia.
 export async function dateRangeReplaceStrategy(
   supabase: SupabaseClient,
   table: string,
   batchId: string,
   rows: Row[],
-  dateField = 'created'
+  dateColumn: string
 ): Promise<void> {
   if (rows.length === 0) return
-  const dates = rows
-    .map(r => new Date(r[dateField] as string).getTime())
-    .filter(d => !isNaN(d))
-  if (dates.length > 0) {
-    const minDate = new Date(Math.min(...dates)).toISOString()
-    const maxDate = new Date(Math.max(...dates)).toISOString()
-    await supabase
+  const times = rows
+    .map(r => {
+      const v = r[dateColumn]
+      if (v === null || v === undefined) return NaN
+      const d = new Date(String(v))
+      return d.getTime()
+    })
+    .filter(t => !isNaN(t))
+  if (times.length > 0) {
+    const minDate = new Date(Math.min(...times)).toISOString()
+    const maxDate = new Date(Math.max(...times)).toISOString()
+    const { error: delErr } = await supabase
       .from(table)
       .delete()
-      .gte(`row_data->>'${dateField}'`, minDate)
-      .lte(`row_data->>'${dateField}'`, maxDate)
+      .gte(dateColumn, minDate)
+      .lte(dateColumn, maxDate)
+    if (delErr) throw delErr
   }
-  const records = rows.map(r => ({ batch_id: batchId, row_data: r }))
-  const { error } = await supabase.from(table).insert(records)
+  const { error } = await supabase.from(table).insert(withBatch(rows, batchId))
   if (error) throw error
 }
 
-// Upsert by a unique key field inside row_data. Used for Zendesk tickets (ID).
+// Upsert on a unique key. Used for Zendesk (zendesk_ticket_id).
 export async function upsertStrategy(
   supabase: SupabaseClient,
   table: string,
   batchId: string,
   rows: Row[],
-  _keyField = 'ID'
+  conflictKey: string
 ): Promise<void> {
-  // Simple approach: full replace for Zendesk (tickets are small volume)
-  await fullReplaceStrategy(supabase, table, batchId, rows)
+  if (rows.length === 0) return
+  const { error } = await supabase
+    .from(table)
+    .upsert(withBatch(rows, batchId), { onConflict: conflictKey })
+  if (error) throw error
 }
