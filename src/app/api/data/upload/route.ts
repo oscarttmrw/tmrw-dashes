@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient as createClient } from '@/lib/supabase/service'
 import { getSchema } from '@/lib/config/data-sources'
-import { fullReplaceStrategy, dateRangeReplaceStrategy, upsertStrategy } from '@/lib/upload-strategies'
+import {
+  fullReplaceStrategy,
+  dateRangeReplaceStrategy,
+  upsertStrategy,
+  appendStrategy,
+} from '@/lib/upload-strategies'
+import { processMetaToCanonical } from '@/lib/processors/meta-processor'
+import { processStripeToCanonical } from '@/lib/processors/stripe-processor'
+import { processHubspotToCanonical } from '@/lib/processors/hubspot-processor'
+import { processPelagoniaToCanonical } from '@/lib/processors/pelagonia-processor'
+import { processTableauToCanonical } from '@/lib/processors/tableau-processor'
+import { processZendeskToCanonical } from '@/lib/processors/zendesk-processor'
+import type { ProcessorResult } from '@/lib/processors/_canonical-helpers'
 
 type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta' | 'pelagonia'
 
@@ -14,6 +26,24 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   pelagonia: 'pelagonia_data',
 }
 
+const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
+  tableau: null,
+  hubspot: null,
+  stripe: 'created_at',
+  zendesk: null,
+  meta: 'date',
+  pelagonia: 'pelagonia_created_at',
+}
+
+const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => ProcessorResult> = {
+  meta: processMetaToCanonical,
+  stripe: processStripeToCanonical,
+  hubspot: processHubspotToCanonical,
+  pelagonia: processPelagoniaToCanonical,
+  tableau: processTableauToCanonical,
+  zendesk: processZendeskToCanonical,
+}
+
 async function applyWriteStrategy(
   supabase: ReturnType<typeof createClient>,
   source: SourceKey,
@@ -24,14 +54,31 @@ async function applyWriteStrategy(
   switch (source) {
     case 'tableau':
     case 'hubspot':
-    case 'pelagonia':
       return fullReplaceStrategy(supabase, table, batchId, rows)
     case 'stripe':
-      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created')
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created_at')
     case 'meta':
-      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'Reporting Starts')
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'date')
+    case 'pelagonia':
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'pelagonia_created_at')
     case 'zendesk':
-      return upsertStrategy(supabase, table, batchId, rows, 'ID')
+      return upsertStrategy(supabase, table, batchId, rows, 'zendesk_ticket_id')
+  }
+}
+
+function dataPeriodBounds(
+  rows: Record<string, unknown>[],
+  source: SourceKey
+): { start: string | null; end: string | null } {
+  const col = SOURCE_DATE_COLUMN[source]
+  if (!col) return { start: null, end: null }
+  const times = rows
+    .map(r => new Date(String(r[col] ?? '')).getTime())
+    .filter(t => !isNaN(t))
+  if (times.length === 0) return { start: null, end: null }
+  return {
+    start: new Date(Math.min(...times)).toISOString(),
+    end: new Date(Math.max(...times)).toISOString(),
   }
 }
 
@@ -53,7 +100,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Unknown source: ${source}` }, { status: 400 })
     }
 
-    // Audit metadata
     const uploadedBy      = form.get('uploaded_by')?.toString()      ?? null
     const dataPeriodFrom  = form.get('data_period_from')?.toString()  ?? null
     const dataPeriodTo    = form.get('data_period_to')?.toString()    ?? null
@@ -62,15 +108,14 @@ export async function POST(request: NextRequest) {
 
     const buffer = await file.arrayBuffer()
     const name = file.name.toLowerCase()
-    let rows: Record<string, unknown>[]
+    let rawRows: Record<string, unknown>[]
 
     if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
       const { default: XLSX } = await import('xlsx')
       const wb = XLSX.read(buffer, { type: 'array' })
       const ws = wb.Sheets[wb.SheetNames[0]]
-      rows = XLSX.utils.sheet_to_json(ws, { defval: null }) as Record<string, unknown>[]
+      rawRows = XLSX.utils.sheet_to_json(ws, { defval: null }) as Record<string, unknown>[]
     } else {
-      // Try UTF-16 (Tableau TSV) then fall back to UTF-8
       let text: string
       try {
         text = new TextDecoder('utf-16le').decode(buffer)
@@ -85,18 +130,19 @@ export async function POST(request: NextRequest) {
         skipEmptyLines: true,
         delimiter,
       })
-      rows = result.data
+      rawRows = result.data
     }
 
-    if (rows.length === 0) {
+    if (rawRows.length === 0) {
       return NextResponse.json({ error: 'File contains no data rows' }, { status: 422 })
     }
 
-    // Validate required columns (case-insensitive)
     const schema = getSchema(source)
     if (schema) {
-      const normHeaders = Object.keys(rows[0]).map(h => h.toLowerCase().trim())
-      const missing = schema.requiredColumns.filter(col => !normHeaders.includes(col.toLowerCase().trim()))
+      const normHeaders = Object.keys(rawRows[0]).map(h => h.toLowerCase().trim())
+      const missing = schema.requiredColumns.filter(
+        col => !normHeaders.includes(col.toLowerCase().trim())
+      )
       if (missing.length > 0) {
         return NextResponse.json(
           { error: `Missing required columns: ${missing.join(', ')}` },
@@ -105,16 +151,31 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Create upload_log row
+    const processor = SOURCE_PROCESSOR[source]
+    const { validRows, errors } = processor(rawRows)
+
+    if (validRows.length === 0) {
+      return NextResponse.json(
+        {
+          error: 'No valid rows after processing',
+          errorCount: errors.length,
+          errors: errors.slice(0, 50),
+        },
+        { status: 400 }
+      )
+    }
+
+    const period = dataPeriodBounds(validRows, source)
+
     const { data: logRow, error: logErr } = await supabase
       .from('upload_log')
       .insert({
         source,
-        record_count: rows.length,
-        status: 'pending',
+        record_count: validRows.length,
+        status: 'in_progress',
         uploaded_by: uploadedBy,
-        data_period_from: dataPeriodFrom || null,
-        data_period_to: dataPeriodTo || null,
+        data_period_from: dataPeriodFrom || period.start,
+        data_period_to: dataPeriodTo || period.end,
         data_period_label: dataPeriodLabel || null,
         file_name: fileName,
       })
@@ -124,17 +185,22 @@ export async function POST(request: NextRequest) {
     if (logErr || !logRow) throw logErr ?? new Error('Failed to create upload log')
     batchId = logRow.id
 
-    await applyWriteStrategy(supabase, source, batchId!, rows)
+    await applyWriteStrategy(supabase, source, batchId!, validRows)
 
     await supabase
       .from('upload_log')
-      .update({ status: 'complete', record_count: rows.length })
+      .update({
+        status: 'complete',
+        record_count: validRows.length,
+      })
       .eq('id', batchId)
 
     return NextResponse.json({
       success: true,
       batchId,
-      recordCount: rows.length,
+      rowCount: validRows.length,
+      errorCount: errors.length,
+      errors: errors.slice(0, 50),
       timestamp: new Date().toISOString(),
     })
   } catch (err) {

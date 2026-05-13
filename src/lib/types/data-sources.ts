@@ -5,6 +5,8 @@ export interface CsvSchema {
   requiredColumns: string[];
   optionalColumns: string[];
   strippedColumns: string[];
+  /** Authoritative list of typed columns in the Supabase table (snake_case, excludes id/batch_id/inserted_at). */
+  canonicalColumns: string[];
 }
 
 export interface DataSourceConfig {

@@ -37,6 +37,28 @@ export const hubspotSchema: CsvSchema = {
     'Name > Last',
   ],
   strippedColumns: [],
+  canonicalColumns: [
+    'hubspot_record_id',
+    'record_type',
+    'hubspot_created_at',
+    'case_status',
+    'primary_clinician',
+    'assigned_doctor',
+    'dashboard_unlocked',
+    'dashboard_unlocked_at',
+    'sex',
+    'age_range',
+    'add_ons',
+    'last_test_date',
+    'next_retest_date',
+    'email_sequence_triggered',
+    'last_interaction_at',
+    'little_prick_id',
+    'patient_id',
+    'lead_status',
+    'lab_batch_tracking_number',
+    'health_story_complete',
+  ],
 };
 
 export const stripeSchema: CsvSchema = {
@@ -59,6 +81,21 @@ export const stripeSchema: CsvSchema = {
     'net',
   ],
   strippedColumns: [],
+  canonicalColumns: [
+    'stripe_charge_id',
+    'created_at',
+    'amount',
+    'amount_refunded',
+    'currency',
+    'captured',
+    'converted_amount',
+    'converted_currency',
+    'decline_reason',
+    'fee',
+    'refunded_date',
+    'status',
+    'invoice_id',
+  ],
 };
 
 export const zendeskSchema: CsvSchema = {
@@ -92,6 +129,18 @@ export const zendeskSchema: CsvSchema = {
     'Requester',
   ],
   strippedColumns: [],
+  canonicalColumns: [
+    'zendesk_ticket_id',
+    'zendesk_created_at',
+    'status',
+    'priority',
+    'assignee',
+    'group_name',
+    'subject',
+    'first_reply_time_minutes',
+    'full_resolution_time_minutes',
+    'satisfaction_score',
+  ],
 };
 
 export const tableauSchema: CsvSchema = {
@@ -113,6 +162,14 @@ export const tableauSchema: CsvSchema = {
     'First Result Ready At',
   ],
   strippedColumns: [],
+  canonicalColumns: [
+    'member_id',
+    'measure_name',
+    'measure_value',
+    'case_status',
+    'person_type',
+    'event_date',
+  ],
 };
 
 export const metaSchema: CsvSchema = {
@@ -132,8 +189,29 @@ export const metaSchema: CsvSchema = {
     'Results',
     'Cost per Result (AUD)',
     'CTR (All)',
+    'Day',
+    'Reach',
+    'Frequency',
+    'Result Type',
+    'Delivery Status',
   ],
   strippedColumns: [],
+  canonicalColumns: [
+    'date',
+    'ad_set_name',
+    'spend_aud',
+    'impressions',
+    'clicks',
+    'ctr',
+    'reach',
+    'frequency',
+    'result_type',
+    'results',
+    'cost_per_result',
+    'landing_page_views',
+    'cost_per_landing_page_view',
+    'delivery_status',
+  ],
 };
 
 export const pelagoniaSchema: CsvSchema = {
@@ -151,8 +229,24 @@ export const pelagoniaSchema: CsvSchema = {
     'Appointment Status',
     'Pipeline',
     'Owner',
+    'Appointment Date',
+    'Calendar',
+    'Source',
+    'Assigned User',
   ],
   strippedColumns: [],
+  canonicalColumns: [
+    'pelagonia_record_id',
+    'record_type',
+    'pelagonia_created_at',
+    'appointment_date',
+    'status',
+    'pipeline_stage',
+    'calendar_name',
+    'source',
+    'assigned_user',
+    'value',
+  ],
 };
 
 /**
