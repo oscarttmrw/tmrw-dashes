@@ -29,7 +29,7 @@ async function applyWriteStrategy(
     case 'stripe':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created')
     case 'meta':
-      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'Reporting Starts')
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'Day')
     case 'zendesk':
       return upsertStrategy(supabase, table, batchId, rows, 'ID')
   }

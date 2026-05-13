@@ -72,7 +72,7 @@ function tableauRawToMember(raw: TableauMemberRaw): Member {
 // ---------------------------------------------------------------------------
 
 const DATE_COL: Partial<Record<string, string>> = {
-  meta: 'reporting starts',
+  meta: 'day',
   stripe: 'created',
   zendesk: 'created at',
   hubspot: 'created at',
@@ -99,17 +99,7 @@ function detectDateRange(
   }
   if (!timestamps.length) return { from: null, to: null }
 
-  // For Meta, also check 'Reporting Ends' for the upper bound
-  let maxTs = Math.max(...timestamps)
-  if (sourceKey === 'meta') {
-    const endKey = Object.keys(rows[0]).find(k => k.toLowerCase().trim() === 'reporting ends')
-    if (endKey) {
-      for (const row of rows) {
-        const d = new Date(row[endKey])
-        if (!isNaN(d.getTime())) maxTs = Math.max(maxTs, d.getTime())
-      }
-    }
-  }
+  const maxTs = Math.max(...timestamps)
 
   return {
     from: new Date(Math.min(...timestamps)).toISOString().split('T')[0],
