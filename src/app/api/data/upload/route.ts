@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient as createClient } from '@/lib/supabase/service'
-import { getSchema } from '@/lib/config/data-sources'
+import { getSchema, validateRequiredColumns } from '@/lib/config/data-sources'
 import {
   fullReplaceStrategy,
   dateRangeReplaceStrategy,
@@ -139,10 +139,7 @@ export async function POST(request: NextRequest) {
 
     const schema = getSchema(source)
     if (schema) {
-      const normHeaders = Object.keys(rawRows[0]).map(h => h.toLowerCase().trim())
-      const missing = schema.requiredColumns.filter(
-        col => !normHeaders.includes(col.toLowerCase().trim())
-      )
+      const missing = validateRequiredColumns(schema, Object.keys(rawRows[0]))
       if (missing.length > 0) {
         return NextResponse.json(
           { error: `Missing required columns: ${missing.join(', ')}` },

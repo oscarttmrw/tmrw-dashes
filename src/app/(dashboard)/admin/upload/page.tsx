@@ -8,7 +8,7 @@ import { DataSourceBadge } from '@/components/dashboard/data-source-badge'
 import { SectionHeading } from '@/components/dashboard/section-heading'
 import { useDashboardData } from '@/lib/context/data-context'
 import type { DashboardData } from '@/lib/context/data-context'
-import { getSchema, dataSourceConfigs } from '@/lib/config/data-sources'
+import { getSchema, validateRequiredColumns, dataSourceConfigs } from '@/lib/config/data-sources'
 import { getMetricsPoweredBy } from '@/lib/utils/metric-source'
 import { createClient } from '@/lib/supabase/client'
 import { Upload, CheckCircle, AlertTriangle, ChevronDown, ChevronUp, X } from 'lucide-react'
@@ -167,8 +167,7 @@ function UploadCard({
   const validateColumns = useCallback((headers: string[], sourceKey: SourceKey): string[] => {
     const schema = getSchema(sourceKey)
     if (!schema) return []
-    const normHeaders = headers.map(h => h.toLowerCase().trim())
-    return schema.requiredColumns.filter(col => !normHeaders.includes(col.toLowerCase().trim()))
+    return validateRequiredColumns(schema, headers)
   }, [])
 
   const openModal = useCallback((pending: PendingUpload) => {
