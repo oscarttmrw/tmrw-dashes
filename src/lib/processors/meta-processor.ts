@@ -1,24 +1,47 @@
-import type { MetaAdRow } from '@/lib/types/meta'
-import { num, int, dateOnly, txt, type ProcessorResult } from './_canonical-helpers'
+import { num, int, txt, type ProcessorResult } from './_canonical-helpers'
 
-function parseNum(value: string | undefined): number {
-  if (!value || value.trim() === '' || value.trim() === '-') return 0
-  return parseFloat(value.replace(/[,$]/g, '').trim()) || 0
+/**
+ * Parse Meta-style Australian dates. Meta exports `Day`, `Starts`, `Ends`,
+ * `Reporting Starts`, `Reporting Ends` in DD/M/YYYY or DD/MM/YYYY. The native
+ * Date constructor parses these inconsistently (US MM/DD/YYYY assumed by V8),
+ * so we parse the parts ourselves. Returns an ISO date (YYYY-MM-DD) or null
+ * for empty / unparseable / sentinel values like "Ongoing".
+ */
+export function parseAusDate(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  const s = String(value).trim()
+  if (s === '' || s === '-' || s.toLowerCase() === 'n/a' || s.toLowerCase() === 'ongoing') {
+    return null
+  }
+  // DD/M/YYYY or DD/MM/YYYY, optional time suffix.
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T].*)?$/)
+  if (m) {
+    const day = parseInt(m[1], 10)
+    const month = parseInt(m[2], 10)
+    const year = parseInt(m[3], 10)
+    if (
+      year >= 1970 && year < 2100
+      && month >= 1 && month <= 12
+      && day >= 1 && day <= 31
+    ) {
+      const mm = String(month).padStart(2, '0')
+      const dd = String(day).padStart(2, '0')
+      return `${year}-${mm}-${dd}`
+    }
+    return null
+  }
+  // ISO date or anything Date can parse (YYYY-MM-DD, ISO timestamps).
+  const d = new Date(s)
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10)
+  return null
 }
 
-function parseNumOrNull(value: string | undefined): number | null {
-  if (!value || value.trim() === '' || value.trim() === '-') return null
-  const n = parseFloat(value.replace(/[,$]/g, '').trim())
-  return isNaN(n) ? null : n
-}
-
-function parseDateOrNull(value: string | undefined): string | null {
-  if (!value || value.trim() === '') return null
-  const d = new Date(value.trim())
-  return isNaN(d.getTime()) ? null : d.toISOString()
-}
-
-export function processMetaToCanonical(data: Record<string, unknown>[]): ProcessorResult {
+/**
+ * Canonical Meta processor. Reads case-insensitively, tolerates whitespace,
+ * empty fields, the literal "Ongoing" in Ends-style columns, and Meta's
+ * Australian date format.
+ */
+export function processMetaCSV(data: Record<string, unknown>[]): ProcessorResult {
   const validRows: Record<string, unknown>[] = []
   const errors: { rowIndex: number; reason: string }[] = []
 
@@ -26,33 +49,59 @@ export function processMetaToCanonical(data: Record<string, unknown>[]): Process
     const lc = Object.fromEntries(
       Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
     )
-    const day = dateOnly(lc['day'])
-    if (!day) {
+
+    // Day is the canonical `date` column (NOT NULL in Supabase). Reject the
+    // row only if Day is missing OR un-parseable — and say which.
+    const dayRaw = lc['day']
+    const dayRawStr = dayRaw === null || dayRaw === undefined ? '' : String(dayRaw).trim()
+    if (dayRawStr === '') {
       errors.push({
         rowIndex: i,
         reason: `Row ${i}: Day field empty. Re-export with 'Breakdown by Day' enabled in Meta Ads Manager.`,
       })
       return
     }
+    const day = parseAusDate(dayRawStr)
+    if (!day) {
+      errors.push({
+        rowIndex: i,
+        reason: `Row ${i}: Day '${dayRawStr}' could not be parsed as a date.`,
+      })
+      return
+    }
+
     const adSet = txt(lc['ad set name'])
     if (!adSet) {
       errors.push({ rowIndex: i, reason: `Row ${i}: Ad Set Name required` })
       return
     }
+
+    // Spend column has three observed export variants. All compare case-
+    // insensitively but the lc keys preserve the original casing's lowercase.
+    const spend = num(
+      lc['amount spent (aud)']
+      ?? lc['amount spent']
+      ?? lc['amount_spent_(aud)']
+      ?? lc['amount_spent']
+    )
+
     validRows.push({
       date: day,
       ad_set_name: adSet,
-      spend_aud: num(lc['amount spent (aud)']),
+      spend_aud: spend,
       impressions: int(lc['impressions']),
-      clicks: int(lc['clicks (all)']),
-      ctr: num(lc['ctr (all)']),
+      clicks: int(lc['clicks (all)'] ?? lc['clicks_(all)'] ?? lc['clicks']),
+      ctr: num(lc['ctr (all)'] ?? lc['ctr_(all)'] ?? lc['ctr']),
       reach: int(lc['reach']),
       frequency: num(lc['frequency']),
       result_type: txt(lc['result type']),
       results: int(lc['results']),
-      cost_per_result: num(lc['cost per result (aud)']),
+      cost_per_result: num(lc['cost per result (aud)'] ?? lc['cost per result']),
       landing_page_views: int(lc['landing page views']),
-      cost_per_landing_page_view: num(lc['cost per landing page view (aud)']),
+      cost_per_landing_page_view: num(
+        lc['cost per landing page view (aud)']
+        ?? lc['cost per landing page view']
+      ),
       delivery_status: txt(lc['delivery status']),
     })
   })
@@ -60,21 +109,7 @@ export function processMetaToCanonical(data: Record<string, unknown>[]): Process
   return { validRows, errors }
 }
 
-export function processMetaCSV(data: Record<string, string>[]): MetaAdRow[] {
-  return data
-    .filter((row) => row['Ad Set Name']?.trim())
-    .map((row): MetaAdRow => ({
-      adSetName: row['Ad Set Name']?.trim() ?? '',
-      campaignName: row['Campaign Name']?.trim() ?? '',
-      spend: parseNum(row['Amount Spent (AUD)']),
-      impressions: parseNum(row['Impressions']),
-      clicks: parseNum(row['Clicks (All)']),
-      landingPageViews: parseNum(row['Landing Page Views']),
-      conversions: parseNum(row['Results']),
-      costPerResult: parseNumOrNull(row['Cost per Result (AUD)']),
-      costPerLPV: parseNumOrNull(row['Cost per Landing Page View (AUD)']),
-      ctr: parseNumOrNull(row['CTR (All)']),
-      dateStart: parseDateOrNull(row['Reporting Starts']),
-      dateStop: parseDateOrNull(row['Reporting Ends']),
-    }))
-}
+// Backwards-compatible alias for the API route imported during PR 1.
+// Legacy `processMetaCSV(MetaAdRow[])` was removed in this hotfix — its only
+// caller (the upload page's client-side processor path) was removed in PR 2.2.
+export { processMetaCSV as processMetaToCanonical }

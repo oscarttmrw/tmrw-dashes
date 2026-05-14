@@ -1,8 +1,16 @@
 export type DataSourceName = 'hubspot' | 'stripe' | 'zendesk' | 'tableau' | 'meta' | 'pelagonia' | 'manual';
 
+/**
+ * A required column may be expressed as a single name or an array of
+ * acceptable variants (any one match satisfies the requirement, compared
+ * case-insensitively). Use the array form when an export tool ships multiple
+ * spellings of the same logical field (e.g. "Amount Spent" vs "Amount Spent (AUD)").
+ */
+export type RequiredColumn = string | string[];
+
 export interface CsvSchema {
   source: DataSourceName;
-  requiredColumns: string[];
+  requiredColumns: RequiredColumn[];
   optionalColumns: string[];
   strippedColumns: string[];
   /** Authoritative list of typed columns in the Supabase table (snake_case, excludes id/batch_id/inserted_at). */

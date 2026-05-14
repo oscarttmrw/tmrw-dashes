@@ -506,7 +506,11 @@ function UploadCard({
               </button>
               {schemaOpen && (
                 <ul className="mt-3 space-y-1">
-                  {schema.requiredColumns.map((col, i) => <li key={i} className="font-mono text-xs text-dash-text">{col}</li>)}
+                  {schema.requiredColumns.map((col, i) => (
+                    <li key={i} className="font-mono text-xs text-dash-text">
+                      {Array.isArray(col) ? col.join(' / ') : col}
+                    </li>
+                  ))}
                 </ul>
               )}
             </div>
