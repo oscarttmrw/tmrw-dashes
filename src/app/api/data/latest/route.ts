@@ -46,7 +46,7 @@ export async function GET() {
     sources.map(s =>
       supabase
         .from('upload_log')
-        .select('inserted_at, uploaded_at')
+        .select('uploaded_at')
         .eq('source', s)
         .eq('status', 'complete')
         .order('uploaded_at', { ascending: false })
@@ -68,9 +68,7 @@ export async function GET() {
       out[s] = data ?? []
     }
     const log = refreshLogs[i].data
-    lastRefresh[s] = (log?.uploaded_at as string | undefined)
-      ?? (log?.inserted_at as string | undefined)
-      ?? null
+    lastRefresh[s] = (log?.uploaded_at as string | undefined) ?? null
   })
 
   out.lastRefresh = lastRefresh
