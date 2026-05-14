@@ -8,64 +8,17 @@ import { DataSourceBadge } from '@/components/dashboard/data-source-badge'
 import { SectionHeading } from '@/components/dashboard/section-heading'
 import { useDashboardData } from '@/lib/context/data-context'
 import type { DashboardData } from '@/lib/context/data-context'
-import { getSchema, dataSourceConfigs } from '@/lib/config/data-sources'
+import { getSchema, validateRequiredColumns, dataSourceConfigs } from '@/lib/config/data-sources'
 import { getMetricsPoweredBy } from '@/lib/utils/metric-source'
-import { processTableauTSV, type TableauMemberRaw } from '@/lib/processors/tableau-processor'
-import { processHubspotCSV } from '@/lib/processors/hubspot-processor'
-import { processStripeCSV } from '@/lib/processors/stripe-processor'
-import { processZendeskCSV } from '@/lib/processors/zendesk-processor'
-import { processMetaCSV } from '@/lib/processors/meta-processor'
-import { processPelagoniaCSV } from '@/lib/processors/pelagonia-processor'
 import { createClient } from '@/lib/supabase/client'
-import type { Member } from '@/lib/types'
 import { Upload, CheckCircle, AlertTriangle, ChevronDown, ChevronUp, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
-// Tableau raw → Member mapping
+// (Removed) Client-side processors moved server-side in PR 1.
+// Upload page now just previews the file and posts FormData; the API does
+// all parsing/processing and the data context re-reads from Supabase.
 // ---------------------------------------------------------------------------
-
-function tableauRawToMember(raw: TableauMemberRaw): Member {
-  const now = new Date().toISOString()
-  const caseStatus = raw.caseStatus?.toLowerCase()
-  return {
-    id: `tab-${raw.memberId}`,
-    hubspotRecordId: null,
-    firstName: '',
-    lastName: '',
-    displayName: `Member ${raw.memberId}`,
-    email: raw.email,
-    sex: null,
-    ageRange: null,
-    type: raw.personType === 'Customer' ? 'Customer' : raw.personType === 'Employee' ? 'Employee' : raw.personType === 'Investor' ? 'Investor' : raw.personType === 'Friend-Family' ? 'Friend-Family' : 'Customer',
-    caseStatus: caseStatus === 'closed' ? 'Closed' : caseStatus === 'inactive' ? 'Inactive' : 'Open',
-    createdAt: raw.createdAt ?? now,
-    primaryClinician: null,
-    assignedDoctor: null,
-    dashboardUnlocked: raw.dashboardPublishedAt !== null,
-    dashboardUnlockedAt: raw.dashboardPublishedAt,
-    lastTestDate: null,
-    nextRetestDate: null,
-    emailSequenceTriggered: [],
-    addOns: [],
-    journeyStage: raw.journeyStage,
-    totalRevenue: 0,
-    transactionCount: 0,
-    firstPaymentDate: raw.firstPurchaseDate,
-    lastPaymentDate: null,
-    mrr: 0,
-    ticketCount: 0,
-    openTickets: 0,
-    avgResolutionTime: null,
-    lastTicketDate: null,
-    csat: null,
-    healthScore: 'unknown',
-    riskFlags: [],
-    daysSinceRegistration: raw.createdAt ? Math.floor((Date.now() - new Date(raw.createdAt).getTime()) / 86400000) : 0,
-    betterTomorrows: 0,
-    isVIP: false,
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Date detection helpers
@@ -189,7 +142,7 @@ function UploadCard({
   isFileBeingDragged: boolean
   currentUserEmail: string
 }) {
-  const { lastRefreshed, updateSource } = useDashboardData()
+  const { lastRefreshed, refresh } = useDashboardData()
   const [state, setState] = useState<UploadState>({ status: 'idle' })
   const [modalForm, setModalForm] = useState<ModalForm>({ uploadedBy: '', periodFrom: '', periodTo: '', periodLabel: '' })
   const [stepsOpen, setStepsOpen] = useState(false)
@@ -214,8 +167,7 @@ function UploadCard({
   const validateColumns = useCallback((headers: string[], sourceKey: SourceKey): string[] => {
     const schema = getSchema(sourceKey)
     if (!schema) return []
-    const normHeaders = headers.map(h => h.toLowerCase().trim())
-    return schema.requiredColumns.filter(col => !normHeaders.includes(col.toLowerCase().trim()))
+    return validateRequiredColumns(schema, headers)
   }, [])
 
   const openModal = useCallback((pending: PendingUpload) => {
@@ -255,13 +207,20 @@ function UploadCard({
         if (missing.length > 0) {
           setState({ status: 'error', errors: [`Missing columns: ${missing.join(', ')}`] }); return
         }
-        const rawMembers = processTableauTSV(content)
-        const members = rawMembers.map(tableauRawToMember)
-        // Date detection from processed data
-        const dates = rawMembers.map(m => m.createdAt).filter(Boolean).map(d => new Date(d!).getTime()).filter(n => !isNaN(n))
+        const createdIdx = headers.findIndex(h => h.toLowerCase().trim() === 'created at')
+        const dates: number[] = []
+        if (createdIdx >= 0) {
+          for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split('\t')
+            const raw = cols[createdIdx]?.trim()
+            if (!raw) continue
+            const d = new Date(raw)
+            if (!isNaN(d.getTime())) dates.push(d.getTime())
+          }
+        }
         const detectedFrom = dates.length ? new Date(Math.min(...dates)).toISOString().split('T')[0] : null
         const detectedTo   = dates.length ? new Date(Math.max(...dates)).toISOString().split('T')[0] : null
-        openModal({ file, rowCount: lines.length - 1, columnCount: headers.length, stateUpdate: { members }, detectedFrom, detectedTo })
+        openModal({ file, rowCount: lines.length - 1, columnCount: headers.length, stateUpdate: {}, detectedFrom, detectedTo })
       } else {
         Papa.parse(content, {
           header: true,
@@ -277,25 +236,7 @@ function UploadCard({
               setState({ status: 'error', errors: [`Missing columns: ${missing.join(', ')}`] }); return
             }
             const { from, to } = detectDateRange(data, source.key)
-            let stateUpdate: Partial<DashboardData>
-            try {
-              if (source.key === 'hubspot') {
-                stateUpdate = { members: processHubspotCSV(data) }
-              } else if (source.key === 'stripe') {
-                stateUpdate = { transactions: processStripeCSV(data) }
-              } else if (source.key === 'zendesk') {
-                stateUpdate = { tickets: processZendeskCSV(data) }
-              } else if (source.key === 'meta') {
-                stateUpdate = { metaAds: processMetaCSV(data) }
-              } else if (source.key === 'pelagonia') {
-                stateUpdate = { pelagoniaOpportunities: processPelagoniaCSV(data) }
-              } else {
-                stateUpdate = {}
-              }
-            } catch (err) {
-              setState({ status: 'error', errors: [`Processing error: ${err instanceof Error ? err.message : String(err)}`] }); return
-            }
-            openModal({ file, rowCount: data.length, columnCount: headers.length, stateUpdate, detectedFrom: from, detectedTo: to })
+            openModal({ file, rowCount: data.length, columnCount: headers.length, stateUpdate: {}, detectedFrom: from, detectedTo: to })
           },
           error: (err: Error) => {
             setState({ status: 'error', errors: [`Parse error: ${err.message}`] })
@@ -327,12 +268,21 @@ function UploadCard({
         setState({ status: 'error', errors: [body.error ?? `Upload failed (HTTP ${res.status})`] })
         return
       }
-      updateSource(source.key, state.pending.stateUpdate)
-      setState({ status: 'success', resultCount: state.pending.rowCount })
+      const body = await res.json().catch(() => ({}))
+      const rowCount = typeof body.rowCount === 'number' ? body.rowCount : state.pending.rowCount
+      const apiErrors = Array.isArray(body.errors)
+        ? (body.errors as Array<{ reason?: string }>).map(e => e.reason ?? String(e)).filter(Boolean)
+        : []
+      await refresh()
+      if (apiErrors.length > 0) {
+        setState({ status: 'success', resultCount: rowCount, errors: apiErrors.slice(0, 10) })
+      } else {
+        setState({ status: 'success', resultCount: rowCount })
+      }
     } catch (err) {
       setState({ status: 'error', errors: [`Network error: ${err instanceof Error ? err.message : String(err)}`] })
     }
-  }, [state.pending, modalForm, source.key, updateSource])
+  }, [state.pending, modalForm, source.key, refresh])
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

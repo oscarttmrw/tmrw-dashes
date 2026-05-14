@@ -269,6 +269,22 @@ export function getSchema(source: string): CsvSchema | undefined {
 }
 
 /**
+ * Case-insensitive header validation. Returns the list of required column
+ * names (in their canonical case from the schema) that are missing from
+ * `headers`. Whitespace-trimmed and lowercased on both sides before compare —
+ * keeps in lock-step with the processors' lowercased lookup pattern.
+ */
+export function validateRequiredColumns(
+  schema: CsvSchema,
+  headers: string[]
+): string[] {
+  const norm = headers.map(h => h.toLowerCase().trim());
+  return schema.requiredColumns.filter(
+    col => !norm.includes(col.toLowerCase().trim())
+  );
+}
+
+/**
  * Per-source configuration including export steps and powered metrics.
  */
 export const dataSourceConfigs: Record<string, DataSourceConfig> = {

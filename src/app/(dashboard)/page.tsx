@@ -108,92 +108,165 @@ const fmtCurrency = (n: number, opts: { compact?: boolean } = {}) =>
 
 const fmtPct = (n: number, digits = 0) => `${(n * 100).toFixed(digits)}%`
 
+const num = (v: unknown): number => {
+  if (v === null || v === undefined) return 0
+  const n = typeof v === 'number' ? v : Number(v)
+  return isNaN(n) ? 0 : n
+}
+
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 const Q1_TARGET_NEW_MEMBERS = 183
 
 export default function DashboardPage() {
   const {
-    members,
-    transactions,
-    tickets,
-    metaAds,
-    pelagoniaOpportunities,
-    derivedCAC,
-    lastRefreshed,
+    meta,
+    stripe,
+    hubspot,
+    pelagonia,
+    zendesk,
+    lastRefresh,
     dataMode,
+    loading,
+    error,
+    refresh,
   } = useDashboardData()
 
   /* ── Section 1: Headline Growth ── */
-  const activeMembers = useMemo(
-    () => members.filter(m => m.caseStatus !== 'Closed' && m.journeyStage !== 'churned' && m.journeyStage !== 'inactive'),
-    [members]
+  // Active Members: hubspot rows whose case_status is not closed/inactive.
+  const activeMembersCount = useMemo(
+    () => hubspot.filter(r => {
+      const s = String(r.case_status ?? '').toLowerCase()
+      return s !== 'closed' && s !== 'inactive'
+    }).length,
+    [hubspot]
   )
-  const newMembersThisPeriod = activeMembers.length
+  const newMembersThisPeriod = activeMembersCount
   const newMembersPct = Q1_TARGET_NEW_MEMBERS > 0 ? newMembersThisPeriod / Q1_TARGET_NEW_MEMBERS : 0
-  const totalMRR = useMemo(() => members.reduce((s, m) => s + (m.mrr || 0), 0), [members])
+
+  // TODO(canonical): MRR has no canonical column. Foundations membership is a
+  // recurring Stripe charge but classification (subscription vs one-off) lived
+  // in the old client-side processor and isn't preserved on Stripe rows.
+  // Leaving as null until a recurring-revenue signal is added to the schema.
+  const totalMRR: number | null = null
+
+  // Total Revenue: sum succeeded Stripe charges, amount stored in cents.
   const totalRevenue = useMemo(
-    () => transactions.reduce((s, t) => s + (Number((t as { amount?: number }).amount) || 0), 0),
-    [transactions]
+    () => stripe
+      .filter(r => String(r.status ?? '').toLowerCase() === 'succeeded')
+      .reduce((s, r) => s + num(r.amount), 0) / 100,
+    [stripe]
   )
 
   /* ── Section 2: Scale ── */
-  const totalMembers = members.length
+  const totalMembers = hubspot.length
+
+  // Health Story Completion: hubspot.health_story_complete is the boolean.
   const healthStoryComplete = useMemo(
-    () => members.filter(m => m.journeyStage !== 'registered').length,
-    [members]
+    () => hubspot.filter(r => r.health_story_complete === true).length,
+    [hubspot]
   )
   const healthStoryRate = totalMembers > 0 ? healthStoryComplete / totalMembers : 0
-  const dashboardUnlocked = useMemo(() => members.filter(m => m.dashboardUnlocked).length, [members])
+
+  // Dashboard Unlock Rate: hubspot.dashboard_unlocked boolean.
+  const dashboardUnlocked = useMemo(
+    () => hubspot.filter(r => r.dashboard_unlocked === true).length,
+    [hubspot]
+  )
   const dashboardUnlockRate = totalMembers > 0 ? dashboardUnlocked / totalMembers : 0
+
+  // TODO(canonical): "Stalled" required journey-stage classification
+  // (awaiting-results AND not unlocked). journey-stage was a derived field on
+  // the old Member type. Proxy below: has a lab_batch_tracking_number but
+  // dashboard not unlocked. Surface as TODO — proxy may over- or under-count.
   const stalledMembers = useMemo(
-    () => members.filter(m => m.journeyStage === 'awaiting-results' && !m.dashboardUnlocked).length,
-    [members]
+    () => hubspot.filter(r =>
+      r.dashboard_unlocked !== true
+      && !!r.lab_batch_tracking_number
+    ).length,
+    [hubspot]
   )
-  const insightsCalls = useMemo(
-    () => members.filter(m => m.journeyStage === 'insights-call-complete' || m.journeyStage === 'active-plan').length,
-    [members]
-  )
+
+  // TODO(canonical): Insights Calls Completed required the derived journey
+  // stages 'insights-call-complete' or 'active-plan'. No canonical column
+  // captures this — kept at null until a source column is identified.
+  const insightsCalls: number | null = null
+
+  // Avg Days to Dashboard: hubspot_created_at → dashboard_unlocked_at, days.
   const avgDaysToDashboard = useMemo(() => {
-    const unlocked = members.filter(m => m.dashboardUnlockedAt && m.createdAt)
+    const unlocked = hubspot.filter(r => r.dashboard_unlocked_at && r.hubspot_created_at)
     if (unlocked.length === 0) return null
-    const total = unlocked.reduce((s, m) => {
-      const days = (new Date(m.dashboardUnlockedAt!).getTime() - new Date(m.createdAt).getTime()) / 86_400_000
-      return s + days
+    const total = unlocked.reduce((s, r) => {
+      const a = new Date(String(r.hubspot_created_at)).getTime()
+      const b = new Date(String(r.dashboard_unlocked_at)).getTime()
+      if (isNaN(a) || isNaN(b)) return s
+      return s + (b - a) / 86_400_000
     }, 0)
     return Math.round(total / unlocked.length)
-  }, [members])
+  }, [hubspot])
 
   /* ── Section 4: Retention ── */
-  const churnedCount = useMemo(() => members.filter(m => m.journeyStage === 'churned').length, [members])
-  const monthlyChurnRate = totalMembers > 0 ? churnedCount / totalMembers : 0
-  const avgCSAT = useMemo(() => {
-    const withCsat = members.filter(m => m.csat !== null && m.csat !== undefined) as Array<{ csat: number }>
-    if (withCsat.length === 0) {
-      const ticketCsats = (tickets as Array<{ csat?: number | null }>).filter(t => t.csat != null) as Array<{ csat: number }>
-      if (ticketCsats.length === 0) return null
-      return ticketCsats.reduce((s, t) => s + t.csat, 0) / ticketCsats.length
-    }
-    return withCsat.reduce((s, m) => s + m.csat, 0) / withCsat.length
-  }, [members, tickets])
+  // 90-Day Retention: rows registered ≥90 days ago, whose case_status is not closed.
   const ninetyDayRetention = useMemo(() => {
-    const eligible = members.filter(m => m.daysSinceRegistration >= 90)
+    const now = Date.now()
+    const eligible = hubspot.filter(r => {
+      const t = new Date(String(r.hubspot_created_at ?? '')).getTime()
+      return !isNaN(t) && (now - t) / 86_400_000 >= 90
+    })
     if (eligible.length === 0) return null
-    const retained = eligible.filter(m => m.journeyStage !== 'churned' && m.caseStatus !== 'Closed').length
+    const retained = eligible.filter(r => String(r.case_status ?? '').toLowerCase() !== 'closed').length
     return retained / eligible.length
-  }, [members])
+  }, [hubspot])
+
+  // TODO(canonical): "Churned" was derived (journey-stage === 'churned').
+  // Using case_status === 'closed' as a proxy — semantically broader; flagged.
+  const churnedCount = useMemo(
+    () => hubspot.filter(r => String(r.case_status ?? '').toLowerCase() === 'closed').length,
+    [hubspot]
+  )
+  const monthlyChurnRate = totalMembers > 0 ? churnedCount / totalMembers : 0
+
+  // CSAT: average of zendesk.satisfaction_score where present.
+  const avgCSAT = useMemo(() => {
+    const scored = zendesk.filter(r => r.satisfaction_score !== null && r.satisfaction_score !== undefined)
+    if (scored.length === 0) return null
+    return scored.reduce((s, r) => s + num(r.satisfaction_score), 0) / scored.length
+  }, [zendesk])
 
   /* ── Section 5: Economics ── */
-  const totalMetaSpend = useMemo(() => metaAds.reduce((s, a) => s + (a.spend || 0), 0), [metaAds])
+  // Total Ad Spend: sum meta.spend_aud.
+  const totalMetaSpend = useMemo(
+    () => meta.reduce((s, r) => s + num(r.spend_aud), 0),
+    [meta]
+  )
+
+  // Cost per Lead: spend / sum(results || landing_page_views).
   const totalLeads = useMemo(
-    () => metaAds.reduce((s, a) => s + (a.conversions || a.landingPageViews || 0), 0),
-    [metaAds]
+    () => meta.reduce((s, r) => s + (num(r.results) || num(r.landing_page_views)), 0),
+    [meta]
   )
   const costPerLead = totalLeads > 0 ? totalMetaSpend / totalLeads : null
-  const callsBooked = useMemo(
-    () => pelagoniaOpportunities.reduce((s, o) => s + (o.callsBooked || 0), 0) || pelagoniaOpportunities.length,
-    [pelagoniaOpportunities]
+
+  // Blended CAC: spend / count of hubspot rows whose record_type is "Customer".
+  const newCustomers = useMemo(
+    () => hubspot.filter(r => {
+      const t = String(r.record_type ?? '').toLowerCase()
+      return t === 'customer'
+    }).length,
+    [hubspot]
   )
+  const derivedCAC = totalMetaSpend > 0 && newCustomers > 0 ? Math.round(totalMetaSpend / newCustomers) : null
+
+  // Calls Booked: pelagonia rows that look like appointments (record_type
+  // 'appointment' or have appointment_date). Falls back to row count.
+  const callsBooked = useMemo(() => {
+    const appts = pelagonia.filter(r =>
+      String(r.record_type ?? '').toLowerCase() === 'appointment'
+      || !!r.appointment_date
+    ).length
+    return appts > 0 ? appts : pelagonia.length
+  }, [pelagonia])
+
   const costPerBookedCall = callsBooked > 0 && totalMetaSpend > 0 ? totalMetaSpend / callsBooked : null
 
   /* ── Alerts (recomputed live) ── */
@@ -231,7 +304,7 @@ export default function DashboardPage() {
   }, [stalledMembers, avgDaysToDashboard, derivedCAC, monthlyChurnRate])
 
   /* ── Source freshness footer ── */
-  const sourceFreshness = Object.entries(lastRefreshed).map(([source, ts]) => {
+  const sourceFreshness = Object.entries(lastRefresh).map(([source, ts]) => {
     const days = ts ? Math.floor((Date.now() - new Date(ts).getTime()) / 86_400_000) : null
     const label = ts ? new Date(ts).toLocaleDateString('en-AU', { month: 'short', day: 'numeric' }) : 'Never'
     const status: Status = days === null ? 'red' : days > 14 ? 'red' : days > 7 ? 'amber' : 'green'
@@ -258,6 +331,26 @@ export default function DashboardPage() {
     <div className="space-y-6 md:space-y-10">
       <Breadcrumb items={[{ label: 'Dashboard' }]} />
 
+      {error && (
+        <div className="flex items-center justify-between rounded-lg border border-status-red/30 bg-status-red/5 px-4 py-3">
+          <p className="font-sans text-sm text-status-red">
+            Could not load dashboard data: {error}
+          </p>
+          <button
+            onClick={() => { refresh() }}
+            className="ml-4 rounded border border-status-red/40 px-3 py-1 font-sans text-xs text-status-red hover:bg-status-red/10"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {loading && !error && (
+        <div className="rounded-lg border border-dash-border bg-dash-bg/60 px-4 py-3">
+          <p className="font-sans text-sm text-dash-text-muted">Loading latest data…</p>
+        </div>
+      )}
+
       {dataMode === 'demo' && (
         <div className="rounded-lg border border-status-amber/30 bg-status-amber/5 px-4 py-3">
           <p className="font-sans text-sm text-status-amber">
@@ -281,9 +374,9 @@ export default function DashboardPage() {
           />
           <MetricTile
             label="MRR"
-            value={isEmpty(totalMRR) ? '—' : fmtCurrency(totalMRR, { compact: true })}
+            value={totalMRR === null ? '—' : fmtCurrency(totalMRR, { compact: true })}
             target="target $50K"
-            status={statusPctVsTarget(totalMRR, 50_000)}
+            status={totalMRR === null ? 'grey' : statusPctVsTarget(totalMRR, 50_000)}
             delta={null}
             href="/financial"
           />
@@ -297,9 +390,9 @@ export default function DashboardPage() {
           />
           <MetricTile
             label="Active Members"
-            value={String(activeMembers.length)}
+            value={String(activeMembersCount)}
             target={`target ${Q1_TARGET_NEW_MEMBERS}`}
-            status={statusPctVsTarget(activeMembers.length, Q1_TARGET_NEW_MEMBERS)}
+            status={statusPctVsTarget(activeMembersCount, Q1_TARGET_NEW_MEMBERS)}
             delta={null}
             href="/members"
           />
@@ -336,9 +429,9 @@ export default function DashboardPage() {
           />
           <MetricTile
             label="Insights Calls Completed"
-            value={String(insightsCalls)}
+            value={insightsCalls === null ? '—' : String(insightsCalls)}
             target="cumulative"
-            status={insightsCalls > 0 ? 'green' : 'grey'}
+            status={insightsCalls === null ? 'grey' : insightsCalls > 0 ? 'green' : 'grey'}
             delta={null}
             href="/clinical"
           />
