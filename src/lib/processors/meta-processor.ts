@@ -1,40 +1,9 @@
 import { num, int, txt, type ProcessorResult } from './_canonical-helpers'
+import { parseAusDate } from './_date-helpers'
 
-/**
- * Parse Meta-style Australian dates. Meta exports `Day`, `Starts`, `Ends`,
- * `Reporting Starts`, `Reporting Ends` in DD/M/YYYY or DD/MM/YYYY. The native
- * Date constructor parses these inconsistently (US MM/DD/YYYY assumed by V8),
- * so we parse the parts ourselves. Returns an ISO date (YYYY-MM-DD) or null
- * for empty / unparseable / sentinel values like "Ongoing".
- */
-export function parseAusDate(value: unknown): string | null {
-  if (value === null || value === undefined) return null
-  const s = String(value).trim()
-  if (s === '' || s === '-' || s.toLowerCase() === 'n/a' || s.toLowerCase() === 'ongoing') {
-    return null
-  }
-  // DD/M/YYYY or DD/MM/YYYY, optional time suffix.
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T].*)?$/)
-  if (m) {
-    const day = parseInt(m[1], 10)
-    const month = parseInt(m[2], 10)
-    const year = parseInt(m[3], 10)
-    if (
-      year >= 1970 && year < 2100
-      && month >= 1 && month <= 12
-      && day >= 1 && day <= 31
-    ) {
-      const mm = String(month).padStart(2, '0')
-      const dd = String(day).padStart(2, '0')
-      return `${year}-${mm}-${dd}`
-    }
-    return null
-  }
-  // ISO date or anything Date can parse (YYYY-MM-DD, ISO timestamps).
-  const d = new Date(s)
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10)
-  return null
-}
+// Re-exported for callers that imported it from this module before the helper
+// was extracted.
+export { parseAusDate }
 
 /**
  * Canonical Meta processor. Reads case-insensitively, tolerates whitespace,
@@ -50,8 +19,6 @@ export function processMetaCSV(data: Record<string, unknown>[]): ProcessorResult
       Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
     )
 
-    // Day is the canonical `date` column (NOT NULL in Supabase). Reject the
-    // row only if Day is missing OR un-parseable — and say which.
     const dayRaw = lc['day']
     const dayRawStr = dayRaw === null || dayRaw === undefined ? '' : String(dayRaw).trim()
     if (dayRawStr === '') {
@@ -76,8 +43,6 @@ export function processMetaCSV(data: Record<string, unknown>[]): ProcessorResult
       return
     }
 
-    // Spend column has three observed export variants. All compare case-
-    // insensitively but the lc keys preserve the original casing's lowercase.
     const spend = num(
       lc['amount spent (aud)']
       ?? lc['amount spent']
@@ -109,7 +74,4 @@ export function processMetaCSV(data: Record<string, unknown>[]): ProcessorResult
   return { validRows, errors }
 }
 
-// Backwards-compatible alias for the API route imported during PR 1.
-// Legacy `processMetaCSV(MetaAdRow[])` was removed in this hotfix — its only
-// caller (the upload page's client-side processor path) was removed in PR 2.2.
 export { processMetaCSV as processMetaToCanonical }
