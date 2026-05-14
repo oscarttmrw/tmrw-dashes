@@ -30,17 +30,17 @@ export interface NavItem {
 export const navigation: NavItem[] = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, section: 'home' },
 
-  { label: 'Financial', href: '/financial', icon: DollarSign, section: 'operations' },
-  { label: 'Members', href: '/members', icon: Users, section: 'operations' },
-  { label: 'Delivery', href: '/clinical', icon: Stethoscope, section: 'operations' },
-  { label: 'Retention', href: '/retention', icon: RefreshCw, section: 'operations' },
-  { label: 'Support', href: '/support', icon: HeadphonesIcon, section: 'operations' },
-  { label: 'Marketing', href: '/marketing', icon: Megaphone, section: 'operations' },
+  { label: 'Financial', href: '/financial', icon: DollarSign, section: 'operations', disabled: true, disabledReason: 'Coming in Phase 2.' },
+  { label: 'Members', href: '/members', icon: Users, section: 'operations', disabled: true, disabledReason: 'Coming in Phase 2.' },
+  { label: 'Delivery', href: '/clinical', icon: Stethoscope, section: 'operations', disabled: true, disabledReason: 'Coming in Phase 2.' },
+  { label: 'Retention', href: '/retention', icon: RefreshCw, section: 'operations', disabled: true, disabledReason: 'Coming in Phase 2.' },
+  { label: 'Support', href: '/support', icon: HeadphonesIcon, section: 'operations', disabled: true, disabledReason: 'Coming in Phase 2.' },
+  { label: 'Marketing', href: '/marketing', icon: Megaphone, section: 'operations', disabled: true, disabledReason: 'Coming in Phase 2.' },
 
-  { label: 'Strategy', href: '/strategy', icon: Target, section: 'management' },
-  { label: 'EOS / L10', href: '/eos', icon: ListChecks, section: 'management' },
-  { label: 'Board Pack', href: '/board-pack', icon: FileText, section: 'management' },
-  { label: 'Team', href: '/team', icon: UsersRound, section: 'management' },
+  { label: 'Strategy', href: '/strategy', icon: Target, section: 'management', disabled: true, disabledReason: 'Coming in Phase 2.' },
+  { label: 'EOS / L10', href: '/eos', icon: ListChecks, section: 'management', disabled: true, disabledReason: 'Coming in Phase 2.' },
+  { label: 'Board Pack', href: '/board-pack', icon: FileText, section: 'management', disabled: true, disabledReason: 'Coming in Phase 2.' },
+  { label: 'Team', href: '/team', icon: UsersRound, section: 'management', disabled: true, disabledReason: 'Coming in Phase 2.' },
   {
     label: 'Data Registry',
     href: '/admin/registry',

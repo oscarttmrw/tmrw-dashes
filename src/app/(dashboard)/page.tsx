@@ -25,8 +25,12 @@ interface TileProps {
 }
 
 function MetricTile({ label, value, target, delta, status, direction = 'higher-better', href }: TileProps) {
+  const tileClass = cn(
+    'flex h-full flex-col rounded-lg border border-dash-border bg-dash-surface p-3 md:p-4 transition-all duration-150',
+    href && 'hover:border-dash-border-strong hover:shadow-sm hover:-translate-y-px'
+  )
   const inner = (
-    <div className="flex h-full flex-col rounded-lg border border-dash-border bg-dash-surface p-3 md:p-4 transition-all duration-150 hover:border-dash-border-strong hover:shadow-sm hover:-translate-y-px">
+    <div className={tileClass}>
       <div className="flex items-start justify-between gap-2">
         <span className="font-sans text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary md:text-[11px]">
           {label}
@@ -371,7 +375,6 @@ export default function DashboardPage() {
             target={`target ${Q1_TARGET_NEW_MEMBERS} by Q1`}
             status={statusPctVsTarget(newMembersThisPeriod, Q1_TARGET_NEW_MEMBERS)}
             delta={{ value: Math.round((newMembersPct - 1) * 100), period: 'vs plan' }}
-            href="/members"
           />
           <MetricTile
             label="MRR"
@@ -379,7 +382,6 @@ export default function DashboardPage() {
             target="target $50K"
             status={totalMRR === null ? 'grey' : statusPctVsTarget(totalMRR, 50_000)}
             delta={null}
-            href="/financial"
           />
           <MetricTile
             label="Total Revenue"
@@ -387,7 +389,6 @@ export default function DashboardPage() {
             target="cumulative this period"
             status={totalRevenue > 0 ? 'green' : 'grey'}
             delta={null}
-            href="/financial"
           />
           <MetricTile
             label="Active Members"
@@ -395,7 +396,6 @@ export default function DashboardPage() {
             target={`target ${Q1_TARGET_NEW_MEMBERS}`}
             status={statusPctVsTarget(activeMembersCount, Q1_TARGET_NEW_MEMBERS)}
             delta={null}
-            href="/members"
           />
         </div>
       </NarrativeSection>
@@ -409,7 +409,6 @@ export default function DashboardPage() {
             target="target >85%"
             status={healthStoryRate >= 0.85 ? 'green' : healthStoryRate >= 0.7 ? 'amber' : totalMembers > 0 ? 'red' : 'grey'}
             delta={null}
-            href="/clinical"
           />
           <MetricTile
             label="Dashboard Unlock Rate"
@@ -417,7 +416,6 @@ export default function DashboardPage() {
             target="target >70%"
             status={dashboardUnlockRate >= 0.7 ? 'green' : dashboardUnlockRate >= 0.5 ? 'amber' : totalMembers > 0 ? 'red' : 'grey'}
             delta={null}
-            href="/clinical"
           />
           <MetricTile
             label="Stalled (Pit of Despair)"
@@ -426,7 +424,6 @@ export default function DashboardPage() {
             status={stalledMembers <= 10 ? 'green' : stalledMembers <= 25 ? 'amber' : 'red'}
             direction="lower-better"
             delta={null}
-            href="/clinical"
           />
           <MetricTile
             label="Insights Calls Completed"
@@ -434,7 +431,6 @@ export default function DashboardPage() {
             target="cumulative"
             status={insightsCalls === null ? 'grey' : insightsCalls > 0 ? 'green' : 'grey'}
             delta={null}
-            href="/clinical"
           />
           <MetricTile
             label="Avg Days to Dashboard"
@@ -447,7 +443,6 @@ export default function DashboardPage() {
             }
             direction="lower-better"
             delta={null}
-            href="/clinical"
           />
         </div>
       </NarrativeSection>
@@ -475,7 +470,6 @@ export default function DashboardPage() {
               : ninetyDayRetention >= 0.7 ? 'amber' : 'red'
             }
             delta={null}
-            href="/retention"
           />
           <MetricTile
             label="Monthly Churn Rate"
@@ -488,7 +482,6 @@ export default function DashboardPage() {
             }
             direction="lower-better"
             delta={null}
-            href="/retention"
           />
           <LockedTile label="NPS Score" target="target >40" reason="Coming soon — source pending" />
           <MetricTile
@@ -501,7 +494,6 @@ export default function DashboardPage() {
               : avgCSAT >= 4 ? 'amber' : 'red'
             }
             delta={null}
-            href="/support"
           />
         </div>
       </NarrativeSection>
@@ -515,7 +507,6 @@ export default function DashboardPage() {
             target="period to date"
             status={totalMetaSpend > 0 ? 'green' : 'grey'}
             delta={null}
-            href="/marketing"
           />
           <MetricTile
             label="Blended CAC"
@@ -528,7 +519,6 @@ export default function DashboardPage() {
             }
             direction="lower-better"
             delta={null}
-            href="/marketing"
           />
           <MetricTile
             label="Cost per Lead"
@@ -541,7 +531,6 @@ export default function DashboardPage() {
             }
             direction="lower-better"
             delta={null}
-            href="/marketing"
           />
           <MetricTile
             label="Calls Booked"
@@ -549,7 +538,6 @@ export default function DashboardPage() {
             target="period to date"
             status={callsBooked > 0 ? 'green' : 'grey'}
             delta={null}
-            href="/marketing"
           />
           <MetricTile
             label="Cost per Booked Call"
@@ -562,7 +550,6 @@ export default function DashboardPage() {
             }
             direction="lower-better"
             delta={null}
-            href="/marketing"
           />
         </div>
       </NarrativeSection>
