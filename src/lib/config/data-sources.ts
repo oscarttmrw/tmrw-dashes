@@ -176,9 +176,11 @@ export const metaSchema: CsvSchema = {
   source: 'meta',
   requiredColumns: [
     'Ad Set Name',
-    'Amount Spent (AUD)',
+    // Meta exports ship this column under multiple labels depending on the
+    // currency and which "Customise columns" tickbox the operator used.
+    ['Amount Spent (AUD)', 'Amount spent (AUD)', 'Amount spent', 'Amount Spent'],
     'Impressions',
-    'Clicks (All)',
+    ['Clicks (All)', 'Clicks (all)'],
     'Reporting Starts',
     'Reporting Ends',
   ],
@@ -269,19 +271,24 @@ export function getSchema(source: string): CsvSchema | undefined {
 }
 
 /**
- * Case-insensitive header validation. Returns the list of required column
- * names (in their canonical case from the schema) that are missing from
- * `headers`. Whitespace-trimmed and lowercased on both sides before compare —
- * keeps in lock-step with the processors' lowercased lookup pattern.
+ * Case-insensitive header validation. Returns the list of required-column
+ * descriptors that no header satisfies. A required column may be a single
+ * name or an array of acceptable variants (any one variant matching the
+ * headers satisfies the requirement). Both sides are lowercased + trimmed
+ * before compare — same pattern the processors use for their lc lookup.
  */
 export function validateRequiredColumns(
   schema: CsvSchema,
   headers: string[]
 ): string[] {
   const norm = headers.map(h => h.toLowerCase().trim());
-  return schema.requiredColumns.filter(
-    col => !norm.includes(col.toLowerCase().trim())
-  );
+  const missing: string[] = [];
+  for (const req of schema.requiredColumns) {
+    const variants = Array.isArray(req) ? req : [req];
+    const found = variants.some(v => norm.includes(v.toLowerCase().trim()));
+    if (!found) missing.push(variants[0]);
+  }
+  return missing;
 }
 
 /**
