@@ -32,14 +32,14 @@ export function processStripeCSV(data: Record<string, unknown>[]): ProcessorResu
     const lc = Object.fromEntries(
       Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
     )
-    const chargeId = txt(lc['id'] ?? lc['charge_id'])
+    const chargeId = txt(lc['id'])
     if (!chargeId) {
-      errors.push({ rowIndex: i, reason: `Row ${i}: missing charge id (column 'id' or 'charge_id')` })
+      errors.push({ rowIndex: i, reason: `Row ${i}: missing charge id (column 'id')` })
       return
     }
-    const createdAt = parseAusDateTime(lc['created date (utc)'] ?? lc['created'])
+    const createdAt = parseAusDateTime(lc['created date (utc)'])
     if (!createdAt) {
-      const raw = lc['created date (utc)'] ?? lc['created'] ?? ''
+      const raw = lc['created date (utc)'] ?? ''
       errors.push({ rowIndex: i, reason: `Row ${i}: created date '${String(raw)}' could not be parsed.` })
       return
     }

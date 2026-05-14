@@ -8,13 +8,14 @@ import { getMetricsPoweredBy } from '@/lib/utils/metric-source';
 
 export const hubspotSchema: CsvSchema = {
   source: 'hubspot',
+  // The HubSpot processor only rejects a row when Record ID is missing.
+  // Every other field is optional and treated as null if absent.
   requiredColumns: [
     'Record ID',
-    'Type',
-    'Created at',
-    'Primary Email',
   ],
   optionalColumns: [
+    'Type',
+    'Created at',
     'Case Status',
     'Primary Clinician',
     'Assigned Doctor',
@@ -27,16 +28,19 @@ export const hubspotSchema: CsvSchema = {
     'Last Test Date',
     'Next Retest Date',
     'Email sequence triggered',
-    'Email addresses',
     'Last interaction > When',
     'Little Prick ID',
     'Patient ID',
     'Lead',
     'Lab Batch Tracking Number',
+    'Health Story Complete',
+  ],
+  strippedColumns: [
+    'Primary Email',
+    'Email addresses',
     'Name > First',
     'Name > Last',
   ],
-  strippedColumns: [],
   canonicalColumns: [
     'hubspot_record_id',
     'record_type',
@@ -63,22 +67,25 @@ export const hubspotSchema: CsvSchema = {
 
 export const stripeSchema: CsvSchema = {
   source: 'stripe',
+  // PII-clean Stripe Charges export (13 columns). The processor strictly
+  // requires id, Created date (UTC), Amount, Currency, Status — the rest of
+  // the 13 columns are optional.
   requiredColumns: [
-    'charge_id',
-    'created',
-    'amount',
-    'currency',
-    'outcome_type',
-    'card_country',
-    'interaction_type',
+    'id',
+    'Created date (UTC)',
+    'Amount',
+    'Currency',
+    'Status',
   ],
   optionalColumns: [
-    'card_brand',
-    'failure_code',
-    'failure_message',
-    'description',
-    'fee',
-    'net',
+    'Amount Refunded',
+    'Captured',
+    'Converted Amount',
+    'Converted Currency',
+    'Decline Reason',
+    'Fee',
+    'Refunded date (UTC)',
+    'Invoice ID',
   ],
   strippedColumns: [],
   canonicalColumns: [
@@ -100,35 +107,38 @@ export const stripeSchema: CsvSchema = {
 
 export const zendeskSchema: CsvSchema = {
   source: 'zendesk',
+  // The Zendesk processor only rejects a row when ID is missing. Everything
+  // else is optional and parsed into the canonical columns when present.
   requiredColumns: [
     'ID',
-    'Status',
-    'Priority',
-    'Via',
-    'Ticket type',
-    'Created at',
-    'Updated at',
-    'Solved at',
-    'Assignee',
-    'Group',
-    'Tags',
-    'Satisfaction Score',
-    'First reply time in minutes',
-    'First reply time in minutes within business hours',
-    'First resolution time in minutes',
-    'Full resolution time in minutes within business hours',
-    'Requester wait time in minutes within business hours',
-    'Reopens',
-    'Replies',
-    'Assignee stations',
-    'Group stations',
   ],
   optionalColumns: [
+    'Created at',
+    'Status',
+    'Priority',
+    'Assignee',
+    'Group',
     'Subject',
-    'Description',
-    'Requester',
+    'Satisfaction Score',
+    // First-reply time variants observed across Zendesk export configs:
+    'First reply time in minutes',
+    'First reply time (in minutes)',
+    'First reply time (min)',
+    'First reply time',
+    // Full-resolution time variants:
+    'Full resolution time in minutes within business hours',
+    'Full resolution time in minutes',
+    'Full resolution time (in minutes)',
+    'Full resolution time (min)',
+    'Full resolution time',
   ],
-  strippedColumns: [],
+  strippedColumns: [
+    'Requester',
+    'Requester email',
+    'Requester external id',
+    'Organization',
+    'Description',
+  ],
   canonicalColumns: [
     'zendesk_ticket_id',
     'zendesk_created_at',
@@ -145,14 +155,15 @@ export const zendeskSchema: CsvSchema = {
 
 export const tableauSchema: CsvSchema = {
   source: 'tableau',
+  // The Tableau processor rejects a row only when Member Id OR Measure Names
+  // is missing — those identify the row and the metric it carries.
   requiredColumns: [
     'Member Id',
-    'Email',
-    'Created At',
     'Measure Names',
-    'Measure Values',
   ],
   optionalColumns: [
+    'Measure Values',
+    'Created At',
     'CASE_STATUS',
     'CASE_TYPE',
     'Person Type',
@@ -161,7 +172,9 @@ export const tableauSchema: CsvSchema = {
     'Dashboard Published At',
     'First Result Ready At',
   ],
-  strippedColumns: [],
+  strippedColumns: [
+    'Email',
+  ],
   canonicalColumns: [
     'member_id',
     'measure_name',
@@ -174,28 +187,35 @@ export const tableauSchema: CsvSchema = {
 
 export const metaSchema: CsvSchema = {
   source: 'meta',
+  // The Meta processor requires Day (parseable date — populates the canonical
+  // `date` column, which is NOT NULL in Supabase), Ad Set Name, and Amount
+  // Spent (under any of its known labels). Reporting Starts/Ends are not
+  // consumed by the processor.
   requiredColumns: [
+    'Day',
     'Ad Set Name',
-    // Meta exports ship this column under multiple labels depending on the
-    // currency and which "Customise columns" tickbox the operator used.
+    // Spend ships under multiple labels depending on currency and which
+    // "Customise columns" tickbox the operator used.
     ['Amount Spent (AUD)', 'Amount spent (AUD)', 'Amount spent', 'Amount Spent'],
-    'Impressions',
-    ['Clicks (All)', 'Clicks (all)'],
-    'Reporting Starts',
-    'Reporting Ends',
   ],
   optionalColumns: [
     'Campaign Name',
-    'Landing Page Views',
-    'Cost per Landing Page View (AUD)',
-    'Results',
-    'Cost per Result (AUD)',
+    'Impressions',
+    'Clicks (All)',
+    'Clicks (all)',
     'CTR (All)',
-    'Day',
     'Reach',
     'Frequency',
     'Result Type',
+    'Results',
+    'Cost per Result (AUD)',
+    'Landing Page Views',
+    'Cost per Landing Page View (AUD)',
     'Delivery Status',
+    'Reporting Starts',
+    'Reporting Ends',
+    'Starts',
+    'Ends',
   ],
   strippedColumns: [],
   canonicalColumns: [
@@ -218,22 +238,30 @@ export const metaSchema: CsvSchema = {
 
 export const pelagoniaSchema: CsvSchema = {
   source: 'pelagonia',
+  // The Pelagonia processor accepts any one of Opportunity ID / Appointment
+  // ID / Contact ID as the record-id source. Nothing else is hard-required —
+  // the processor populates from whichever columns are present.
   requiredColumns: [
-    'Opportunity ID',
-    'Stage',
-    'Value',
-    'Contact ID',
-    'Created At',
+    ['Opportunity ID', 'Appointment ID', 'Contact ID'],
   ],
   optionalColumns: [
+    'Opportunity ID',
+    'Appointment ID',
+    'Contact ID',
+    'Stage',
+    'Value',
+    'Created At',
     'Won At',
     'Calls Booked',
     'Appointment Status',
-    'Pipeline',
-    'Owner',
     'Appointment Date',
+    'Pipeline',
+    'Pipeline Stage',
+    'Status',
     'Calendar',
+    'Calendar Name',
     'Source',
+    'Owner',
     'Assigned User',
   ],
   strippedColumns: [],
@@ -328,7 +356,7 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
       'Click Payments in the left navigation.',
       'Set the date range to the period you\'re uploading.',
       'Click Export (top right) → select Charges as the data type.',
-      'Tick: charge_id, created, amount, currency, outcome_type, card_country, interaction_type, plus optional columns card_brand, failure_code, failure_message, description, fee, net.',
+      'Tick the PII-clean column set: id, Created date (UTC), Amount, Amount Refunded, Currency, Captured, Converted Amount, Converted Currency, Decline Reason, Fee, Refunded date (UTC), Status, Invoice ID.',
       'Choose CSV format.',
       'Click Export and drop the downloaded file into the upload zone below.',
     ],
