@@ -150,11 +150,12 @@ export default function DashboardPage() {
   // Leaving as null until a recurring-revenue signal is added to the schema.
   const totalMRR: number | null = null
 
-  // Total Revenue: sum succeeded Stripe charges, amount stored in cents.
+  // Total Revenue: sum succeeded Stripe charges. Stripe CSV exports `Amount`
+  // in major units (dollars), not cents — store and sum as-is.
   const totalRevenue = useMemo(
     () => stripe
       .filter(r => String(r.status ?? '').toLowerCase() === 'succeeded')
-      .reduce((s, r) => s + num(r.amount), 0) / 100,
+      .reduce((s, r) => s + num(r.amount), 0),
     [stripe]
   )
 

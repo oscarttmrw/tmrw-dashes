@@ -1,7 +1,28 @@
-import type { PelagoniaRow } from '@/lib/types/pelagonia'
-import { num, tsIso, txt, type ProcessorResult } from './_canonical-helpers'
+import { txt, type ProcessorResult } from './_canonical-helpers'
+import { parseAusDateTime } from './_date-helpers'
 
-export function processPelagoniaToCanonical(data: Record<string, unknown>[]): ProcessorResult {
+/**
+ * Strip currency symbols / commas / whitespace before numeric parse.
+ * Pelagonia (GoHighLevel) sometimes exports Value as "$1,250.00".
+ */
+function parseLooseNumber(v: unknown): number | null {
+  if (v === null || v === undefined) return null
+  const s = String(v).replace(/[^0-9.\-]/g, '').trim()
+  if (s === '' || s === '-' || s === '.') return null
+  const n = Number(s)
+  return isNaN(n) ? null : n
+}
+
+/**
+ * Canonical Pelagonia processor.
+ *
+ * record_type heuristic: a row is treated as an "appointment" if it has a
+ * populated Appointment Date OR a Calendar field. Otherwise it's an
+ * "opportunity" (pipeline row). Pelagonia/GHL exports the two record types
+ * in the same flat CSV — the discriminator below mirrors which columns the
+ * tool populates for each.
+ */
+export function processPelagoniaCSV(data: Record<string, unknown>[]): ProcessorResult {
   const validRows: Record<string, unknown>[] = []
   const errors: { rowIndex: number; reason: string }[] = []
 
@@ -11,66 +32,43 @@ export function processPelagoniaToCanonical(data: Record<string, unknown>[]): Pr
     )
 
     const opportunityId = txt(lc['opportunity id'])
-    const appointmentDate = tsIso(lc['appointment date'])
+    const appointmentId = txt(lc['appointment id'])
+    const appointmentDate = parseAusDateTime(lc['appointment date'])
     const calendar = txt(lc['calendar'] ?? lc['calendar name'])
-    const recordId = opportunityId ?? txt(lc['appointment id']) ?? txt(lc['contact id'])
+    const recordId = opportunityId ?? appointmentId ?? txt(lc['contact id'])
 
     if (!recordId) {
-      errors.push({ rowIndex: i, reason: `Row ${i}: missing record id (Opportunity ID / Appointment ID)` })
+      errors.push({
+        rowIndex: i,
+        reason: `Row ${i}: missing record id (Opportunity ID / Appointment ID / Contact ID)`,
+      })
       return
     }
 
-    const recordType = appointmentDate || calendar ? 'appointment' : 'opportunity'
+    const isAppointment = !!appointmentDate || !!calendar || !!appointmentId
+    const recordType = isAppointment ? 'appointment' : 'opportunity'
+
+    const status = isAppointment
+      ? txt(lc['appointment status'] ?? lc['status'] ?? lc['stage'])
+      : txt(lc['stage'] ?? lc['pipeline stage'] ?? lc['status'])
+
+    const stageRaw = txt(lc['stage'] ?? lc['pipeline stage'] ?? lc['pipeline'])
 
     validRows.push({
       pelagonia_record_id: recordId,
       record_type: recordType,
-      pelagonia_created_at: tsIso(lc['created at']),
+      pelagonia_created_at: parseAusDateTime(lc['created at']),
       appointment_date: appointmentDate,
-      status: txt(lc['stage'] ?? lc['appointment status'] ?? lc['status']),
-      pipeline_stage: txt(lc['stage'] ?? lc['pipeline stage'] ?? lc['pipeline']),
+      status: status === null ? null : status.toLowerCase(),
+      pipeline_stage: stageRaw,
       calendar_name: calendar,
       source: txt(lc['source']),
       assigned_user: txt(lc['owner'] ?? lc['assigned user']),
-      value: num(lc['value']),
+      value: parseLooseNumber(lc['value']),
     })
   })
 
   return { validRows, errors }
 }
 
-function parseNum(value: string | undefined): number {
-  if (!value || value.trim() === '' || value.trim() === '-') return 0
-  return parseFloat(value.replace(/[,$]/g, '').trim()) || 0
-}
-
-function parseDateOrNull(value: string | undefined): string | null {
-  if (!value || value.trim() === '' || value.toLowerCase() === 'n/a') return null
-  const d = new Date(value.trim())
-  return isNaN(d.getTime()) ? null : d.toISOString()
-}
-
-const WON_STAGES = ['won', 'closed won', 'closed - won', 'converted']
-
-export function processPelagoniaCSV(data: Record<string, string>[]): PelagoniaRow[] {
-  return data
-    .filter((row) => row['Opportunity ID']?.trim() || row['Contact ID']?.trim())
-    .map((row): PelagoniaRow => {
-      const stage = row['Stage']?.trim() ?? ''
-      const isWon =
-        WON_STAGES.includes(stage.toLowerCase()) ||
-        Boolean(row['Won At']?.trim() && row['Won At']?.trim() !== 'n/a')
-
-      return {
-        opportunityId: row['Opportunity ID']?.trim() ?? '',
-        stage,
-        value: parseNum(row['Value']),
-        contactId: row['Contact ID']?.trim() ?? '',
-        createdAt: parseDateOrNull(row['Created At']),
-        wonAt: parseDateOrNull(row['Won At']),
-        callsBooked: parseNum(row['Calls Booked']),
-        appointmentStatus: row['Appointment Status']?.trim() ?? '',
-        isWon,
-      }
-    })
-}
+export { processPelagoniaCSV as processPelagoniaToCanonical }
