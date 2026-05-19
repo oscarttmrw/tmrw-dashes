@@ -1,15 +1,11 @@
 import { num, txt, bool, type ProcessorResult } from './_canonical-helpers'
-import { parseAusDateTime } from './_date-helpers'
 
-function normalizeStripeStatus(raw: unknown): string | null {
-  const s = String(raw ?? '').trim().toLowerCase()
-  if (!s) return null
-  if (s === 'paid' || s === 'succeeded') return 'succeeded'
-  if (s === 'refunded') return 'refunded'
-  if (s === 'failed') return 'failed'
-  if (s === 'disputed') return 'disputed'
-  if (s === 'pending') return 'pending'
-  return s
+function parseISODateTime(v: unknown): string | null {
+  if (!v) return null
+  const s = String(v).trim()
+  if (s === '') return null
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? null : d.toISOString()
 }
 
 function upperTxt(v: unknown): string | null {
@@ -17,14 +13,28 @@ function upperTxt(v: unknown): string | null {
   return t === null ? null : t.toUpperCase()
 }
 
+function parseJsonb(v: unknown): unknown {
+  if (v === null || v === undefined || v === '') return null
+  if (typeof v === 'object') return v
+  const s = String(v).trim()
+  if (s === '') return null
+  try {
+    return JSON.parse(s)
+  } catch {
+    // If it isn't valid JSON, store as null rather than corrupt jsonb.
+    return null
+  }
+}
+
 /**
- * Canonical Stripe processor. Reads case-insensitively, parses Stripe's
- * "Created date (UTC)" / "Refunded date (UTC)" Australian datetime format,
- * stores Amount in major units (dollars) — Stripe's CSV exports `Amount`
- * already in major units (not cents). Currency is upper-cased; Captured is
- * parsed as a real boolean.
+ * Stripe processor (Fivetran-export shape). Verbatim mirror — column headers
+ * map 1:1 to Supabase columns. NOTE: AMOUNT is in cents (Fivetran/API
+ * representation, e.g. 8950 = $89.50). Downstream metric code must divide by 100.
+ *
+ * No charge ID column — dedup relies on the date-range-replace strategy
+ * configured in the upload route, keyed on `created`.
  */
-export function processStripeCSV(data: Record<string, unknown>[]): ProcessorResult {
+export function processStripeFivetran(data: Record<string, unknown>[]): ProcessorResult {
   const validRows: Record<string, unknown>[] = []
   const errors: { rowIndex: number; reason: string }[] = []
 
@@ -32,35 +42,50 @@ export function processStripeCSV(data: Record<string, unknown>[]): ProcessorResu
     const lc = Object.fromEntries(
       Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
     )
-    const chargeId = txt(lc['id'])
-    if (!chargeId) {
-      errors.push({ rowIndex: i, reason: `Row ${i}: missing charge id (column 'id')` })
+
+    const created = parseISODateTime(lc['created'])
+    if (!created) {
+      errors.push({ rowIndex: i, reason: `Row ${i}: missing or invalid CREATED` })
       return
     }
-    const createdAt = parseAusDateTime(lc['created date (utc)'])
-    if (!createdAt) {
-      const raw = lc['created date (utc)'] ?? ''
-      errors.push({ rowIndex: i, reason: `Row ${i}: created date '${String(raw)}' could not be parsed.` })
+
+    const amount = num(lc['amount'])
+    if (amount === null) {
+      errors.push({ rowIndex: i, reason: `Row ${i}: missing AMOUNT` })
       return
     }
+
     validRows.push({
-      stripe_charge_id: chargeId,
-      created_at: createdAt,
-      amount: num(lc['amount']),
-      amount_refunded: num(lc['amount refunded'] ?? lc['amount_refunded']),
-      currency: upperTxt(lc['currency']),
+      amount,
+      amount_refunded: num(lc['amount_refunded']),
+      application: txt(lc['application']),
+      application_fee_amount: num(lc['application_fee_amount']),
+      calculated_statement_descriptor: txt(lc['calculated_statement_descriptor']),
       captured: bool(lc['captured']),
-      converted_amount: num(lc['converted amount'] ?? lc['converted_amount']),
-      converted_currency: upperTxt(lc['converted currency'] ?? lc['converted_currency']),
-      decline_reason: txt(lc['decline reason'] ?? lc['failure_message'] ?? lc['decline_reason']),
-      fee: num(lc['fee']),
-      refunded_date: parseAusDateTime(lc['refunded date (utc)'] ?? lc['refunded_date']),
-      status: normalizeStripeStatus(lc['status']),
-      invoice_id: txt(lc['invoice id'] ?? lc['invoice_id']),
+      created,
+      currency: upperTxt(lc['currency']),
+      description: txt(lc['description']),
+      failure_code: txt(lc['failure_code']),
+      fraud_details_user_report: txt(lc['fraud_details_user_report']),
+      fraud_details_stripe_report: txt(lc['fraud_details_stripe_report']),
+      livemode: bool(lc['livemode']),
+      metadata: parseJsonb(lc['metadata']),
+      outcome_network_status: txt(lc['outcome_network_status']),
+      outcome_risk_level: txt(lc['outcome_risk_level']),
+      outcome_seller_message: txt(lc['outcome_seller_message']),
+      outcome_type: txt(lc['outcome_type']),
+      paid: bool(lc['paid']),
+      refunded: bool(lc['refunded']),
+      status: txt(lc['status']),
+      invoice_id: txt(lc['invoice_id']),
+      fivetran_synced: parseISODateTime(lc['_fivetran_synced']),
+      outcome_network_decline_code: txt(lc['outcome_network_decline_code']),
+      failure_balance_transaction_id: txt(lc['failure_balance_transaction_id']),
+      amount_captured: num(lc['amount_captured']),
     })
   })
 
   return { validRows, errors }
 }
 
-export { processStripeCSV as processStripeToCanonical }
+export { processStripeFivetran as processStripeToCanonical }

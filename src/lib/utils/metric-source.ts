@@ -52,7 +52,8 @@ export function getMetricsPoweredBy(source: string): string[] {
     hubspot: ['hubspot', 'hubspot-marketing'],
     stripe: ['stripe'],
     zendesk: ['zendesk'],
-    meta: ['meta'],
+    meta_ads: ['meta_ads'],
+    social_organic: ['social_organic'],
     pelagonia: ['pelagonia'],
   }
   const ids = registryIds[source] ?? []

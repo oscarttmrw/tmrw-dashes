@@ -67,41 +67,67 @@ export const hubspotSchema: CsvSchema = {
 
 export const stripeSchema: CsvSchema = {
   source: 'stripe',
-  // PII-clean Stripe Charges export (13 columns). The processor strictly
-  // requires id, Created date (UTC), Amount, Currency, Status — the rest of
-  // the 13 columns are optional.
+  // Fivetran-shape Stripe export. No charge ID column (intentionally removed
+  // at source). Dedup is handled by date-range-replace strategy keyed on `created`.
+  // Required: CREATED, AMOUNT, STATUS — everything else optional.
   requiredColumns: [
-    'id',
-    'Created date (UTC)',
-    'Amount',
-    'Currency',
-    'Status',
+    'CREATED',
+    'AMOUNT',
+    'STATUS',
   ],
   optionalColumns: [
-    'Amount Refunded',
-    'Captured',
-    'Converted Amount',
-    'Converted Currency',
-    'Decline Reason',
-    'Fee',
-    'Refunded date (UTC)',
-    'Invoice ID',
+    'AMOUNT_REFUNDED',
+    'APPLICATION',
+    'APPLICATION_FEE_AMOUNT',
+    'CALCULATED_STATEMENT_DESCRIPTOR',
+    'CAPTURED',
+    'CURRENCY',
+    'DESCRIPTION',
+    'FAILURE_CODE',
+    'FRAUD_DETAILS_USER_REPORT',
+    'FRAUD_DETAILS_STRIPE_REPORT',
+    'LIVEMODE',
+    'METADATA',
+    'OUTCOME_NETWORK_STATUS',
+    'OUTCOME_RISK_LEVEL',
+    'OUTCOME_SELLER_MESSAGE',
+    'OUTCOME_TYPE',
+    'PAID',
+    'REFUNDED',
+    'INVOICE_ID',
+    '_FIVETRAN_SYNCED',
+    'OUTCOME_NETWORK_DECLINE_CODE',
+    'FAILURE_BALANCE_TRANSACTION_ID',
+    'AMOUNT_CAPTURED',
   ],
   strippedColumns: [],
   canonicalColumns: [
-    'stripe_charge_id',
-    'created_at',
     'amount',
     'amount_refunded',
-    'currency',
+    'application',
+    'application_fee_amount',
+    'calculated_statement_descriptor',
     'captured',
-    'converted_amount',
-    'converted_currency',
-    'decline_reason',
-    'fee',
-    'refunded_date',
+    'created',
+    'currency',
+    'description',
+    'failure_code',
+    'fraud_details_user_report',
+    'fraud_details_stripe_report',
+    'livemode',
+    'metadata',
+    'outcome_network_status',
+    'outcome_risk_level',
+    'outcome_seller_message',
+    'outcome_type',
+    'paid',
+    'refunded',
     'status',
     'invoice_id',
+    'fivetran_synced',
+    'outcome_network_decline_code',
+    'failure_balance_transaction_id',
+    'amount_captured',
   ],
 };
 
@@ -185,54 +211,67 @@ export const tableauSchema: CsvSchema = {
   ],
 };
 
-export const metaSchema: CsvSchema = {
-  source: 'meta',
-  // The Meta processor requires Day (parseable date — populates the canonical
-  // `date` column, which is NOT NULL in Supabase), Ad Set Name, and Amount
-  // Spent (under any of its known labels). Reporting Starts/Ends are not
-  // consumed by the processor.
+export const metaAdsSchema: CsvSchema = {
+  source: 'meta_ads',
+  // Daily aggregate paid Meta performance. One row per day for now.
+  // When Campaign Name (OTW) lands, this becomes (date, campaign_name) composite.
   requiredColumns: [
-    'Day',
-    'Ad Set Name',
-    // Spend ships under multiple labels depending on currency and which
-    // "Customise columns" tickbox the operator used.
-    ['Amount Spent (AUD)', 'Amount spent (AUD)', 'Amount spent', 'Amount Spent'],
+    'Date',
+    ['Spend ($)', 'Spend'],
   ],
   optionalColumns: [
-    'Campaign Name',
     'Impressions',
-    'Clicks (All)',
-    'Clicks (all)',
-    'CTR (All)',
-    'Reach',
-    'Frequency',
-    'Result Type',
-    'Results',
-    'Cost per Result (AUD)',
+    'CTR (%)',
+    'Clicks',
     'Landing Page Views',
-    'Cost per Landing Page View (AUD)',
-    'Delivery Status',
-    'Reporting Starts',
-    'Reporting Ends',
-    'Starts',
-    'Ends',
+    'Cost per LPV ($)',
+    'Conversions (Leads)',
+    'Cost per Conversion ($)',
+    'Video Views',
+    'Post Engagements',
+    // OTW: 'Campaign Name'
   ],
   strippedColumns: [],
   canonicalColumns: [
     'date',
-    'ad_set_name',
-    'spend_aud',
+    'spend',
     'impressions',
-    'clicks',
     'ctr',
-    'reach',
-    'frequency',
-    'result_type',
-    'results',
-    'cost_per_result',
+    'clicks',
     'landing_page_views',
-    'cost_per_landing_page_view',
-    'delivery_status',
+    'cost_per_lpv',
+    'conversions_leads',
+    'cost_per_conversion',
+    'video_views',
+    'post_engagements',
+  ],
+};
+
+export const socialOrganicSchema: CsvSchema = {
+  source: 'social_organic',
+  // Accepts EITHER:
+  //   - Followers sheet: Platform | Followers | Notes   (no date — uses upload date)
+  //   - Views sheet:     Date | Platform | Page Views | Video Views | Post Engagements
+  // The processor detects shape by column signature.
+  // Required check just ensures Platform exists (true in both shapes).
+  requiredColumns: [
+    'Platform',
+  ],
+  optionalColumns: [
+    'Date',
+    'Followers',
+    'Notes',
+    'Page Views',
+    'Video Views',
+    'Post Engagements',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'date',
+    'platform',
+    'metric_name',
+    'metric_value',
+    'notes',
   ],
 };
 
@@ -287,7 +326,8 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   stripe: stripeSchema,
   zendesk: zendeskSchema,
   tableau: tableauSchema,
-  meta: metaSchema,
+  meta_ads: metaAdsSchema,
+  social_organic: socialOrganicSchema,
   pelagonia: pelagoniaSchema,
 };
 
@@ -352,13 +392,11 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
   stripe: {
     name: 'Stripe',
     exportSteps: [
-      'Log in to dashboard.stripe.com.',
-      'Click Payments in the left navigation.',
-      'Set the date range to the period you\'re uploading.',
-      'Click Export (top right) → select Charges as the data type.',
-      'Tick the PII-clean column set: id, Created date (UTC), Amount, Amount Refunded, Currency, Captured, Converted Amount, Converted Currency, Decline Reason, Fee, Refunded date (UTC), Status, Invoice ID.',
-      'Choose CSV format.',
-      'Click Export and drop the downloaded file into the upload zone below.',
+      'Export Stripe charges from your Fivetran-managed pipeline.',
+      'Required columns: CREATED, AMOUNT, STATUS.',
+      'Optional but recommended: AMOUNT_REFUNDED, INVOICE_ID, OUTCOME_TYPE, OUTCOME_NETWORK_STATUS, CURRENCY, CAPTURED, PAID, REFUNDED, _FIVETRAN_SYNCED, AMOUNT_CAPTURED.',
+      'NOTE: amounts are in cents (Fivetran/API representation), not dollars.',
+      'Drop the CSV into the Stripe upload zone.',
     ],
     poweredMetrics: getMetricsPoweredBy('stripe'),
   },
@@ -375,17 +413,27 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
     ],
     poweredMetrics: getMetricsPoweredBy('zendesk'),
   },
-  meta: {
-    name: 'Meta for Business',
+  meta_ads: {
+    name: 'Meta Ads',
     exportSteps: [
-      'Log in to business.facebook.com and open Ads Manager.',
-      'Select the ad account for TMRW.',
-      'Set your date range in the top-right date picker.',
-      'Click the Columns dropdown → Customise columns. Add: Ad Set Name, Amount Spent, Impressions, Clicks (All), Landing Page Views, Cost per Landing Page View, Results, Cost per Result, CTR (All), Reporting Starts, Reporting Ends.',
-      'Click the Export button (top right) → Export Table Data → .csv.',
-      'Drop the downloaded file into the upload zone below.',
+      'Open the TMRW_MARKETING_DATA workbook.',
+      'Locate the "Meta Ads" sheet — one row per day with daily aggregate ad performance.',
+      'Save just that sheet as CSV or XLSX (File → Save As → select sheet only).',
+      'Drop the file into the Meta Ads upload zone.',
+      'Required columns: Date, Spend ($). Optional: Impressions, CTR (%), Clicks, Landing Page Views, Cost per LPV ($), Conversions (Leads), Cost per Conversion ($), Video Views, Post Engagements.',
     ],
-    poweredMetrics: getMetricsPoweredBy('meta'),
+    poweredMetrics: getMetricsPoweredBy('meta_ads'),
+  },
+  social_organic: {
+    name: 'Social Organic',
+    exportSteps: [
+      'Open the TMRW_MARKETING_DATA workbook.',
+      'Two sheets feed this source — upload them one at a time:',
+      '  • "Social Media Followers" — Platform, Followers, Notes (uploaded date used as snapshot date).',
+      '  • "Social Media Views"     — Date, Platform, Page Views, Video Views, Post Engagements.',
+      'Save the sheet as CSV or XLSX, then drop into the Social Organic upload zone.',
+    ],
+    poweredMetrics: getMetricsPoweredBy('social_organic'),
   },
   pelagonia: {
     name: 'Pelagonia (GoHighLevel)',

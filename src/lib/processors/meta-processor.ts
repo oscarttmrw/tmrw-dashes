@@ -1,16 +1,25 @@
-import { num, int, txt, type ProcessorResult } from './_canonical-helpers'
-import { parseAusDate } from './_date-helpers'
+import { num, type ProcessorResult } from './_canonical-helpers'
 
-// Re-exported for callers that imported it from this module before the helper
-// was extracted.
-export { parseAusDate }
+function parseIntFlexible(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null
+  const s = String(v).replace(/,/g, '').trim()
+  if (s === '') return null
+  const n = parseInt(s, 10)
+  return isNaN(n) ? null : n
+}
+
+function parseDateOnly(v: unknown): string | null {
+  if (!v) return null
+  const d = new Date(String(v))
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+}
 
 /**
- * Canonical Meta processor. Reads case-insensitively, tolerates whitespace,
- * empty fields, the literal "Ongoing" in Ends-style columns, and Meta's
- * Australian date format.
+ * Meta Ads processor. Daily aggregate paid Meta performance.
+ * Verbatim mirror — TMRW_MARKETING_DATA "Meta Ads" sheet → meta_ads table.
+ * Numeric strings with comma separators are handled (e.g. "3,662" → 3662).
  */
-export function processMetaCSV(data: Record<string, unknown>[]): ProcessorResult {
+export function processMetaAds(data: Record<string, unknown>[]): ProcessorResult {
   const validRows: Record<string, unknown>[] = []
   const errors: { rowIndex: number; reason: string }[] = []
 
@@ -19,59 +28,35 @@ export function processMetaCSV(data: Record<string, unknown>[]): ProcessorResult
       Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
     )
 
-    const dayRaw = lc['day']
-    const dayRawStr = dayRaw === null || dayRaw === undefined ? '' : String(dayRaw).trim()
-    if (dayRawStr === '') {
-      errors.push({
-        rowIndex: i,
-        reason: `Row ${i}: Day field empty. Re-export with 'Breakdown by Day' enabled in Meta Ads Manager.`,
-      })
-      return
-    }
-    const day = parseAusDate(dayRawStr)
-    if (!day) {
-      errors.push({
-        rowIndex: i,
-        reason: `Row ${i}: Day '${dayRawStr}' could not be parsed as a date.`,
-      })
+    const date = parseDateOnly(lc['date'])
+    if (!date) {
+      errors.push({ rowIndex: i, reason: `Row ${i}: missing or invalid Date` })
       return
     }
 
-    const adSet = txt(lc['ad set name'])
-    if (!adSet) {
-      errors.push({ rowIndex: i, reason: `Row ${i}: Ad Set Name required` })
+    const spend = num(lc['spend ($)'] ?? lc['spend'])
+    if (spend === null) {
+      errors.push({ rowIndex: i, reason: `Row ${i}: missing Spend` })
       return
     }
-
-    const spend = num(
-      lc['amount spent (aud)']
-      ?? lc['amount spent']
-      ?? lc['amount_spent_(aud)']
-      ?? lc['amount_spent']
-    )
 
     validRows.push({
-      date: day,
-      ad_set_name: adSet,
-      spend_aud: spend,
-      impressions: int(lc['impressions']),
-      clicks: int(lc['clicks (all)'] ?? lc['clicks_(all)'] ?? lc['clicks']),
-      ctr: num(lc['ctr (all)'] ?? lc['ctr_(all)'] ?? lc['ctr']),
-      reach: int(lc['reach']),
-      frequency: num(lc['frequency']),
-      result_type: txt(lc['result type']),
-      results: int(lc['results']),
-      cost_per_result: num(lc['cost per result (aud)'] ?? lc['cost per result']),
-      landing_page_views: int(lc['landing page views']),
-      cost_per_landing_page_view: num(
-        lc['cost per landing page view (aud)']
-        ?? lc['cost per landing page view']
-      ),
-      delivery_status: txt(lc['delivery status']),
+      date,
+      spend,
+      impressions: parseIntFlexible(lc['impressions']),
+      ctr: num(lc['ctr (%)'] ?? lc['ctr']),
+      clicks: parseIntFlexible(lc['clicks']),
+      landing_page_views: parseIntFlexible(lc['landing page views']),
+      cost_per_lpv: num(lc['cost per lpv ($)'] ?? lc['cost per lpv']),
+      conversions_leads: parseIntFlexible(lc['conversions (leads)'] ?? lc['conversions']),
+      cost_per_conversion: num(lc['cost per conversion ($)'] ?? lc['cost per conversion']),
+      video_views: parseIntFlexible(lc['video views']),
+      post_engagements: parseIntFlexible(lc['post engagements']),
     })
   })
 
   return { validRows, errors }
 }
 
-export { processMetaCSV as processMetaToCanonical }
+// Alias kept for compatibility with the SOURCE_PROCESSOR map naming convention.
+export { processMetaAds as processMetaAdsToCanonical }

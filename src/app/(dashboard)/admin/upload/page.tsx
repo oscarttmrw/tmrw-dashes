@@ -25,7 +25,8 @@ import { cn } from '@/lib/utils'
 // ---------------------------------------------------------------------------
 
 const DATE_COL: Partial<Record<string, string>> = {
-  meta: 'reporting starts',
+  meta_ads: 'date',
+  social_organic: 'date',
   stripe: 'created',
   zendesk: 'created at',
   hubspot: 'created at',
@@ -52,17 +53,7 @@ function detectDateRange(
   }
   if (!timestamps.length) return { from: null, to: null }
 
-  // For Meta, also check 'Reporting Ends' for the upper bound
-  let maxTs = Math.max(...timestamps)
-  if (sourceKey === 'meta') {
-    const endKey = Object.keys(rows[0]).find(k => k.toLowerCase().trim() === 'reporting ends')
-    if (endKey) {
-      for (const row of rows) {
-        const d = new Date(row[endKey])
-        if (!isNaN(d.getTime())) maxTs = Math.max(maxTs, d.getTime())
-      }
-    }
-  }
+  const maxTs = Math.max(...timestamps)
 
   return {
     from: new Date(Math.min(...timestamps)).toISOString().split('T')[0],
@@ -84,7 +75,7 @@ function formatDateLabel(from: string | null, to: string | null): string {
 // Types
 // ---------------------------------------------------------------------------
 
-type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta' | 'pelagonia'
+type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta_ads' | 'social_organic' | 'pelagonia'
 
 interface PendingUpload {
   file: File
@@ -120,12 +111,13 @@ interface DataSourceConfig {
 // Sorted descending by metrics powered
 const dataSources: DataSourceConfig[] = (
   [
-    { key: 'pelagonia', name: 'PELAGONIA (GOHIGHLEVEL)', recordLabel: 'opportunities', columnLabel: 'columns' },
-    { key: 'meta',      name: 'META FOR BUSINESS',       recordLabel: 'ad sets',       columnLabel: 'columns' },
-    { key: 'zendesk',   name: 'ZENDESK',                 recordLabel: 'records',        columnLabel: 'columns' },
-    { key: 'hubspot',   name: 'HUBSPOT',                 recordLabel: 'records',        columnLabel: 'columns' },
-    { key: 'stripe',    name: 'STRIPE',                  recordLabel: 'transactions',   columnLabel: 'columns' },
-    { key: 'tableau',   name: 'TABLEAU',                 recordLabel: 'members',        columnLabel: 'measures', note: 'TSV file with UTF-16 encoding handled automatically' },
+    { key: 'pelagonia',      name: 'PELAGONIA (GOHIGHLEVEL)', recordLabel: 'opportunities', columnLabel: 'columns' },
+    { key: 'meta_ads',       name: 'META ADS',                recordLabel: 'days',          columnLabel: 'columns' },
+    { key: 'social_organic', name: 'SOCIAL ORGANIC',          recordLabel: 'metric rows',   columnLabel: 'columns' },
+    { key: 'zendesk',        name: 'ZENDESK',                 recordLabel: 'records',       columnLabel: 'columns' },
+    { key: 'hubspot',        name: 'HUBSPOT',                 recordLabel: 'records',       columnLabel: 'columns' },
+    { key: 'stripe',         name: 'STRIPE',                  recordLabel: 'transactions',  columnLabel: 'columns' },
+    { key: 'tableau',        name: 'TABLEAU',                 recordLabel: 'members',       columnLabel: 'measures', note: 'TSV file with UTF-16 encoding handled automatically' },
   ] as DataSourceConfig[]
 ).sort((a, b) => getMetricsPoweredBy(b.key).length - getMetricsPoweredBy(a.key).length)
 

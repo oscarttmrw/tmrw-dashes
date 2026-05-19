@@ -7,7 +7,8 @@ import {
   upsertStrategy,
   appendStrategy,
 } from '@/lib/upload-strategies'
-import { processMetaToCanonical } from '@/lib/processors/meta-processor'
+import { processMetaAdsToCanonical } from '@/lib/processors/meta-processor'
+import { processSocialOrganicToCanonical } from '@/lib/processors/social-organic-processor'
 import { processStripeToCanonical } from '@/lib/processors/stripe-processor'
 import { processHubspotToCanonical } from '@/lib/processors/hubspot-processor'
 import { processPelagoniaToCanonical } from '@/lib/processors/pelagonia-processor'
@@ -15,28 +16,31 @@ import { processTableauToCanonical } from '@/lib/processors/tableau-processor'
 import { processZendeskToCanonical } from '@/lib/processors/zendesk-processor'
 import type { ProcessorResult } from '@/lib/processors/_canonical-helpers'
 
-type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta' | 'pelagonia'
+type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta_ads' | 'social_organic' | 'pelagonia'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
   tableau: 'tableau_data',
   hubspot: 'hubspot_data',
   stripe: 'stripe_data',
   zendesk: 'zendesk_data',
-  meta: 'meta_data',
+  meta_ads: 'meta_ads',
+  social_organic: 'social_organic',
   pelagonia: 'pelagonia_data',
 }
 
 const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   tableau: null,
   hubspot: null,
-  stripe: 'created_at',
+  stripe: 'created',
   zendesk: null,
-  meta: 'date',
+  meta_ads: 'date',
+  social_organic: 'date',
   pelagonia: 'pelagonia_created_at',
 }
 
 const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => ProcessorResult> = {
-  meta: processMetaToCanonical,
+  meta_ads: processMetaAdsToCanonical,
+  social_organic: processSocialOrganicToCanonical,
   stripe: processStripeToCanonical,
   hubspot: processHubspotToCanonical,
   pelagonia: processPelagoniaToCanonical,
@@ -56,9 +60,12 @@ async function applyWriteStrategy(
     case 'hubspot':
       return fullReplaceStrategy(supabase, table, batchId, rows)
     case 'stripe':
-      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created_at')
-    case 'meta':
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created')
+    case 'meta_ads':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'date')
+    case 'social_organic':
+      // Upsert on the composite unique constraint so re-uploads update in place.
+      return upsertStrategy(supabase, table, batchId, rows, 'date,platform,metric_name')
     case 'pelagonia':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'pelagonia_created_at')
     case 'zendesk':
