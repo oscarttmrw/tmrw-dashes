@@ -124,7 +124,7 @@ const Q1_TARGET_NEW_MEMBERS = 183
 
 export default function DashboardPage() {
   const {
-    meta,
+    metaAds,
     stripe,
     hubspot,
     pelagonia,
@@ -154,12 +154,12 @@ export default function DashboardPage() {
   // Leaving as null until a recurring-revenue signal is added to the schema.
   const totalMRR: number | null = null
 
-  // Total Revenue: sum succeeded Stripe charges. Stripe CSV exports `Amount`
-  // in major units (dollars), not cents — store and sum as-is.
+  // Total Revenue: sum succeeded Stripe charges. Fivetran-shape export stores
+  // AMOUNT in CENTS (e.g. 8950 = $89.50). Divide by 100 to convert to dollars.
   const totalRevenue = useMemo(
     () => stripe
       .filter(r => String(r.status ?? '').toLowerCase() === 'succeeded')
-      .reduce((s, r) => s + num(r.amount), 0),
+      .reduce((s, r) => s + num(r.amount) / 100, 0),
     [stripe]
   )
 
@@ -239,16 +239,19 @@ export default function DashboardPage() {
   }, [zendesk])
 
   /* ── Section 5: Economics ── */
-  // Total Ad Spend: sum meta.spend_aud.
+  // Total Ad Spend: sum metaAds.spend (dollars).
   const totalMetaSpend = useMemo(
-    () => meta.reduce((s, r) => s + num(r.spend_aud), 0),
-    [meta]
+    () => metaAds.reduce((s, r) => s + num(r.spend), 0),
+    [metaAds]
   )
 
-  // Cost per Lead: spend / sum(results || landing_page_views).
+  // Cost per Lead: spend / sum(conversions_leads, falling back to landing_page_views).
   const totalLeads = useMemo(
-    () => meta.reduce((s, r) => s + (num(r.results) || num(r.landing_page_views)), 0),
-    [meta]
+    () => metaAds.reduce(
+      (s, r) => s + (num(r.conversions_leads) || num(r.landing_page_views)),
+      0
+    ),
+    [metaAds]
   )
   const costPerLead = totalLeads > 0 ? totalMetaSpend / totalLeads : null
 

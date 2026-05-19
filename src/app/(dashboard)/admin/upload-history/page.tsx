@@ -25,7 +25,7 @@ interface UploadLogRow {
   data_period_label: string | null
 }
 
-const ALL_SOURCES = ['pelagonia', 'meta', 'zendesk', 'hubspot', 'stripe', 'tableau'] as const
+const ALL_SOURCES = ['pelagonia', 'meta_ads', 'social_organic', 'zendesk', 'hubspot', 'stripe', 'tableau'] as const
 const ALL_STATUSES = ['complete', 'pending', 'failed'] as const
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react'
 import type { Member, Transaction, Ticket, Clinician, Alert, Rock } from '@/lib/types'
-import type { MetaAdRow } from '@/lib/types/meta'
 import type { PelagoniaRow } from '@/lib/types/pelagonia'
 import type { ManualMetrics } from '@/data/mock/manual-metrics'
 import {
@@ -21,20 +20,14 @@ import {
 
 export type DataMode = 'demo' | 'actual'
 
-// Canonical row shapes returned by /api/data/latest. Typed as unknown-records
-// here because the dashboard pages haven't been migrated to consume canonical
-// columns yet (that's PR 3 / future work).
 export type CanonicalRow = Record<string, unknown>
 
 export interface DashboardData {
   // Legacy domain-shaped arrays — still exposed so existing pages don't crash.
-  // Populated only from demo mode; in 'actual' mode they remain empty until a
-  // future PR maps canonical rows to these shapes.
   members: Member[]
   transactions: Transaction[]
   tickets: Ticket[]
   clinicians: Clinician[]
-  metaAds: MetaAdRow[]
   pelagoniaOpportunities: PelagoniaRow[]
   manualMetrics: ManualMetrics
   rocks: Rock[]
@@ -42,8 +35,9 @@ export interface DashboardData {
   isUsingMockData: boolean
   dataMode: DataMode
 
-  // Canonical Supabase row arrays — the source of truth going forward.
-  meta: CanonicalRow[]
+  // Canonical Supabase row arrays — source of truth.
+  metaAds: CanonicalRow[]
+  socialOrganic: CanonicalRow[]
   stripe: CanonicalRow[]
   hubspot: CanonicalRow[]
   pelagonia: CanonicalRow[]
@@ -51,7 +45,6 @@ export interface DashboardData {
   zendesk: CanonicalRow[]
 
   lastRefresh: Record<string, string | null>
-  // Legacy alias for code that still references `lastRefreshed`.
   lastRefreshed: Record<string, string | null>
 }
 
@@ -70,7 +63,8 @@ interface DataContextValue extends DashboardData {
 // ---------------------------------------------------------------------------
 
 const emptyLastRefresh: Record<string, string | null> = {
-  meta: null,
+  metaAds: null,
+  socialOrganic: null,
   stripe: null,
   hubspot: null,
   pelagonia: null,
@@ -83,14 +77,14 @@ const defaultData: DashboardData = {
   transactions: [],
   tickets: [],
   clinicians: [],
-  metaAds: [],
   pelagoniaOpportunities: [],
   manualMetrics: mockManualMetrics,
   rocks: mockRocks,
   alerts: mockAlerts,
   isUsingMockData: false,
   dataMode: 'actual',
-  meta: [],
+  metaAds: [],
+  socialOrganic: [],
   stripe: [],
   hubspot: [],
   pelagonia: [],
@@ -113,7 +107,8 @@ const demoData: DashboardData = {
     hubspot: '2026-03-06T14:30:00.000Z',
     stripe: '2026-03-07T06:00:00.000Z',
     zendesk: '2026-03-06T22:15:00.000Z',
-    meta: null,
+    metaAds: null,
+    socialOrganic: null,
     pelagonia: null,
   },
   lastRefreshed: {
@@ -121,7 +116,8 @@ const demoData: DashboardData = {
     hubspot: '2026-03-06T14:30:00.000Z',
     stripe: '2026-03-07T06:00:00.000Z',
     zendesk: '2026-03-06T22:15:00.000Z',
-    meta: null,
+    metaAds: null,
+    socialOrganic: null,
     pelagonia: null,
   },
 }
@@ -163,10 +159,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
       setData(prev => ({
         ...prev,
-        // Preserve demo-only arrays if user explicitly switched to demo.
         isUsingMockData: false,
         dataMode: 'actual',
-        meta: asRows(body.meta),
+        metaAds: asRows(body.metaAds),
+        socialOrganic: asRows(body.socialOrganic),
         stripe: asRows(body.stripe),
         hubspot: asRows(body.hubspot),
         pelagonia: asRows(body.pelagonia),
@@ -200,18 +196,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
     refresh()
   }, [refresh])
 
-  // Derived CAC: total Meta spend / new members from HubSpot.
-  // In 'actual' mode both arrays are empty until canonical→domain mapping
-  // lands, so this returns null. In demo mode it uses the seeded mocks.
   const derivedCAC = useMemo((): number | null => {
     const metaAds = data.metaAds ?? []
-    const members = data.members ?? []
-    if (!metaAds.length || !members.length) return null
-    const totalSpend = metaAds.reduce((sum, row) => sum + (row.spend ?? 0), 0)
-    const newMembers = members.filter(m => m.type === 'Customer').length
-    if (totalSpend === 0 || newMembers === 0) return null
-    return Math.round(totalSpend / newMembers)
-  }, [data.metaAds, data.members])
+    const hubspot = data.hubspot ?? []
+    if (!metaAds.length) return null
+    const totalSpend = metaAds.reduce(
+      (sum, row) => sum + (typeof row.spend === 'number' ? row.spend : Number(row.spend) || 0),
+      0
+    )
+    const newCustomers = hubspot.filter(r =>
+      String(r.record_type ?? '').toLowerCase() === 'customer'
+    ).length
+    if (totalSpend === 0 || newCustomers === 0) return null
+    return Math.round(totalSpend / newCustomers)
+  }, [data.metaAds, data.hubspot])
 
   return (
     <DataContext.Provider
