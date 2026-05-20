@@ -246,26 +246,32 @@ export default function UploadPage() {
                   </div>
 
                   {s.chosenSource !== 'skip' && (
-                    <div className="mt-3 grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs text-dash-text-muted">Period from</label>
-                        <input
-                          type="date"
-                          value={s.periodFrom}
-                          onChange={(e) => handlePeriodChange(idx, 'periodFrom', e.target.value)}
-                          className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 font-mono text-xs text-dash-text"
-                        />
+                    isFollowersSnapshot(s) ? (
+                      <p className="mt-3 text-xs italic text-dash-text-muted">
+                        Snapshot — uses upload date, no period range needed.
+                      </p>
+                    ) : (
+                      <div className="mt-3 grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-dash-text-muted">Period from</label>
+                          <input
+                            type="date"
+                            value={s.periodFrom}
+                            onChange={(e) => handlePeriodChange(idx, 'periodFrom', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 font-mono text-xs text-dash-text"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-dash-text-muted">Period to</label>
+                          <input
+                            type="date"
+                            value={s.periodTo}
+                            onChange={(e) => handlePeriodChange(idx, 'periodTo', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 font-mono text-xs text-dash-text"
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-xs text-dash-text-muted">Period to</label>
-                        <input
-                          type="date"
-                          value={s.periodTo}
-                          onChange={(e) => handlePeriodChange(idx, 'periodTo', e.target.value)}
-                          className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 font-mono text-xs text-dash-text"
-                        />
-                      </div>
-                    </div>
+                    )
                   )}
                 </div>
               ))}
@@ -320,6 +326,13 @@ function detectSourceByHeaders(headers: string[]): SourceKey | null {
     if (missing.length === 0) matches.push(source)
   }
   return matches.length === 1 ? matches[0] : null
+}
+
+// Social Organic Followers sheet is a snapshot — has a Followers column but no Date.
+// The processor stamps it with the upload date, so no period range is required.
+function isFollowersSnapshot(sheet: DetectedSheet & { chosenSource?: SourceKey | 'skip' }): boolean {
+  if (sheet.chosenSource !== 'social_organic') return false
+  return sheet.headers.some(h => h.toLowerCase().trim() === 'followers')
 }
 
 function detectDateRange(

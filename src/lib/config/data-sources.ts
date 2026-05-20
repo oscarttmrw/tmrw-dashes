@@ -253,17 +253,16 @@ export const socialOrganicSchema: CsvSchema = {
   //   - Followers sheet: Platform | Followers | Notes   (no date — uses upload date)
   //   - Views sheet:     Date | Platform | Page Views | Video Views | Post Engagements
   // The processor detects shape by column signature.
-  // Required check just ensures Platform exists (true in both shapes).
+  // Required column acts as a discriminator from other sources: at least
+  // one of the recognised metric columns must be present. Platform is
+  // optional — Followers needs it, Views doesn't (defaults to 'all').
   requiredColumns: [
-    'Platform',
+    ['Followers', 'Page Views', 'Video Views', 'Post Engagements'],
   ],
   optionalColumns: [
     'Date',
-    'Followers',
+    'Platform',
     'Notes',
-    'Page Views',
-    'Video Views',
-    'Post Engagements',
   ],
   strippedColumns: [],
   canonicalColumns: [

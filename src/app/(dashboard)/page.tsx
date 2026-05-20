@@ -245,12 +245,9 @@ export default function DashboardPage() {
     [metaAds]
   )
 
-  // Cost per Lead: spend / sum(conversions_leads, falling back to landing_page_views).
+  // Cost per Lead: spend / sum(conversions_leads). Matches /marketing.
   const totalLeads = useMemo(
-    () => metaAds.reduce(
-      (s, r) => s + (num(r.conversions_leads) || num(r.landing_page_views)),
-      0
-    ),
+    () => metaAds.reduce((s, r) => s + num(r.conversions_leads), 0),
     [metaAds]
   )
   const costPerLead = totalLeads > 0 ? totalMetaSpend / totalLeads : null

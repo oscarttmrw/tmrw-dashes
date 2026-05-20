@@ -67,20 +67,13 @@ export function processSocialOrganic(data: Record<string, unknown>[]): Processor
       return
     }
 
-    // Views shape
+    // Views shape — Platform is optional; defaults to 'all' when absent.
     const date = parseDateOnly(lc['date'])
-    const platform = txt(lc['platform'])
     if (!date) {
       errors.push({ rowIndex: i, reason: `Row ${i}: missing Date` })
       return
     }
-    if (!platform) {
-      errors.push({
-        rowIndex: i,
-        reason: `Row ${i}: missing Platform — column must be added to the Social Media Views sheet.`,
-      })
-      return
-    }
+    const platform = txt(lc['platform']) ?? 'all'
 
     const metrics: [string, unknown][] = [
       ['page_views', lc['page views']],
