@@ -366,6 +366,33 @@ function detectDateRange(
   }
 }
 
+// Find the most likely header row in a raw sheet. Excel sheets often have
+// a title row (and sometimes a blank row) before the actual column headers.
+// Heuristic: scan the first ~10 rows, pick the row with the most populated
+// cells that look like header strings (non-numeric, no __EMPTY_ artifacts).
+function findHeaderRowIndex(matrix: unknown[][]): number {
+  const scanDepth = Math.min(10, matrix.length)
+  let bestIdx = 0
+  let bestScore = -1
+  for (let i = 0; i < scanDepth; i++) {
+    const row = matrix[i] ?? []
+    let score = 0
+    for (const cell of row) {
+      if (cell === null || cell === undefined || cell === '') continue
+      const s = String(cell).trim()
+      if (!s) continue
+      // Penalise rows where most cells look like numbers (data, not headers).
+      if (!isNaN(Number(s))) { score -= 1; continue }
+      score += 1
+    }
+    if (score > bestScore) {
+      bestScore = score
+      bestIdx = i
+    }
+  }
+  return bestIdx
+}
+
 async function parseDroppedFile(file: File): Promise<DetectedSheet[]> {
   const ext = file.name.toLowerCase().split('.').pop() ?? ''
 
@@ -373,7 +400,15 @@ async function parseDroppedFile(file: File): Promise<DetectedSheet[]> {
     const buf = await file.arrayBuffer()
     const wb = XLSX.read(buf, { type: 'array' })
     return wb.SheetNames.map(sheetName => {
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheetName], { defval: null })
+      const ws = wb.Sheets[sheetName]
+      // Read as array-of-arrays first so we can find the real header row,
+      // then re-parse from that row onward as keyed objects.
+      const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, blankrows: false })
+      const headerIdx = findHeaderRowIndex(matrix)
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+        defval: null,
+        range: headerIdx,
+      })
       const headers = rows.length > 0 ? Object.keys(rows[0]) : []
       const byName = SHEET_NAME_TO_SOURCE[sheetName.toLowerCase().trim()] ?? null
       const detected = byName ?? detectSourceByHeaders(headers)
