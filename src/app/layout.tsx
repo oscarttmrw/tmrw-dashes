@@ -5,6 +5,9 @@ import './globals.css'
 export const metadata: Metadata = {
   title: 'TMRW Operating Dashboard',
   description: 'TMRW Health operational command center',
+  icons: {
+    icon: 'https://res.cloudinary.com/dkbhatjde/image/upload/v1774156339/TMRW_Monogram_Black_m8ld50.svg',
+  },
 }
 
 export const viewport = {

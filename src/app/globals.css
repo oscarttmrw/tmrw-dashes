@@ -1,10 +1,56 @@
 @import "tailwindcss";
 @source "../../node_modules/@tremor/react/dist/**/*.js";
 
+@font-face {
+  font-family: 'ApocRevelations';
+  src: url('https://res.cloudinary.com/dkbhatjde/raw/upload/v1774155589/ApocRevelations-Regular_wnz2nv.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Brown';
+  src: url('https://res.cloudinary.com/dkbhatjde/raw/upload/v1774155996/Brown-Regular_wkp3tt.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --font-serif: 'Crimson Text', Georgia, serif;
+
+  /* TMRW brand typography system */
+  --font-display: 'ApocRevelations', serif;
+  --font-body: 'Crimson Text', Georgia, serif;
+  --font-ui: 'Brown', ui-sans-serif, system-ui, sans-serif;
+
+  /* TMRW brand palette — primary (greys) */
+  --color-tmrw-white: #FFFFFF;
+  --color-tmrw-black: #000000;
+  --color-tmrw-grey-50: #F7F7F7;
+  --color-tmrw-grey-100: #F0F0F0;
+  --color-tmrw-grey-200: #E4E4E4;
+  --color-tmrw-grey-300: #D9D9D9;
+  --color-tmrw-grey-700: #3C3C3C;
+  --color-tmrw-grey-800: #252525;
+  --color-tmrw-grey-900: #1B1B1B;
+
+  /* TMRW brand palette — secondary (accent, ≤20% usage) */
+  --color-tmrw-syringe: #E61317;
+  --color-tmrw-infusion: #E4A30B;
+  --color-tmrw-blood: #500000;
+  --color-tmrw-electric: #2339FF;
+  --color-tmrw-toxic: #00E755;
+
+  /* TMRW brand palette — tertiary (rare) */
+  --color-tmrw-alert: #FF3300;
+  --color-tmrw-serum: #FCE369;
+  --color-tmrw-vitality: #FF9335;
+  --color-tmrw-deeplab: #000B70;
+  --color-tmrw-tonic: #003D1C;
 
   /* Surfaces — INCREASED CONTRAST */
   --color-dash-bg: #FFFFFF;

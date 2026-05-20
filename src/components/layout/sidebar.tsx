@@ -2,9 +2,11 @@
 
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { navigation } from '@/lib/config/navigation'
+import { TMRW_LOGOS } from '@/lib/brand'
 import { PanelLeftClose, PanelLeft } from 'lucide-react'
 
 interface SidebarProps {
@@ -37,9 +39,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     >
       <div className="flex h-14 items-center justify-between border-b border-dash-border px-3">
         {!collapsed && (
-          <span className="font-sans text-[15px] font-bold tracking-[-0.03em] text-dash-text">
-            TMRW
-          </span>
+          <Image
+            src={TMRW_LOGOS.wordmarkBlack}
+            alt="TMRW Health"
+            width={88}
+            height={22}
+            priority
+            unoptimized
+          />
         )}
         <button
           onClick={onToggle}

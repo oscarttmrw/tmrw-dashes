@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import Image from 'next/image'
 import { Calendar, Download, Search, Menu, FileText, FileDown } from 'lucide-react'
+import { TMRW_LOGOS } from '@/lib/brand'
 interface TopBarProps {
   onCommandBarOpen: () => void
   onMobileMenuOpen?: () => void
@@ -104,9 +106,15 @@ export function TopBar({ onCommandBarOpen, onMobileMenuOpen }: TopBarProps) {
           </button>
         )}
         {/* TMRW brand visible only on mobile (desktop has it in sidebar) */}
-        <h1 className="font-sans text-[15px] font-semibold tracking-[-0.02em] text-white md:hidden">
-          TMRW
-        </h1>
+        <Image
+          src={TMRW_LOGOS.wordmarkWhite}
+          alt="TMRW Health"
+          width={80}
+          height={20}
+          priority
+          unoptimized
+          className="md:hidden"
+        />
       </div>
 
       <div className="flex items-center gap-2 md:gap-3">
