@@ -32,16 +32,15 @@ function KpiTile({ label, value, sublabel }: KpiTileProps) {
 }
 
 export default function MarketingPage() {
-  const { metaAds, socialOrganic } = useDashboardData()
+  const { metaAds, socialFollowers, socialViews } = useDashboardData()
 
-  // ── Social Organic: Total Followers (latest snapshot per platform) ──
+  // ── Social Followers: latest snapshot per platform ──
   const followersByPlatform = useMemo(() => {
-    const followersRows = socialOrganic.filter(r => r.metric_name === 'followers')
     const latest = new Map<string, { date: string; value: number }>()
-    for (const row of followersRows) {
+    for (const row of socialFollowers) {
       const platform = String(row.platform ?? '')
       const date = String(row.date ?? '')
-      const value = num(row.metric_value)
+      const value = num(row.followers)
       const existing = latest.get(platform)
       if (!existing || date > existing.date) {
         latest.set(platform, { date, value })
@@ -52,76 +51,66 @@ export default function MarketingPage() {
       followers: value,
       date,
     })).sort((a, b) => b.followers - a.followers)
-  }, [socialOrganic])
+  }, [socialFollowers])
 
   const totalFollowers = useMemo(
     () => followersByPlatform.reduce((s, p) => s + p.followers, 0),
     [followersByPlatform]
   )
 
-  // ── Social Organic: Weekly engagement metrics ──
+  // ── Social Views: last 7 days totals ──
   const weeklyEngagement = useMemo(() => {
     const sevenDaysAgo = new Date()
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
     const cutoff = sevenDaysAgo.toISOString().slice(0, 10)
-    const recent = socialOrganic.filter(r =>
-      String(r.metric_name) !== 'followers' &&
-      String(r.date ?? '') >= cutoff
-    )
-    const sums = { page_views: 0, video_views: 0, post_engagements: 0 }
-    for (const row of recent) {
-      const name = String(row.metric_name) as keyof typeof sums
-      if (name in sums) {
-        sums[name] += num(row.metric_value)
-      }
+    const recent = socialViews.filter(r => String(r.date ?? '') >= cutoff)
+    const acc = { page_views: 0, video_views: 0, post_engagements: 0 }
+    for (const r of recent) {
+      acc.page_views += num(r.page_views)
+      acc.video_views += num(r.video_views)
+      acc.post_engagements += num(r.post_engagements)
     }
-    return sums
-  }, [socialOrganic])
+    return acc
+  }, [socialViews])
 
-  // ── Social Organic: Daily engagement trend (last 30 days) ──
+  // ── Social Views: daily trend, last 30 days ──
   const engagementTrend = useMemo(() => {
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
     const cutoff = thirtyDaysAgo.toISOString().slice(0, 10)
-    const byDate = new Map<string, { date: string; page_views: number; video_views: number; post_engagements: number }>()
-    for (const row of socialOrganic) {
-      const date = String(row.date ?? '')
-      const metric = String(row.metric_name)
-      if (date < cutoff || metric === 'followers') continue
-      if (!byDate.has(date)) {
-        byDate.set(date, { date, page_views: 0, video_views: 0, post_engagements: 0 })
-      }
-      const bucket = byDate.get(date)!
-      if (metric === 'page_views' || metric === 'video_views' || metric === 'post_engagements') {
-        bucket[metric] += num(row.metric_value)
-      }
-    }
-    return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
-  }, [socialOrganic])
+    return socialViews
+      .filter(r => String(r.date ?? '') >= cutoff)
+      .map(r => ({
+        date: String(r.date ?? ''),
+        page_views: num(r.page_views),
+        video_views: num(r.video_views),
+        post_engagements: num(r.post_engagements),
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+  }, [socialViews])
 
-  // ── Meta Ads: Headline numbers ──
-  const totalMetaSpend = useMemo(
-    () => metaAds.reduce((s, r) => s + num(r.spend), 0),
-    [metaAds]
-  )
-  const totalImpressions = useMemo(
-    () => metaAds.reduce((s, r) => s + num(r.impressions), 0),
-    [metaAds]
-  )
-  const totalClicks = useMemo(
-    () => metaAds.reduce((s, r) => s + num(r.clicks), 0),
-    [metaAds]
-  )
-  const overallCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : null
-  const totalConversions = useMemo(
-    () => metaAds.reduce((s, r) => s + num(r.conversions_leads), 0),
-    [metaAds]
-  )
-  const costPerConversion = totalConversions > 0 ? totalMetaSpend / totalConversions : null
+  // ── Meta Ads: all 10 tiles in upload-column order ──
+  const meta = useMemo(() => {
+    const totals = { spend: 0, impressions: 0, clicks: 0, landing_page_views: 0, conversions_leads: 0, video_views: 0, post_engagements: 0 }
+    for (const r of metaAds) {
+      totals.spend += num(r.spend)
+      totals.impressions += num(r.impressions)
+      totals.clicks += num(r.clicks)
+      totals.landing_page_views += num(r.landing_page_views)
+      totals.conversions_leads += num(r.conversions_leads)
+      totals.video_views += num(r.video_views)
+      totals.post_engagements += num(r.post_engagements)
+    }
+    const ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : null
+    const costPerLpv = totals.landing_page_views > 0 ? totals.spend / totals.landing_page_views : null
+    const costPerConversion = totals.conversions_leads > 0 ? totals.spend / totals.conversions_leads : null
+    return { ...totals, ctr, costPerLpv, costPerConversion }
+  }, [metaAds])
 
   const fmtNumber = (n: number) => n.toLocaleString('en-AU')
-  const fmtCurrency = (n: number) => `$${n.toLocaleString('en-AU', { maximumFractionDigits: 0 })}`
+  const fmtCurrency = (n: number) => `$${n.toLocaleString('en-AU', { maximumFractionDigits: 2 })}`
   const fmtPercent = (n: number | null) => n === null ? '—' : `${n.toFixed(2)}%`
+  const fmtCurrencyOrDash = (n: number | null) => n === null ? '—' : fmtCurrency(n)
 
   return (
     <div className="space-y-4 md:space-y-10">
@@ -130,14 +119,16 @@ export default function MarketingPage() {
       <section>
         <SectionHeading number={1} title="Paid — Meta Ads" />
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <KpiTile label="Total Spend" value={fmtCurrency(totalMetaSpend)} />
-          <KpiTile label="Impressions" value={fmtNumber(totalImpressions)} />
-          <KpiTile label="Clicks" value={fmtNumber(totalClicks)} />
-          <KpiTile label="CTR" value={fmtPercent(overallCtr)} />
-          <KpiTile
-            label="Cost / Lead"
-            value={costPerConversion === null ? '—' : fmtCurrency(costPerConversion)}
-          />
+          <KpiTile label="Spend" value={fmtCurrency(meta.spend)} />
+          <KpiTile label="Impressions" value={fmtNumber(meta.impressions)} />
+          <KpiTile label="Clicks" value={fmtNumber(meta.clicks)} />
+          <KpiTile label="CTR" value={fmtPercent(meta.ctr)} />
+          <KpiTile label="Landing Page Views" value={fmtNumber(meta.landing_page_views)} />
+          <KpiTile label="Cost per LPV" value={fmtCurrencyOrDash(meta.costPerLpv)} />
+          <KpiTile label="Conversions (Leads)" value={fmtNumber(meta.conversions_leads)} />
+          <KpiTile label="Cost per Conversion" value={fmtCurrencyOrDash(meta.costPerConversion)} />
+          <KpiTile label="Video Views" value={fmtNumber(meta.video_views)} />
+          <KpiTile label="Post Engagements" value={fmtNumber(meta.post_engagements)} />
         </div>
       </section>
 

@@ -8,28 +8,40 @@ import { useDashboardData } from '@/lib/context/data-context'
 import { getSchema, validateRequiredColumns } from '@/lib/config/data-sources'
 import { createClient } from '@/lib/supabase/client'
 
-type SourceKey = 'meta_ads' | 'social_organic' | 'stripe' | 'hubspot' | 'pelagonia' | 'tableau' | 'zendesk'
+type SourceKey = 'meta_ads' | 'social_followers' | 'social_views' | 'stripe' | 'hubspot' | 'pelagonia' | 'tableau' | 'zendesk'
 
 const SHEET_NAME_TO_SOURCE: Record<string, SourceKey> = {
   'meta ads': 'meta_ads',
-  'social media followers': 'social_organic',
-  'social media views': 'social_organic',
+  'social media followers': 'social_followers',
+  'social media views': 'social_views',
 }
 
 const VALID_SOURCES: SourceKey[] = [
-  'meta_ads', 'social_organic', 'stripe', 'hubspot', 'pelagonia', 'tableau', 'zendesk',
+  'meta_ads', 'social_followers', 'social_views', 'stripe', 'hubspot', 'pelagonia', 'tableau', 'zendesk',
 ]
 
 // Column the schema's date filter keys off. Used to auto-fill the from/to
-// pickers in the confirm modal. Sources without a date column show empty
-// inputs and the user can leave them blank.
+// pickers in the confirm modal.
 const DATE_COL: Partial<Record<SourceKey, string>> = {
   meta_ads: 'date',
-  social_organic: 'date',
+  social_views: 'date',
   stripe: 'created',
   hubspot: 'created at',
   pelagonia: 'created at',
   zendesk: 'created at',
+}
+
+// Maps the snake_case source key (used in upload form + Supabase) to the
+// camelCase key /api/data/latest returns for lastRefreshed.
+const REFRESH_KEY: Record<SourceKey, string> = {
+  meta_ads: 'metaAds',
+  social_followers: 'socialFollowers',
+  social_views: 'socialViews',
+  stripe: 'stripe',
+  hubspot: 'hubspot',
+  pelagonia: 'pelagonia',
+  tableau: 'tableau',
+  zendesk: 'zendesk',
 }
 
 interface DetectedSheet {
@@ -185,16 +197,17 @@ export default function UploadPage() {
       <section>
         <h2 className="mb-3 font-sans text-sm font-semibold text-dash-text">Source status</h2>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {VALID_SOURCES.map(source => (
-            <div key={source} className="rounded-lg border border-dash-border bg-dash-surface p-3">
-              <p className="font-mono text-xs uppercase tracking-wide text-dash-text-muted">{source}</p>
-              <p className="mt-1 text-sm text-dash-text">
-                {lastRefreshed[source]
-                  ? `Last upload: ${new Date(lastRefreshed[source]!).toLocaleString('en-AU')}`
-                  : 'Never uploaded'}
-              </p>
-            </div>
-          ))}
+          {VALID_SOURCES.map(source => {
+            const ts = lastRefreshed[REFRESH_KEY[source]]
+            return (
+              <div key={source} className="rounded-lg border border-dash-border bg-dash-surface p-3">
+                <p className="font-mono text-xs uppercase tracking-wide text-dash-text-muted">{source}</p>
+                <p className="mt-1 text-sm text-dash-text">
+                  {ts ? `Last upload: ${new Date(ts).toLocaleString('en-AU')}` : 'Never uploaded'}
+                </p>
+              </div>
+            )
+          })}
         </div>
       </section>
 
@@ -246,7 +259,7 @@ export default function UploadPage() {
                   </div>
 
                   {s.chosenSource !== 'skip' && (
-                    isFollowersSnapshot(s) ? (
+                    s.chosenSource === 'social_followers' ? (
                       <p className="mt-3 text-xs italic text-dash-text-muted">
                         Snapshot — uses upload date, no period range needed.
                       </p>
@@ -326,13 +339,6 @@ function detectSourceByHeaders(headers: string[]): SourceKey | null {
     if (missing.length === 0) matches.push(source)
   }
   return matches.length === 1 ? matches[0] : null
-}
-
-// Social Organic Followers sheet is a snapshot — has a Followers column but no Date.
-// The processor stamps it with the upload date, so no period range is required.
-function isFollowersSnapshot(sheet: DetectedSheet & { chosenSource?: SourceKey | 'skip' }): boolean {
-  if (sheet.chosenSource !== 'social_organic') return false
-  return sheet.headers.some(h => h.toLowerCase().trim() === 'followers')
 }
 
 function detectDateRange(

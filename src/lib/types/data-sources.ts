@@ -1,4 +1,4 @@
-export type DataSourceName = 'hubspot' | 'stripe' | 'zendesk' | 'tableau' | 'meta_ads' | 'social_organic' | 'pelagonia' | 'manual';
+export type DataSourceName = 'hubspot' | 'stripe' | 'zendesk' | 'tableau' | 'meta_ads' | 'social_followers' | 'social_views' | 'pelagonia' | 'manual';
 
 /**
  * A required column may be expressed as a single name or an array of

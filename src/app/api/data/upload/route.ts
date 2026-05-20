@@ -8,7 +8,8 @@ import {
   appendStrategy,
 } from '@/lib/upload-strategies'
 import { processMetaAdsToCanonical } from '@/lib/processors/meta-processor'
-import { processSocialOrganicToCanonical } from '@/lib/processors/social-organic-processor'
+import { processSocialFollowersToCanonical } from '@/lib/processors/social-followers-processor'
+import { processSocialViewsToCanonical } from '@/lib/processors/social-views-processor'
 import { processStripeToCanonical } from '@/lib/processors/stripe-processor'
 import { processHubspotToCanonical } from '@/lib/processors/hubspot-processor'
 import { processPelagoniaToCanonical } from '@/lib/processors/pelagonia-processor'
@@ -16,7 +17,7 @@ import { processTableauToCanonical } from '@/lib/processors/tableau-processor'
 import { processZendeskToCanonical } from '@/lib/processors/zendesk-processor'
 import type { ProcessorResult } from '@/lib/processors/_canonical-helpers'
 
-type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta_ads' | 'social_organic' | 'pelagonia'
+type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta_ads' | 'social_followers' | 'social_views' | 'pelagonia'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
   tableau: 'tableau_data',
@@ -24,7 +25,8 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   stripe: 'stripe_data',
   zendesk: 'zendesk_data',
   meta_ads: 'meta_ads',
-  social_organic: 'social_organic',
+  social_followers: 'social_followers',
+  social_views: 'social_views',
   pelagonia: 'pelagonia_data',
 }
 
@@ -34,13 +36,15 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   stripe: 'created',
   zendesk: null,
   meta_ads: 'date',
-  social_organic: 'date',
+  social_followers: 'date',
+  social_views: 'date',
   pelagonia: 'pelagonia_created_at',
 }
 
 const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => ProcessorResult> = {
   meta_ads: processMetaAdsToCanonical,
-  social_organic: processSocialOrganicToCanonical,
+  social_followers: processSocialFollowersToCanonical,
+  social_views: processSocialViewsToCanonical,
   stripe: processStripeToCanonical,
   hubspot: processHubspotToCanonical,
   pelagonia: processPelagoniaToCanonical,
@@ -63,9 +67,10 @@ async function applyWriteStrategy(
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created')
     case 'meta_ads':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'date')
-    case 'social_organic':
-      // Upsert on the composite unique constraint so re-uploads update in place.
-      return upsertStrategy(supabase, table, batchId, rows, 'date,platform,metric_name')
+    case 'social_followers':
+      return upsertStrategy(supabase, table, batchId, rows, 'date,platform')
+    case 'social_views':
+      return upsertStrategy(supabase, table, batchId, rows, 'date')
     case 'pelagonia':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'pelagonia_created_at')
     case 'zendesk':

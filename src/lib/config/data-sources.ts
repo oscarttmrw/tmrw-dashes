@@ -247,30 +247,45 @@ export const metaAdsSchema: CsvSchema = {
   ],
 };
 
-export const socialOrganicSchema: CsvSchema = {
-  source: 'social_organic',
-  // Accepts EITHER:
-  //   - Followers sheet: Platform | Followers | Notes   (no date — uses upload date)
-  //   - Views sheet:     Date | Platform | Page Views | Video Views | Post Engagements
-  // The processor detects shape by column signature.
-  // Required column acts as a discriminator from other sources: at least
-  // one of the recognised metric columns must be present. Platform is
-  // optional — Followers needs it, Views doesn't (defaults to 'all').
+export const socialFollowersSchema: CsvSchema = {
+  source: 'social_followers',
+  // Followers snapshot — Platform / Followers / (Notes).
+  // No Date column — processor stamps with the upload date.
   requiredColumns: [
-    ['Followers', 'Page Views', 'Video Views', 'Post Engagements'],
+    'Platform',
+    'Followers',
   ],
   optionalColumns: [
-    'Date',
-    'Platform',
     'Notes',
   ],
   strippedColumns: [],
   canonicalColumns: [
     'date',
     'platform',
-    'metric_name',
-    'metric_value',
+    'followers',
     'notes',
+  ],
+};
+
+export const socialViewsSchema: CsvSchema = {
+  source: 'social_views',
+  // Daily aggregate engagement — Date / Page Views / Video Views / Post Engagements.
+  // At least one metric column must be present in addition to Date.
+  requiredColumns: [
+    'Date',
+    ['Page Views', 'Video Views', 'Post Engagements'],
+  ],
+  optionalColumns: [
+    'Page Views',
+    'Video Views',
+    'Post Engagements',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'date',
+    'page_views',
+    'video_views',
+    'post_engagements',
   ],
 };
 
@@ -326,7 +341,8 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   zendesk: zendeskSchema,
   tableau: tableauSchema,
   meta_ads: metaAdsSchema,
-  social_organic: socialOrganicSchema,
+  social_followers: socialFollowersSchema,
+  social_views: socialViewsSchema,
   pelagonia: pelagoniaSchema,
 };
 
@@ -425,16 +441,23 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
     ],
     poweredMetrics: getMetricsPoweredBy('meta_ads'),
   },
-  social_organic: {
-    name: 'Social Organic',
+  social_followers: {
+    name: 'Social Followers',
     exportSteps: [
       'Open the TMRW_MARKETING_DATA workbook.',
-      'Two sheets feed this source — upload them one at a time:',
-      '  • "Social Media Followers" — Platform, Followers, Notes (uploaded date used as snapshot date).',
-      '  • "Social Media Views"     — Date, Platform, Page Views, Video Views, Post Engagements.',
-      'Save the sheet as CSV or XLSX, then drop into the Social Organic upload zone.',
+      'Locate the "Social Media Followers" sheet — Platform / Followers / Notes.',
+      'Save the sheet and drop into the upload zone; the upload date is used as the snapshot date.',
     ],
-    poweredMetrics: getMetricsPoweredBy('social_organic'),
+    poweredMetrics: getMetricsPoweredBy('social_followers'),
+  },
+  social_views: {
+    name: 'Social Views',
+    exportSteps: [
+      'Open the TMRW_MARKETING_DATA workbook.',
+      'Locate the "Social Media Views" sheet — Date / Page Views / Video Views / Post Engagements.',
+      'Save the sheet and drop into the upload zone.',
+    ],
+    poweredMetrics: getMetricsPoweredBy('social_views'),
   },
   pelagonia: {
     name: 'Pelagonia (GoHighLevel)',

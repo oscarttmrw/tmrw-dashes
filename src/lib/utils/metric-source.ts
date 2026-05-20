@@ -58,7 +58,8 @@ export function getMetricsPoweredBy(source: string): string[] {
     stripe: ['stripe'],
     zendesk: ['zendesk'],
     meta_ads: ['meta_ads'],
-    social_organic: ['social_organic'],
+    social_followers: ['social_followers'],
+    social_views: ['social_views'],
     pelagonia: ['pelagonia'],
   }
   const ids = registryIds[source] ?? []
@@ -99,12 +100,13 @@ export const metricSourceMap: Record<string, { sources: string[]; registryId: st
   'conversions': { sources: ['Meta for Business'], registryId: ['meta_ads'] },
   'cost-per-conversion': { sources: ['Meta for Business'], registryId: ['meta_ads'] },
   'blended-cac': { sources: ['Meta for Business', 'HubSpot'], registryId: ['meta_ads', 'hubspot'] },
-  // Social Organic
-  'total-followers': { sources: ['Social Organic'], registryId: ['social_organic'] },
-  'followers-by-platform': { sources: ['Social Organic'], registryId: ['social_organic'] },
-  'weekly-page-views': { sources: ['Social Organic'], registryId: ['social_organic'] },
-  'weekly-video-views': { sources: ['Social Organic'], registryId: ['social_organic'] },
-  'weekly-post-engagements': { sources: ['Social Organic'], registryId: ['social_organic'] },
+  // Social Followers
+  'total-followers': { sources: ['Social Followers'], registryId: ['social_followers'] },
+  'followers-by-platform': { sources: ['Social Followers'], registryId: ['social_followers'] },
+  // Social Views
+  'weekly-page-views': { sources: ['Social Views'], registryId: ['social_views'] },
+  'weekly-video-views': { sources: ['Social Views'], registryId: ['social_views'] },
+  'weekly-post-engagements': { sources: ['Social Views'], registryId: ['social_views'] },
   // Pelagonia (GoHighLevel)
   'opportunities-opened': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },
   'open-opportunity-value': { sources: ['Pelagonia (GoHighLevel)'], registryId: ['pelagonia'] },

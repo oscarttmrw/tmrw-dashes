@@ -37,7 +37,8 @@ export interface DashboardData {
 
   // Canonical Supabase row arrays — source of truth.
   metaAds: CanonicalRow[]
-  socialOrganic: CanonicalRow[]
+  socialFollowers: CanonicalRow[]
+  socialViews: CanonicalRow[]
   stripe: CanonicalRow[]
   hubspot: CanonicalRow[]
   pelagonia: CanonicalRow[]
@@ -64,7 +65,8 @@ interface DataContextValue extends DashboardData {
 
 const emptyLastRefresh: Record<string, string | null> = {
   metaAds: null,
-  socialOrganic: null,
+  socialFollowers: null,
+  socialViews: null,
   stripe: null,
   hubspot: null,
   pelagonia: null,
@@ -84,7 +86,8 @@ const defaultData: DashboardData = {
   isUsingMockData: false,
   dataMode: 'actual',
   metaAds: [],
-  socialOrganic: [],
+  socialFollowers: [],
+  socialViews: [],
   stripe: [],
   hubspot: [],
   pelagonia: [],
@@ -108,7 +111,8 @@ const demoData: DashboardData = {
     stripe: '2026-03-07T06:00:00.000Z',
     zendesk: '2026-03-06T22:15:00.000Z',
     metaAds: null,
-    socialOrganic: null,
+    socialFollowers: null,
+    socialViews: null,
     pelagonia: null,
   },
   lastRefreshed: {
@@ -117,7 +121,8 @@ const demoData: DashboardData = {
     stripe: '2026-03-07T06:00:00.000Z',
     zendesk: '2026-03-06T22:15:00.000Z',
     metaAds: null,
-    socialOrganic: null,
+    socialFollowers: null,
+    socialViews: null,
     pelagonia: null,
   },
 }
@@ -162,7 +167,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         isUsingMockData: false,
         dataMode: 'actual',
         metaAds: asRows(body.metaAds),
-        socialOrganic: asRows(body.socialOrganic),
+        socialFollowers: asRows(body.socialFollowers),
+        socialViews: asRows(body.socialViews),
         stripe: asRows(body.stripe),
         hubspot: asRows(body.hubspot),
         pelagonia: asRows(body.pelagonia),

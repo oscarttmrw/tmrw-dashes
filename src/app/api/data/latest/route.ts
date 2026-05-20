@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { createClient as createServerSupabase } from '@/lib/supabase/server'
 
-type SourceKey = 'metaAds' | 'socialOrganic' | 'stripe' | 'hubspot' | 'pelagonia' | 'tableau' | 'zendesk'
+type SourceKey = 'metaAds' | 'socialFollowers' | 'socialViews' | 'stripe' | 'hubspot' | 'pelagonia' | 'tableau' | 'zendesk'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
   metaAds: 'meta_ads',
-  socialOrganic: 'social_organic',
+  socialFollowers: 'social_followers',
+  socialViews: 'social_views',
   stripe: 'stripe_data',
   hubspot: 'hubspot_data',
   pelagonia: 'pelagonia_data',
@@ -16,7 +17,8 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
 
 const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
   metaAds: 'date',
-  socialOrganic: 'date',
+  socialFollowers: 'date',
+  socialViews: 'date',
   stripe: 'created',
   hubspot: 'hubspot_created_at',
   pelagonia: 'pelagonia_created_at',
@@ -27,7 +29,8 @@ const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
 // JS-side camelCase key → upload_log.source value (snake_case, matches upload route).
 const SOURCE_DB_NAME: Record<SourceKey, string> = {
   metaAds: 'meta_ads',
-  socialOrganic: 'social_organic',
+  socialFollowers: 'social_followers',
+  socialViews: 'social_views',
   stripe: 'stripe',
   hubspot: 'hubspot',
   pelagonia: 'pelagonia',
@@ -44,7 +47,7 @@ export async function GET() {
   }
 
   const supabase = createServiceClient()
-  const sources: SourceKey[] = ['metaAds', 'socialOrganic', 'stripe', 'hubspot', 'pelagonia', 'tableau', 'zendesk']
+  const sources: SourceKey[] = ['metaAds', 'socialFollowers', 'socialViews', 'stripe', 'hubspot', 'pelagonia', 'tableau', 'zendesk']
 
   const results = await Promise.all(
     sources.map(s =>
