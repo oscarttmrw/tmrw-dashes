@@ -341,18 +341,20 @@ export function getSchema(source: string): CsvSchema | undefined {
  * Case-insensitive header validation. Returns the list of required-column
  * descriptors that no header satisfies. A required column may be a single
  * name or an array of acceptable variants (any one variant matching the
- * headers satisfies the requirement). Both sides are lowercased + trimmed
- * before compare — same pattern the processors use for their lc lookup.
+ * headers satisfies the requirement). Normalisation strips case and all
+ * non-alphanumeric characters, so 'Page Views', 'page_views', 'page-views'
+ * and 'PageViews' all collide.
  */
 export function validateRequiredColumns(
   schema: CsvSchema,
   headers: string[]
 ): string[] {
-  const norm = headers.map(h => h.toLowerCase().trim());
+  const normalise = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const norm = headers.map(normalise);
   const missing: string[] = [];
   for (const req of schema.requiredColumns) {
     const variants = Array.isArray(req) ? req : [req];
-    const found = variants.some(v => norm.includes(v.toLowerCase().trim()));
+    const found = variants.some(v => norm.includes(normalise(v)));
     if (!found) missing.push(variants[0]);
   }
   return missing;

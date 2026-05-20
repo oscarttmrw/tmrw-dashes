@@ -241,7 +241,7 @@ export default function UploadPage() {
                         ? <span className="text-dash-text-muted">Skipped</span>
                         : s.missingColumns.length === 0
                           ? <span className="text-status-green">✓ Valid</span>
-                          : <span className="text-status-red">✗ Missing: {s.missingColumns.join(', ')}</span>}
+                          : <span className="text-status-red" title={`Headers seen: ${s.headers.join(', ')}`}>✗ Missing: {s.missingColumns.join(', ')}</span>}
                     </div>
                   </div>
 
