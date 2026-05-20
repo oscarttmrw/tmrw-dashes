@@ -15,8 +15,11 @@ const sourceConfig: Record<Source, { label: string; color: string }> = {
   pelagonia: { label: 'Pelagonia', color: 'bg-src-zendesk/15 text-src-zendesk' },
 }
 
-export function DataSourceBadge({ source }: { source: Source }) {
-  const config = sourceConfig[source]
+export function DataSourceBadge({ source }: { source: Source | string }) {
+  const config = sourceConfig[source as Source] ?? {
+    label: source,
+    color: 'bg-dash-border/40 text-dash-text-muted',
+  }
   return (
     <span
       className={cn(
