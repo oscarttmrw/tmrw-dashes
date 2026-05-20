@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
+import Papa from 'papaparse'
+import * as XLSX from 'xlsx'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { useDashboardData } from '@/lib/context/data-context'
 import { getSchema, validateRequiredColumns } from '@/lib/config/data-sources'
@@ -18,6 +20,18 @@ const VALID_SOURCES: SourceKey[] = [
   'meta_ads', 'social_organic', 'stripe', 'hubspot', 'pelagonia', 'tableau', 'zendesk',
 ]
 
+// Column the schema's date filter keys off. Used to auto-fill the from/to
+// pickers in the confirm modal. Sources without a date column show empty
+// inputs and the user can leave them blank.
+const DATE_COL: Partial<Record<SourceKey, string>> = {
+  meta_ads: 'date',
+  social_organic: 'date',
+  stripe: 'created',
+  hubspot: 'created at',
+  pelagonia: 'created at',
+  zendesk: 'created at',
+}
+
 interface DetectedSheet {
   file: File
   sheetName: string
@@ -30,11 +44,12 @@ interface DetectedSheet {
 interface SheetSubmissionState extends DetectedSheet {
   chosenSource: SourceKey | 'skip'
   missingColumns: string[]
+  periodFrom: string
+  periodTo: string
 }
 
 interface ModalForm {
   uploadedBy: string
-  periodLabel: string
 }
 
 export default function UploadPage() {
@@ -42,7 +57,7 @@ export default function UploadPage() {
   const [sheets, setSheets] = useState<SheetSubmissionState[] | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [modalForm, setModalForm] = useState<ModalForm>({ uploadedBy: '', periodLabel: '' })
+  const [modalForm, setModalForm] = useState<ModalForm>({ uploadedBy: '' })
   const [results, setResults] = useState<{ source: string; success: boolean; message: string }[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [parseError, setParseError] = useState<string | null>(null)
@@ -65,7 +80,8 @@ export default function UploadPage() {
       const withValidation: SheetSubmissionState[] = detected.map(s => {
         const chosen: SourceKey | 'skip' = s.detectedSource ?? 'skip'
         const missing = chosen !== 'skip' ? validateSheet(s, chosen) : []
-        return { ...s, chosenSource: chosen, missingColumns: missing }
+        const { from, to } = chosen !== 'skip' ? detectDateRange(s.rows, chosen) : { from: '', to: '' }
+        return { ...s, chosenSource: chosen, missingColumns: missing, periodFrom: from, periodTo: to }
       })
       setSheets(withValidation)
       setModalOpen(true)
@@ -80,7 +96,17 @@ export default function UploadPage() {
       const copy = [...prev]
       const sheet = copy[idx]
       const missing = source !== 'skip' ? validateSheet(sheet, source) : []
-      copy[idx] = { ...sheet, chosenSource: source, missingColumns: missing }
+      const { from, to } = source !== 'skip' ? detectDateRange(sheet.rows, source) : { from: '', to: '' }
+      copy[idx] = { ...sheet, chosenSource: source, missingColumns: missing, periodFrom: from, periodTo: to }
+      return copy
+    })
+  }
+
+  const handlePeriodChange = (idx: number, field: 'periodFrom' | 'periodTo', value: string) => {
+    setSheets(prev => {
+      if (!prev) return prev
+      const copy = [...prev]
+      copy[idx] = { ...copy[idx], [field]: value }
       return copy
     })
   }
@@ -123,7 +149,7 @@ export default function UploadPage() {
       <section>
         <h1 className="mb-1 font-sans text-base font-semibold text-dash-text">Upload data</h1>
         <p className="mb-4 text-xs text-dash-text-muted">
-          Drop a workbook (xlsx) or single file (csv/tsv). Sheets are auto-routed by name where possible — you&apos;ll confirm before anything is written.
+          Drop a workbook (xlsx) or single file (csv/tsv). Sheets are auto-routed by name or column signature where possible — you&apos;ll confirm before anything is written.
         </p>
 
         <div
@@ -194,6 +220,7 @@ export default function UploadPage() {
               {sheets.map((s, idx) => (
                 <div key={idx} className="rounded-md border border-dash-border bg-dash-surface p-3">
                   <p className="text-xs text-dash-text-muted">{s.file.name} :: {s.sheetName}</p>
+
                   <div className="mt-2 grid grid-cols-3 items-center gap-3">
                     <div>
                       <label className="block text-xs text-dash-text-muted">Source</label>
@@ -217,6 +244,29 @@ export default function UploadPage() {
                           : <span className="text-status-red">✗ Missing: {s.missingColumns.join(', ')}</span>}
                     </div>
                   </div>
+
+                  {s.chosenSource !== 'skip' && (
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-dash-text-muted">Period from</label>
+                        <input
+                          type="date"
+                          value={s.periodFrom}
+                          onChange={(e) => handlePeriodChange(idx, 'periodFrom', e.target.value)}
+                          className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 font-mono text-xs text-dash-text"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-dash-text-muted">Period to</label>
+                        <input
+                          type="date"
+                          value={s.periodTo}
+                          onChange={(e) => handlePeriodChange(idx, 'periodTo', e.target.value)}
+                          className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 font-mono text-xs text-dash-text"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -229,16 +279,6 @@ export default function UploadPage() {
                   value={modalForm.uploadedBy}
                   onChange={(e) => setModalForm(f => ({ ...f, uploadedBy: e.target.value }))}
                   placeholder="you@tmrw.health"
-                  className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 text-sm text-dash-text"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-dash-text-muted">Period label (optional)</label>
-                <input
-                  type="text"
-                  value={modalForm.periodLabel}
-                  onChange={(e) => setModalForm(f => ({ ...f, periodLabel: e.target.value }))}
-                  placeholder="e.g. April 2026"
                   className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 text-sm text-dash-text"
                 />
               </div>
@@ -268,22 +308,62 @@ export default function UploadPage() {
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
+// Probe each source's required-column schema; if exactly one source's
+// requirements are fully satisfied by the headers, that's the match.
+// More than one match → ambiguous → return null (user picks).
+function detectSourceByHeaders(headers: string[]): SourceKey | null {
+  const matches: SourceKey[] = []
+  for (const source of VALID_SOURCES) {
+    const schema = getSchema(source)
+    if (!schema) continue
+    const missing = validateRequiredColumns(schema, headers)
+    if (missing.length === 0) matches.push(source)
+  }
+  return matches.length === 1 ? matches[0] : null
+}
+
+function detectDateRange(
+  rows: Record<string, unknown>[],
+  source: SourceKey
+): { from: string; to: string } {
+  const targetCol = DATE_COL[source]
+  if (!rows.length || !targetCol) return { from: '', to: '' }
+
+  const matchingKey = Object.keys(rows[0]).find(k => k.toLowerCase().trim() === targetCol)
+  if (!matchingKey) return { from: '', to: '' }
+
+  const timestamps: number[] = []
+  for (const row of rows) {
+    const val = row[matchingKey]
+    if (val === null || val === undefined || val === '') continue
+    const d = new Date(String(val))
+    if (!isNaN(d.getTime())) timestamps.push(d.getTime())
+  }
+  if (!timestamps.length) return { from: '', to: '' }
+
+  return {
+    from: new Date(Math.min(...timestamps)).toISOString().split('T')[0],
+    to: new Date(Math.max(...timestamps)).toISOString().split('T')[0],
+  }
+}
+
 async function parseDroppedFile(file: File): Promise<DetectedSheet[]> {
   const ext = file.name.toLowerCase().split('.').pop() ?? ''
 
   if (ext === 'xlsx' || ext === 'xls') {
-    const { default: XLSX } = await import('xlsx')
     const buf = await file.arrayBuffer()
     const wb = XLSX.read(buf, { type: 'array' })
     return wb.SheetNames.map(sheetName => {
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheetName], { defval: null })
       const headers = rows.length > 0 ? Object.keys(rows[0]) : []
+      const byName = SHEET_NAME_TO_SOURCE[sheetName.toLowerCase().trim()] ?? null
+      const detected = byName ?? detectSourceByHeaders(headers)
       return {
         file,
         sheetName,
         rows,
         headers,
-        detectedSource: SHEET_NAME_TO_SOURCE[sheetName.toLowerCase().trim()] ?? null,
+        detectedSource: detected,
         rowCount: rows.length,
       }
     })
@@ -291,7 +371,6 @@ async function parseDroppedFile(file: File): Promise<DetectedSheet[]> {
 
   const text = await file.text()
   const delimiter = text.includes('\t') ? '\t' : ','
-  const { default: Papa } = await import('papaparse')
   const result = Papa.parse<Record<string, unknown>>(text, {
     header: true, skipEmptyLines: true, delimiter,
   })
@@ -302,7 +381,7 @@ async function parseDroppedFile(file: File): Promise<DetectedSheet[]> {
     sheetName: file.name,
     rows,
     headers,
-    detectedSource: null,
+    detectedSource: detectSourceByHeaders(headers),
     rowCount: rows.length,
   }]
 }
@@ -313,8 +392,7 @@ function validateSheet(sheet: DetectedSheet, source: SourceKey): string[] {
   return validateRequiredColumns(schema, sheet.headers)
 }
 
-async function submitSheet(sheet: DetectedSheet, source: SourceKey, metadata: ModalForm) {
-  const { default: Papa } = await import('papaparse')
+async function submitSheet(sheet: SheetSubmissionState, source: SourceKey, metadata: ModalForm) {
   const csv = Papa.unparse(sheet.rows)
   const blob = new Blob([csv], { type: 'text/csv' })
   const file = new File([blob], `${sheet.sheetName}.csv`, { type: 'text/csv' })
@@ -323,7 +401,8 @@ async function submitSheet(sheet: DetectedSheet, source: SourceKey, metadata: Mo
   fd.append('file', file)
   fd.append('source', source)
   fd.append('uploaded_by', metadata.uploadedBy)
-  fd.append('data_period_label', metadata.periodLabel)
+  fd.append('data_period_from', sheet.periodFrom)
+  fd.append('data_period_to', sheet.periodTo)
   fd.append('file_name', `${sheet.file.name} :: ${sheet.sheetName}`)
 
   const res = await fetch('/api/data/upload', { method: 'POST', body: fd })
