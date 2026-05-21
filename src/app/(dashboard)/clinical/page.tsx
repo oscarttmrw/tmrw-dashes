@@ -282,7 +282,7 @@ function dwellTextColor(s: Status): string {
 // ═══════════════════════════════════════════════════════════════════════
 
 export default function ClinicalPage() {
-  const { clinicians, members, dataMode } = useDashboardData()
+  const { clinicians, members, dataMode, posthogManual } = useDashboardData()
 
   const [selectedClinician, setSelectedClinician] = useState<Clinician | null>(null)
   const [selectedMember, setSelectedMember] = useState<Member | null>(null)
@@ -302,9 +302,24 @@ export default function ClinicalPage() {
     return getCapacityForecast(hiringScenario)
   }, [hiringScenario, capacityPeriod, baseCapacity])
 
+  // Pipeline: override the Registered and Active Plan stage counts with the
+  // operator-entered PostHog figures when present. Everything else stays as the
+  // existing mock baseline.
+  const effectivePipelineStages = useMemo(() => {
+    return pipelineStages.map(stage => {
+      if (stage.id === 'registered' && posthogManual.registrations !== null) {
+        return { ...stage, memberCount: posthogManual.registrations }
+      }
+      if (stage.id === 'active-plan' && posthogManual.totalCasebook !== null) {
+        return { ...stage, memberCount: posthogManual.totalCasebook }
+      }
+      return stage
+    })
+  }, [posthogManual.registrations, posthogManual.totalCasebook])
+
   // Pipeline stats
-  const totalInPipeline = pipelineStages.reduce((s, p) => s + p.memberCount, 0)
-  const bottleneckCount = pipelineStages.filter(p => p.isBottleneck).length
+  const totalInPipeline = effectivePipelineStages.reduce((s, p) => s + p.memberCount, 0)
+  const bottleneckCount = effectivePipelineStages.filter(p => p.isBottleneck).length
 
   // Oracle data available check
   const hasOracle = dataMode === 'demo'
@@ -320,6 +335,37 @@ export default function ClinicalPage() {
           <DataSourceBadge source="manual" />
         </div>
       </div>
+
+      {/* PostHog snapshot — operator-entered figures from Admin → Settings.
+          Only renders when at least one value has been entered. */}
+      {(posthogManual.registrations !== null
+        || posthogManual.churnedMembers !== null
+        || posthogManual.totalCasebook !== null) && (
+        <section>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+            {[
+              { label: 'Registrations', value: posthogManual.registrations },
+              { label: 'Total Casebook', value: posthogManual.totalCasebook },
+              { label: 'Churned Members', value: posthogManual.churnedMembers },
+            ].map(card => (
+              <div
+                key={card.label}
+                className="rounded-lg border border-dash-border bg-dash-surface p-3 md:p-4"
+              >
+                <span className="font-sans text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary md:text-[11px]">
+                  {card.label}
+                </span>
+                <div className="mt-1 font-mono text-xl font-bold tracking-[-0.01em] text-dash-text md:text-2xl">
+                  {card.value !== null ? card.value.toLocaleString('en-AU') : '—'}
+                </div>
+                <span className="font-sans text-[10px] text-dash-text-muted md:text-[11px]">
+                  PostHog (manual entry)
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════════ */}
       {/* 01 Journey Pipeline — Kanban Flow                             */}
@@ -346,7 +392,7 @@ export default function ClinicalPage() {
         {/* Pipeline cards — horizontal scroll */}
         <div className="overflow-x-auto pb-2 -mx-3 px-3 md:mx-0 md:px-0">
           <div className="flex gap-1.5 min-w-max md:gap-2">
-            {pipelineStages.map((stage, i) => {
+            {effectivePipelineStages.map((stage, i) => {
               const phaseColor = PHASE_COLORS[stage.phase]
               const status = dwellStatusColor(stage.medianDwellDays, stage.targetDwellDays)
               const textColor = dwellTextColor(status)
