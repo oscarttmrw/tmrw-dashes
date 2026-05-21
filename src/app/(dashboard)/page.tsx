@@ -134,17 +134,20 @@ export default function DashboardPage() {
     loading,
     error,
     refresh,
+    posthogManual,
   } = useDashboardData()
 
   /* ── Section 1: Headline Growth ── */
-  // Active Members: hubspot rows whose case_status is not closed/inactive.
-  const activeMembersCount = useMemo(
+  // Active Members: prefer the operator-entered casebook total from PostHog,
+  // otherwise fall back to hubspot rows whose case_status is not closed/inactive.
+  const derivedActiveMembers = useMemo(
     () => hubspot.filter(r => {
       const s = String(r.case_status ?? '').toLowerCase()
       return s !== 'closed' && s !== 'inactive'
     }).length,
     [hubspot]
   )
+  const activeMembersCount = posthogManual.totalCasebook ?? derivedActiveMembers
   const newMembersThisPeriod = activeMembersCount
   const newMembersPct = Q1_TARGET_NEW_MEMBERS > 0 ? newMembersThisPeriod / Q1_TARGET_NEW_MEMBERS : 0
 
@@ -164,7 +167,8 @@ export default function DashboardPage() {
   )
 
   /* ── Section 2: Scale ── */
-  const totalMembers = hubspot.length
+  // Total registrations: prefer the PostHog manual figure, otherwise hubspot row count.
+  const totalMembers = posthogManual.registrations ?? hubspot.length
 
   // Health Story Completion: hubspot.health_story_complete is the boolean.
   const healthStoryComplete = useMemo(
@@ -223,12 +227,13 @@ export default function DashboardPage() {
     return retained / eligible.length
   }, [hubspot])
 
-  // TODO(canonical): "Churned" was derived (journey-stage === 'churned').
-  // Using case_status === 'closed' as a proxy — semantically broader; flagged.
-  const churnedCount = useMemo(
+  // Churned members: prefer the PostHog manual figure. Fallback uses
+  // case_status === 'closed' as a (broader) proxy for journey-stage churn.
+  const derivedChurnedCount = useMemo(
     () => hubspot.filter(r => String(r.case_status ?? '').toLowerCase() === 'closed').length,
     [hubspot]
   )
+  const churnedCount = posthogManual.churnedMembers ?? derivedChurnedCount
   const monthlyChurnRate = totalMembers > 0 ? churnedCount / totalMembers : 0
 
   // CSAT: average of zendesk.satisfaction_score where present.

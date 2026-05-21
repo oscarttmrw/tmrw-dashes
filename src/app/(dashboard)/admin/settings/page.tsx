@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { useDashboardData } from '@/lib/context/data-context'
 
@@ -40,6 +41,117 @@ function DemoModeSection() {
             <span className={`ml-2 text-xs font-medium ${isDemo ? 'text-amber-500' : 'text-dash-text-muted'}`}>
               {isDemo ? 'On' : 'Off'}
             </span>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// PostHog Manual Inputs
+// ---------------------------------------------------------------------------
+function PosthogManualSection() {
+  const { posthogManual, savePosthogManual } = useDashboardData()
+
+  const toStr = (n: number | null | undefined) => (n === null || n === undefined ? '' : String(n))
+  const [registrations, setRegistrations] = useState(toStr(posthogManual.registrations))
+  const [churnedMembers, setChurnedMembers] = useState(toStr(posthogManual.churnedMembers))
+  const [totalCasebook, setTotalCasebook] = useState(toStr(posthogManual.totalCasebook))
+  const [saving, setSaving] = useState(false)
+  const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+
+  useEffect(() => {
+    setRegistrations(toStr(posthogManual.registrations))
+    setChurnedMembers(toStr(posthogManual.churnedMembers))
+    setTotalCasebook(toStr(posthogManual.totalCasebook))
+  }, [posthogManual.registrations, posthogManual.churnedMembers, posthogManual.totalCasebook])
+
+  const parse = (s: string): number | null => {
+    const t = s.trim()
+    if (t === '') return null
+    const n = Number(t)
+    return Number.isFinite(n) ? Math.round(n) : null
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setFeedback(null)
+    try {
+      await savePosthogManual({
+        registrations: parse(registrations),
+        churnedMembers: parse(churnedMembers),
+        totalCasebook: parse(totalCasebook),
+      })
+      setFeedback({ kind: 'ok', msg: 'Saved.' })
+    } catch (e) {
+      setFeedback({ kind: 'err', msg: e instanceof Error ? e.message : 'Save failed' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const lastUpdated = posthogManual.uploadedAt
+    ? new Date(posthogManual.uploadedAt).toLocaleString('en-AU', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      })
+    : 'Never'
+
+  const fields: Array<{ key: string; label: string; value: string; set: (v: string) => void }> = [
+    { key: 'registrations', label: 'Registrations', value: registrations, set: setRegistrations },
+    { key: 'churned', label: 'Churned Members', value: churnedMembers, set: setChurnedMembers },
+    { key: 'casebook', label: 'Total Casebook', value: totalCasebook, set: setTotalCasebook },
+  ]
+
+  return (
+    <section>
+      <h2 className="mb-4 font-sans text-sm font-semibold uppercase tracking-wider text-dash-text-secondary">
+        PostHog Data
+      </h2>
+      <div className="rounded-lg border border-dash-border bg-dash-surface p-5">
+        <p className="mb-4 text-sm text-dash-text-secondary">
+          Manually enter the latest figures from PostHog. These override the derived counts on the
+          dashboard and the operations tabs until updated. Last updated: <span className="font-mono text-dash-text">{lastUpdated}</span>.
+        </p>
+        <div className="space-y-4">
+          {fields.map((f) => (
+            <div
+              key={f.key}
+              className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4"
+            >
+              <label htmlFor={`posthog-${f.key}`} className="w-44 shrink-0 text-sm text-dash-text">
+                {f.label}
+              </label>
+              <input
+                id={`posthog-${f.key}`}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                value={f.value}
+                onChange={(e) => f.set(e.target.value)}
+                placeholder="Enter count"
+                className="w-full rounded-md border border-dash-border bg-dash-bg px-3 py-2 text-sm text-dash-text placeholder:text-dash-text-muted focus:border-dash-red focus:outline-none focus:ring-1 focus:ring-dash-red sm:max-w-[200px]"
+              />
+            </div>
+          ))}
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="shrink-0 rounded-md border border-dash-border bg-dash-bg px-4 py-2 text-xs font-medium text-dash-text-secondary transition-colors hover:border-dash-red/40 hover:text-dash-red disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            {feedback && (
+              <span
+                className={`text-xs ${
+                  feedback.kind === 'ok' ? 'text-emerald-500' : 'text-rose-500'
+                }`}
+              >
+                {feedback.msg}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -96,6 +208,10 @@ export default function SettingsPage() {
 
       {/* Demo Mode */}
       <DemoModeSection />
+
+      {/* PostHog manual inputs — placed above Metric Targets so operators
+          can refresh source-of-truth counts before reviewing targets. */}
+      <PosthogManualSection />
 
       {/* Metric Targets */}
       <section>

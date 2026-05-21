@@ -5,6 +5,7 @@ import type { Member, Transaction, Ticket, Clinician, Alert, Rock } from '@/lib/
 import type { MetaAdRow } from '@/lib/types/meta'
 import type { PelagoniaRow } from '@/lib/types/pelagonia'
 import type { ManualMetrics } from '@/data/mock/manual-metrics'
+import type { PosthogManualValues } from '@/app/api/posthog-manual/route'
 import {
   mockMembers,
   mockTransactions,
@@ -53,6 +54,10 @@ export interface DashboardData {
   lastRefresh: Record<string, string | null>
   // Legacy alias for code that still references `lastRefreshed`.
   lastRefreshed: Record<string, string | null>
+
+  // Manual operator-entered numbers (sourced from PostHog dashboards).
+  // Override the derived counts on dashboard tiles when present.
+  posthogManual: PosthogManualValues
 }
 
 interface DataContextValue extends DashboardData {
@@ -63,6 +68,11 @@ interface DataContextValue extends DashboardData {
   switchToActual: () => void
   hasActualData: boolean
   derivedCAC: number | null
+  savePosthogManual: (values: {
+    registrations: number | null
+    churnedMembers: number | null
+    totalCasebook: number | null
+  }) => Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +108,12 @@ const defaultData: DashboardData = {
   zendesk: [],
   lastRefresh: { ...emptyLastRefresh },
   lastRefreshed: { ...emptyLastRefresh },
+  posthogManual: {
+    registrations: null,
+    churnedMembers: null,
+    totalCasebook: null,
+    uploadedAt: null,
+  },
 }
 
 const demoData: DashboardData = {
@@ -139,6 +155,7 @@ const DataContext = createContext<DataContextValue>({
   switchToActual: () => {},
   hasActualData: false,
   derivedCAC: null,
+  savePosthogManual: async () => {},
 })
 
 function asRows(v: unknown): CanonicalRow[] {
@@ -154,13 +171,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/data/latest', { credentials: 'include', cache: 'no-store' })
-      if (!res.ok) throw new Error(`Status ${res.status}`)
-      const body = await res.json()
+      const [latestRes, posthogRes] = await Promise.all([
+        fetch('/api/data/latest', { credentials: 'include', cache: 'no-store' }),
+        fetch('/api/posthog-manual', { credentials: 'include', cache: 'no-store' }),
+      ])
+      if (!latestRes.ok) throw new Error(`Status ${latestRes.status}`)
+      const body = await latestRes.json()
       const lastRefresh = {
         ...emptyLastRefresh,
         ...((body.lastRefresh as Record<string, string | null> | undefined) ?? {}),
       }
+      const posthogManual: PosthogManualValues = posthogRes.ok
+        ? await posthogRes.json()
+        : { registrations: null, churnedMembers: null, totalCasebook: null, uploadedAt: null }
       setData(prev => ({
         ...prev,
         // Preserve demo-only arrays if user explicitly switched to demo.
@@ -174,11 +197,33 @@ export function DataProvider({ children }: { children: ReactNode }) {
         zendesk: asRows(body.zendesk),
         lastRefresh,
         lastRefreshed: lastRefresh,
+        posthogManual,
       }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
+    }
+  }, [])
+
+  const savePosthogManual = useCallback(async (values: {
+    registrations: number | null
+    churnedMembers: number | null
+    totalCasebook: number | null
+  }) => {
+    const res = await fetch('/api/posthog-manual', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(values),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`Failed to save (${res.status}) ${text}`)
+    }
+    const body = await res.json()
+    if (body?.values) {
+      setData(prev => ({ ...prev, posthogManual: body.values as PosthogManualValues }))
     }
   }, [])
 
@@ -224,6 +269,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         switchToActual,
         hasActualData,
         derivedCAC,
+        savePosthogManual,
       }}
     >
       {children}
