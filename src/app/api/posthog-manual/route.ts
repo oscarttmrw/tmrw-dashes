@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { createClient as createServerSupabase } from '@/lib/supabase/server'
-
-export interface PosthogManualValues {
-  registrations: number | null
-  churnedMembers: number | null
-  totalCasebook: number | null
-  uploadedAt: string | null
-}
+import type { PosthogManualValues } from '@/lib/types/posthog-manual'
 
 const EMPTY: PosthogManualValues = {
   registrations: null,

@@ -5,7 +5,7 @@ import type { Member, Transaction, Ticket, Clinician, Alert, Rock } from '@/lib/
 import type { MetaAdRow } from '@/lib/types/meta'
 import type { PelagoniaRow } from '@/lib/types/pelagonia'
 import type { ManualMetrics } from '@/data/mock/manual-metrics'
-import type { PosthogManualValues } from '@/app/api/posthog-manual/route'
+import type { PosthogManualValues } from '@/lib/types/posthog-manual'
 import {
   mockMembers,
   mockTransactions,
