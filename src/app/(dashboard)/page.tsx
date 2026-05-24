@@ -1,12 +1,18 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { AlertCard } from '@/components/dashboard/alert-card'
 import { SectionHeading } from '@/components/dashboard/section-heading'
 import { StatusDot } from '@/components/dashboard/status-dot'
 import { TrendIndicator } from '@/components/dashboard/trend-indicator'
+import {
+  DateRangePicker,
+  defaultDateRangePicker,
+  type DateRangePickerValue,
+} from '@/components/dashboard/date-range-picker'
+import { TileChart, bucketByDay } from '@/components/dashboard/tile-chart'
 import { useDashboardData } from '@/lib/context/data-context'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
@@ -22,9 +28,10 @@ interface TileProps {
   status: Status
   direction?: 'higher-better' | 'lower-better'
   href?: string
+  chart?: React.ReactNode
 }
 
-function MetricTile({ label, value, target, delta, status, direction = 'higher-better', href }: TileProps) {
+function MetricTile({ label, value, target, delta, status, direction = 'higher-better', href, chart }: TileProps) {
   const tileClass = cn(
     'flex h-full flex-col rounded-lg border border-dash-border bg-dash-surface p-3 md:p-4 transition-all duration-150',
     href && 'hover:border-dash-border-strong hover:shadow-sm hover:-translate-y-px'
@@ -45,6 +52,7 @@ function MetricTile({ label, value, target, delta, status, direction = 'higher-b
           <TrendIndicator value={delta.value} direction={direction} />
         )}
       </div>
+      {chart && <div className="mt-2">{chart}</div>}
       <div className="mt-auto pt-1.5 flex items-center justify-between text-[10px] text-dash-text-muted md:text-[11px]">
         {target ? <span>{target}</span> : <span />}
         {delta?.period && <span className="font-sans">{delta.period}</span>}
@@ -159,19 +167,15 @@ export default function DashboardPage() {
     refresh,
   } = useDashboardData()
 
-  // Suppress unused-var warning — operational_data is wired in for PR C/D.
+  // Suppress unused-var warning — operational_data is wired in for PR D.
   void _operational_data
 
-  // Hardcoded date filter — PR C wires in the user-controlled range picker.
-  const { periodStart, periodEnd, prevPeriodStart, prevPeriodEnd } = useMemo(() => {
-    const now = new Date()
-    return {
-      periodStart: new Date(now.getFullYear(), now.getMonth(), 1),
-      periodEnd: now,
-      prevPeriodStart: new Date(now.getFullYear(), now.getMonth() - 1, 1),
-      prevPeriodEnd: new Date(now.getFullYear(), now.getMonth(), 0),
-    }
-  }, [])
+  // User-controlled date range picker (PR C). Independent state per page.
+  const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
+  const periodStart = pickerValue.period.start
+  const periodEnd = pickerValue.period.end
+  const prevPeriodStart = pickerValue.comparison.start
+  const prevPeriodEnd = pickerValue.comparison.end
 
   // Plan target for the current month (matched by first-of-month).
   const currentPlanTarget = useMemo(() => {
@@ -371,6 +375,61 @@ export default function DashboardPage() {
   const callConvDelta = callConvRate !== null && callConvRatePrev !== null
     ? deltaPct(callConvRate, callConvRatePrev) : null
 
+  /* ── Sparkline series (one per active tile) ── */
+  const registrationsSeries = useMemo(
+    () => bucketByDay(customerRows, 'customer_entered_at', periodStart, periodEnd,
+      (rows) => rows.length),
+    [customerRows, periodStart, periodEnd]
+  )
+  const grossRevenueSeries = useMemo(
+    () => bucketByDay(stripe, 'created', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.amount_paid), 0) / 100),
+    [stripe, periodStart, periodEnd]
+  )
+  const epiDashSeries = useMemo(
+    () => bucketByDay(customerRows, 'epigenetics_dashboard_unlocked_date', periodStart, periodEnd,
+      (rows) => rows.filter(r => r.epigenetics_dashboard_unlocked === true).length),
+    [customerRows, periodStart, periodEnd]
+  )
+  const churnSeries = useMemo(
+    () => bucketByDay(customerRows, 'churn_date', periodStart, periodEnd,
+      (rows) => rows.length),
+    [customerRows, periodStart, periodEnd]
+  )
+  const costPerLeadSeries = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => {
+        const spend = rows.reduce((s, r) => s + num(r.spend), 0)
+        const leads = rows.reduce((s, r) => s + (num(r.conversions_leads) || num(r.landing_page_views)), 0)
+        return leads > 0 ? spend / leads : 0
+      }),
+    [meta_ads, periodStart, periodEnd]
+  )
+  const costPerCallSeries = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => {
+        const spend = rows.reduce((s, r) => s + num(r.spend), 0)
+        // Per-day call count from GHL on the same date
+        const day = rows[0]?.date as string | undefined
+        if (!day) return 0
+        const calls = ghl_opportunities.filter(o =>
+          CALL_STAGES.has(String(o.stage ?? ''))
+          && String(o.created_on ?? '').slice(0, 10) === day
+        ).length
+        return calls > 0 ? spend / calls : 0
+      }),
+    [meta_ads, ghl_opportunities, periodStart, periodEnd]
+  )
+  const callConvSeries = useMemo(
+    () => bucketByDay(ghl_opportunities, 'created_on', periodStart, periodEnd,
+      (rows) => {
+        const calls = rows.filter(r => CALL_STAGES.has(String(r.stage ?? ''))).length
+        const won = rows.filter(r => String(r.status ?? '').toLowerCase() === 'won').length
+        return calls > 0 ? (won / calls) * 100 : 0
+      }),
+    [ghl_opportunities, periodStart, periodEnd]
+  )
+
   /* ── Status helpers ── */
   const statusPctVsTarget = (actual: number, target: number, direction: 'higher-better' | 'lower-better' = 'higher-better'): Status => {
     if (!target) return 'grey'
@@ -423,7 +482,10 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 md:space-y-10">
-      <Breadcrumb items={[{ label: 'Dashboard' }]} />
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <Breadcrumb items={[{ label: 'Dashboard' }]} />
+        <DateRangePicker value={pickerValue} onChange={setPickerValue} />
+      </div>
 
       {error && (
         <div className="flex items-center justify-between rounded-lg border border-status-red/30 bg-status-red/5 px-4 py-3">
@@ -459,8 +521,9 @@ export default function DashboardPage() {
             status={registrationsTarget
               ? statusPctVsTarget(registrationsCurrent, registrationsTarget)
               : (registrationsCurrent > 0 ? 'green' : 'grey')}
-            delta={registrationsDelta === null ? null : { value: Math.round(registrationsDelta), period: 'vs last month' }}
+            delta={registrationsDelta === null ? null : { value: Math.round(registrationsDelta), period: 'vs previous' }}
             href="/members"
+            chart={<TileChart data={registrationsSeries} />}
           />
           <MetricTile
             label="Gross Revenue"
@@ -473,8 +536,9 @@ export default function DashboardPage() {
             status={grossRevenueTarget
               ? statusPctVsTarget(grossRevenueCurrent, grossRevenueTarget)
               : (grossRevenueCurrent > 0 ? 'green' : 'grey')}
-            delta={grossRevenueDelta === null ? null : { value: Math.round(grossRevenueDelta), period: 'vs last month' }}
+            delta={grossRevenueDelta === null ? null : { value: Math.round(grossRevenueDelta), period: 'vs previous' }}
             href="/financial"
+            chart={<TileChart data={grossRevenueSeries} formatValue={(n) => fmtCurrency(n, { compact: true })} />}
           />
           <LockedTile
             label="Net Revenue"
@@ -524,9 +588,10 @@ export default function DashboardPage() {
             <MetricTile
               label="Epi Dashboards Released"
               value={String(epiDashCurrent)}
-              target="this month"
+              target="period total"
               status="grey"
-              delta={epiDashDelta === null ? null : { value: Math.round(epiDashDelta), period: 'vs last month' }}
+              delta={epiDashDelta === null ? null : { value: Math.round(epiDashDelta), period: 'vs previous' }}
+              chart={<TileChart data={epiDashSeries} />}
             />
             <MetricTile
               label="Time TruDiag → Epi"
@@ -553,8 +618,9 @@ export default function DashboardPage() {
               : monthlyChurnRate <= 8 ? 'amber' : 'red'
             }
             direction="lower-better"
-            delta={churnDelta === null ? null : { value: Math.round(churnDelta), period: 'vs last month' }}
+            delta={churnDelta === null ? null : { value: Math.round(churnDelta), period: 'vs previous' }}
             href="/retention"
+            chart={<TileChart data={churnSeries} variant="line" />}
           />
           <LockedTile
             label="90-Day Retention"
@@ -584,8 +650,9 @@ export default function DashboardPage() {
               : costPerLead <= 80 ? 'amber' : 'red'
             }
             direction="lower-better"
-            delta={costPerLeadDelta === null ? null : { value: Math.round(costPerLeadDelta), period: 'vs last month' }}
+            delta={costPerLeadDelta === null ? null : { value: Math.round(costPerLeadDelta), period: 'vs previous' }}
             href="/marketing"
+            chart={<TileChart data={costPerLeadSeries} variant="line" formatValue={(n) => fmtCurrency(n)} />}
           />
           <MetricTile
             label="Cost per Call"
@@ -597,16 +664,18 @@ export default function DashboardPage() {
               : costPerCall <= 300 ? 'amber' : 'red'
             }
             direction="lower-better"
-            delta={costPerCallDelta === null ? null : { value: Math.round(costPerCallDelta), period: 'vs last month' }}
+            delta={costPerCallDelta === null ? null : { value: Math.round(costPerCallDelta), period: 'vs previous' }}
             href="/marketing"
+            chart={<TileChart data={costPerCallSeries} variant="line" formatValue={(n) => fmtCurrency(n)} />}
           />
           <MetricTile
             label="Call Conversion Rate"
             value={callConvRate === null ? '—' : `${callConvRate.toFixed(1)}%`}
-            target="this month"
+            target="period total"
             status="grey"
-            delta={callConvDelta === null ? null : { value: Math.round(callConvDelta), period: 'vs last month' }}
+            delta={callConvDelta === null ? null : { value: Math.round(callConvDelta), period: 'vs previous' }}
             href="/marketing"
+            chart={<TileChart data={callConvSeries} variant="line" formatValue={(n) => `${n.toFixed(1)}%`} />}
           />
           <LockedTile
             label="Cost per Conversion"
