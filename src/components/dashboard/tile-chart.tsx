@@ -53,7 +53,7 @@ export function TileChart({
             <Line
               type="monotone"
               dataKey="value"
-              stroke="#8B0000"
+              stroke="#E61317"
               strokeWidth={1.5}
               dot={false}
               isAnimationActive={false}
@@ -70,8 +70,8 @@ export function TileChart({
         <AreaChart data={cleaned} margin={{ top: 4, right: 0, left: 0, bottom: 2 }}>
           <defs>
             <linearGradient id="tileSparkFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#8B0000" stopOpacity={0.18} />
-              <stop offset="100%" stopColor="#8B0000" stopOpacity={0} />
+              <stop offset="0%" stopColor="#E61317" stopOpacity={0.18} />
+              <stop offset="100%" stopColor="#E61317" stopOpacity={0} />
             </linearGradient>
           </defs>
           <Tooltip
@@ -82,7 +82,7 @@ export function TileChart({
           <Area
             type="monotone"
             dataKey="value"
-            stroke="#8B0000"
+            stroke="#E61317"
             strokeWidth={1.5}
             fill="url(#tileSparkFill)"
             isAnimationActive={false}
