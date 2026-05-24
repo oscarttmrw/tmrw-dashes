@@ -95,6 +95,30 @@ function detectDateRange(
   }
 }
 
+/**
+ * Pull a usable string out of any thrown value or API error payload. The
+ * native `String(err)` of a Supabase / fetch error object yields the dreaded
+ * "[object Object]" — this helper handles Error instances, strings, and
+ * arbitrary plain objects.
+ */
+function extractErrorMessage(err: unknown): string | null {
+  if (err === null || err === undefined) return null
+  if (err instanceof Error) return err.message
+  if (typeof err === 'string') return err
+  if (typeof err === 'object') {
+    const maybe = err as { message?: unknown; error?: unknown; reason?: unknown }
+    if (typeof maybe.message === 'string') return maybe.message
+    if (typeof maybe.error === 'string') return maybe.error
+    if (typeof maybe.reason === 'string') return maybe.reason
+    try {
+      return JSON.stringify(err)
+    } catch {
+      return String(err)
+    }
+  }
+  return String(err)
+}
+
 function formatDateLabel(from: string | null, to: string | null): string {
   if (!from || !to) return ''
   const f = new Date(from + 'T00:00:00')
@@ -111,11 +135,12 @@ function formatDateLabel(from: string | null, to: string | null): string {
 
 interface PendingUpload {
   file: File
-  source: SourceKey
+  source: SourceKey | null
   rowCount: number
   columnCount: number
   detectedFrom: string | null
   detectedTo: string | null
+  parsedRows: Record<string, string>[]
 }
 
 interface UploadState {
@@ -126,11 +151,23 @@ interface UploadState {
   detectedSource?: SourceKey
 }
 
+const SOURCE_OPTIONS: { key: SourceKey; label: string }[] = [
+  { key: 'hubspot_contacts',  label: 'HubSpot Contacts' },
+  { key: 'ghl_opportunities', label: 'GHL Opportunities' },
+  { key: 'operational_data',  label: 'Operational Data' },
+  { key: 'stripe',            label: 'Stripe Charges' },
+  { key: 'meta',              label: 'Meta Ads' },
+  { key: 'zendesk',           label: 'Zendesk' },
+  { key: 'pelagonia',         label: 'Pelagonia' },
+  { key: 'tableau',           label: 'Tableau' },
+]
+
 interface ModalForm {
   uploadedBy: string
   periodFrom: string
   periodTo: string
   periodLabel: string
+  source: SourceKey | null
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +180,7 @@ export default function UploadPage() {
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const [currentUserEmail, setCurrentUserEmail] = useState('')
   const [state, setState] = useState<UploadState>({ status: 'idle' })
-  const [modalForm, setModalForm] = useState<ModalForm>({ uploadedBy: '', periodFrom: '', periodTo: '', periodLabel: '' })
+  const [modalForm, setModalForm] = useState<ModalForm>({ uploadedBy: '', periodFrom: '', periodTo: '', periodLabel: '', source: null })
   const fileRef = useRef<HTMLInputElement>(null)
   const dragCounter = useRef(0)
 
@@ -179,8 +216,13 @@ export default function UploadPage() {
       periodFrom: pending.detectedFrom ?? '',
       periodTo: pending.detectedTo ?? '',
       periodLabel: label,
+      source: pending.source,
     })
-    setState({ status: 'modal', pending, detectedSource: pending.source })
+    setState({
+      status: 'modal',
+      pending,
+      detectedSource: pending.source ?? undefined,
+    })
   }, [currentUserEmail])
 
   const handleFile = useCallback(async (file: File) => {
@@ -240,18 +282,7 @@ export default function UploadPage() {
 
       const headers = Object.keys(rows[0])
       const source = detectSourceByHeaders(headers)
-      if (!source) {
-        setState({
-          status: 'error',
-          errors: [
-            'Could not auto-detect the data source from this file\'s columns.',
-            `Headers seen: ${headers.slice(0, 8).join(', ')}${headers.length > 8 ? '…' : ''}`,
-          ],
-        })
-        return
-      }
-
-      const { from, to } = detectDateRange(rows, source)
+      const { from, to } = source ? detectDateRange(rows, source) : { from: null, to: null }
       openModal({
         file,
         source,
@@ -259,6 +290,7 @@ export default function UploadPage() {
         columnCount: headers.length,
         detectedFrom: from,
         detectedTo: to,
+        parsedRows: rows,
       })
     } catch (err) {
       setState({ status: 'error', errors: [`Read error: ${err instanceof Error ? err.message : String(err)}`] })
@@ -266,11 +298,12 @@ export default function UploadPage() {
   }, [openModal])
 
   const handleConfirm = useCallback(async () => {
-    if (!state.pending) return
+    if (!state.pending || !modalForm.source) return
+    const chosenSource = modalForm.source
     setState(prev => ({ ...prev, status: 'uploading' }))
 
     const form = new FormData()
-    form.append('source', state.pending.source)
+    form.append('source', chosenSource)
     form.append('file', state.pending.file)
     form.append('file_name', state.pending.file.name)
     form.append('uploaded_by', modalForm.uploadedBy)
@@ -282,22 +315,23 @@ export default function UploadPage() {
       const res = await fetch('/api/data/upload', { method: 'POST', body: form })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        setState({ status: 'error', errors: [body.error ?? `Upload failed (HTTP ${res.status})`] })
+        const message = extractErrorMessage(body?.error) ?? `Upload failed (HTTP ${res.status})`
+        setState({ status: 'error', errors: [message] })
         return
       }
       const body = await res.json().catch(() => ({}))
       const rowCount = typeof body.rowCount === 'number' ? body.rowCount : state.pending.rowCount
       const apiErrors = Array.isArray(body.errors)
-        ? (body.errors as Array<{ reason?: string }>).map(e => e.reason ?? String(e)).filter(Boolean)
+        ? (body.errors as Array<unknown>).map(e => extractErrorMessage(e) ?? '').filter(Boolean)
         : []
       await refresh()
       if (apiErrors.length > 0) {
-        setState({ status: 'success', resultCount: rowCount, detectedSource: state.pending.source, errors: apiErrors.slice(0, 10) })
+        setState({ status: 'success', resultCount: rowCount, detectedSource: chosenSource, errors: apiErrors.slice(0, 10) })
       } else {
-        setState({ status: 'success', resultCount: rowCount, detectedSource: state.pending.source })
+        setState({ status: 'success', resultCount: rowCount, detectedSource: chosenSource })
       }
     } catch (err) {
-      setState({ status: 'error', errors: [`Network error: ${err instanceof Error ? err.message : String(err)}`] })
+      setState({ status: 'error', errors: [`Network error: ${extractErrorMessage(err) ?? 'unknown error'}`] })
     }
   }, [state.pending, modalForm, refresh])
 
@@ -315,7 +349,10 @@ export default function UploadPage() {
     if (file) handleFile(file)
   }, [handleFile])
 
-  const canConfirm = modalForm.uploadedBy.trim().length > 0 && state.status !== 'uploading'
+  const canConfirm =
+    modalForm.uploadedBy.trim().length > 0
+    && modalForm.source !== null
+    && state.status !== 'uploading'
   const detectedName = state.detectedSource ? (dataSourceConfigs[state.detectedSource]?.name ?? state.detectedSource) : ''
 
   return (
@@ -348,9 +385,7 @@ export default function UploadPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-lg rounded-xl border border-dash-border bg-dash-bg shadow-2xl">
             <div className="flex items-center justify-between border-b border-dash-border px-6 py-4">
-              <h2 className="text-sm font-semibold text-dash-text">
-                Confirm upload — {dataSourceConfigs[state.pending.source]?.name ?? state.pending.source}
-              </h2>
+              <h2 className="text-sm font-semibold text-dash-text">Confirm upload</h2>
               {state.status !== 'uploading' && (
                 <button onClick={() => setState({ status: 'idle' })} className="text-dash-text-muted hover:text-dash-text">
                   <X size={16} />
@@ -369,11 +404,42 @@ export default function UploadPage() {
                 </div>
               </div>
 
-              <div className="rounded-md bg-dash-surface px-3 py-2">
-                <p className="text-[10px] uppercase tracking-wider text-dash-text-muted">Detected source</p>
-                <div className="mt-1 flex items-center gap-2">
-                  <DataSourceBadge source={state.pending.source} />
-                  <span className="text-xs text-dash-text-secondary">{dataSourceConfigs[state.pending.source]?.name ?? state.pending.source}</span>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-dash-text-secondary">
+                  Detected as: {state.pending.source === null && (
+                    <span className="font-normal italic text-status-amber">no match — pick one below</span>
+                  )}
+                </label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={modalForm.source ?? ''}
+                    onChange={e => {
+                      const next = (e.target.value || null) as SourceKey | null
+                      const range =
+                        next && state.pending
+                          ? detectDateRange(state.pending.parsedRows, next)
+                          : { from: null, to: null }
+                      setModalForm(prev => ({
+                        ...prev,
+                        source: next,
+                        periodFrom: range.from ?? prev.periodFrom,
+                        periodTo: range.to ?? prev.periodTo,
+                        periodLabel: formatDateLabel(
+                          range.from ?? prev.periodFrom,
+                          range.to ?? prev.periodTo,
+                        ),
+                      }))
+                    }}
+                    className="w-full rounded-md border border-dash-border bg-dash-surface px-2.5 py-1.5 text-xs text-dash-text focus:border-dash-red focus:outline-none"
+                  >
+                    <option value="">Pick source…</option>
+                    {SOURCE_OPTIONS.map(opt => (
+                      <option key={opt.key} value={opt.key}>{opt.label}</option>
+                    ))}
+                  </select>
+                  {modalForm.source && (
+                    <DataSourceBadge source={modalForm.source} />
+                  )}
                 </div>
               </div>
 
