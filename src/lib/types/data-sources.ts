@@ -6,7 +6,9 @@ export type DataSourceName =
   | 'stripe'
   | 'zendesk'
   | 'tableau'
-  | 'meta'
+  | 'meta_ads'
+  | 'social_followers'
+  | 'social_views'
   | 'pelagonia'
   | 'manual';
 

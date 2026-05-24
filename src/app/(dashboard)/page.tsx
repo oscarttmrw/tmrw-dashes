@@ -147,7 +147,7 @@ function isSameMonth(a: Date, b: Date): boolean {
 
 export default function DashboardPage() {
   const {
-    meta,
+    meta_ads,
     stripe,
     hubspot_contacts,
     ghl_opportunities,
@@ -301,26 +301,26 @@ export default function DashboardPage() {
   /* ── Section 4 — Economics ── */
   const CALL_STAGES = new Set(['Call Booked', 'No Show', 'Call Attended', 'Won', 'Cancelled', 'Rescheduled'])
 
-  // Meta spend by period
+  // Meta spend by period (meta_ads.spend in $)
   const metaSpendCurrent = useMemo(
-    () => meta.filter(r => inPeriod(r.date, periodStart, periodEnd)).reduce((s, r) => s + num(r.spend_aud), 0),
-    [meta, periodStart, periodEnd]
+    () => meta_ads.filter(r => inPeriod(r.date, periodStart, periodEnd)).reduce((s, r) => s + num(r.spend), 0),
+    [meta_ads, periodStart, periodEnd]
   )
   const metaSpendPrev = useMemo(
-    () => meta.filter(r => inPeriod(r.date, prevPeriodStart, prevPeriodEnd)).reduce((s, r) => s + num(r.spend_aud), 0),
-    [meta, prevPeriodStart, prevPeriodEnd]
+    () => meta_ads.filter(r => inPeriod(r.date, prevPeriodStart, prevPeriodEnd)).reduce((s, r) => s + num(r.spend), 0),
+    [meta_ads, prevPeriodStart, prevPeriodEnd]
   )
 
-  // Meta leads (results, falling back to landing_page_views)
+  // Meta leads — conversions_leads from the workbook (falls back to LPV if absent)
   const metaLeadsCurrent = useMemo(
-    () => meta.filter(r => inPeriod(r.date, periodStart, periodEnd))
-      .reduce((s, r) => s + (num(r.results) || num(r.landing_page_views)), 0),
-    [meta, periodStart, periodEnd]
+    () => meta_ads.filter(r => inPeriod(r.date, periodStart, periodEnd))
+      .reduce((s, r) => s + (num(r.conversions_leads) || num(r.landing_page_views)), 0),
+    [meta_ads, periodStart, periodEnd]
   )
   const metaLeadsPrev = useMemo(
-    () => meta.filter(r => inPeriod(r.date, prevPeriodStart, prevPeriodEnd))
-      .reduce((s, r) => s + (num(r.results) || num(r.landing_page_views)), 0),
-    [meta, prevPeriodStart, prevPeriodEnd]
+    () => meta_ads.filter(r => inPeriod(r.date, prevPeriodStart, prevPeriodEnd))
+      .reduce((s, r) => s + (num(r.conversions_leads) || num(r.landing_page_views)), 0),
+    [meta_ads, prevPeriodStart, prevPeriodEnd]
   )
 
   // 4.1 Cost per Lead
@@ -413,7 +413,7 @@ export default function DashboardPage() {
   }, [monthlyChurnRate, costPerLead, costPerCall])
 
   /* ── Source freshness footer — iterate the NEW source keys ── */
-  const sourceFreshness = (['hubspot_contacts', 'stripe', 'ghl_opportunities', 'meta', 'operational_data'] as const).map(source => {
+  const sourceFreshness = (['hubspot_contacts', 'stripe', 'ghl_opportunities', 'meta_ads', 'operational_data'] as const).map(source => {
     const ts = lastRefresh[source]
     const days = ts ? Math.floor((Date.now() - new Date(ts).getTime()) / 86_400_000) : null
     const label = ts ? new Date(ts).toLocaleDateString('en-AU', { month: 'short', day: 'numeric' }) : 'Never'

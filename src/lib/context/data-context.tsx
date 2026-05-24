@@ -43,7 +43,9 @@ export interface DashboardData {
   dataMode: DataMode
 
   // Canonical Supabase row arrays — the source of truth going forward.
-  meta: CanonicalRow[]
+  meta_ads: CanonicalRow[]
+  social_followers: CanonicalRow[]
+  social_views: CanonicalRow[]
   stripe: CanonicalRow[]
   hubspot: CanonicalRow[]
   pelagonia: CanonicalRow[]
@@ -74,7 +76,9 @@ interface DataContextValue extends DashboardData {
 // ---------------------------------------------------------------------------
 
 const emptyLastRefresh: Record<string, string | null> = {
-  meta: null,
+  meta_ads: null,
+  social_followers: null,
+  social_views: null,
   stripe: null,
   hubspot: null,
   pelagonia: null,
@@ -97,7 +101,9 @@ const defaultData: DashboardData = {
   alerts: mockAlerts,
   isUsingMockData: false,
   dataMode: 'actual',
-  meta: [],
+  meta_ads: [],
+  social_followers: [],
+  social_views: [],
   stripe: [],
   hubspot: [],
   pelagonia: [],
@@ -177,7 +183,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
         // Preserve demo-only arrays if user explicitly switched to demo.
         isUsingMockData: false,
         dataMode: 'actual',
-        meta: asRows(body.meta),
+        meta_ads: asRows(body.meta_ads),
+        social_followers: asRows(body.social_followers),
+        social_views: asRows(body.social_views),
         stripe: asRows(body.stripe),
         hubspot: asRows(body.hubspot),
         pelagonia: asRows(body.pelagonia),

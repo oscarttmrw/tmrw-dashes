@@ -6,7 +6,9 @@ import {
   dateRangeReplaceStrategy,
   upsertStrategy,
 } from '@/lib/upload-strategies'
-import { processMetaToCanonical } from '@/lib/processors/meta-processor'
+import { processMetaAdsToCanonical } from '@/lib/processors/meta-processor'
+import { processSocialFollowersToCanonical } from '@/lib/processors/social-followers-processor'
+import { processSocialViewsToCanonical } from '@/lib/processors/social-views-processor'
 import { processStripeToCanonical } from '@/lib/processors/stripe-processor'
 import { processHubspotContactsToCanonical } from '@/lib/processors/hubspot-contacts-processor'
 import { processGhlToCanonical } from '@/lib/processors/ghl-processor'
@@ -23,7 +25,9 @@ type SourceKey =
   | 'operational_data'
   | 'stripe'
   | 'zendesk'
-  | 'meta'
+  | 'meta_ads'
+  | 'social_followers'
+  | 'social_views'
   | 'pelagonia'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
@@ -33,7 +37,9 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   operational_data: 'operational_data',
   stripe: 'stripe_data',
   zendesk: 'zendesk_data',
-  meta: 'meta_data',
+  meta_ads: 'meta_ads',
+  social_followers: 'social_followers',
+  social_views: 'social_views',
   pelagonia: 'pelagonia_data',
 }
 
@@ -44,12 +50,16 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   operational_data: 'date',
   stripe: 'created',
   zendesk: null,
-  meta: 'date',
+  meta_ads: 'date',
+  social_followers: 'date',
+  social_views: 'date',
   pelagonia: 'pelagonia_created_at',
 }
 
 const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => ProcessorResult> = {
-  meta: processMetaToCanonical,
+  meta_ads: processMetaAdsToCanonical,
+  social_followers: processSocialFollowersToCanonical,
+  social_views: processSocialViewsToCanonical,
   stripe: processStripeToCanonical,
   hubspot_contacts: processHubspotContactsToCanonical,
   ghl_opportunities: processGhlToCanonical,
@@ -76,8 +86,12 @@ async function applyWriteStrategy(
       return upsertStrategy(supabase, table, batchId, rows, 'date')
     case 'stripe':
       return upsertStrategy(supabase, table, batchId, rows, 'stripe_invoice_id')
-    case 'meta':
+    case 'meta_ads':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'date')
+    case 'social_followers':
+      return upsertStrategy(supabase, table, batchId, rows, 'date,platform')
+    case 'social_views':
+      return upsertStrategy(supabase, table, batchId, rows, 'date')
     case 'pelagonia':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'pelagonia_created_at')
     case 'zendesk':

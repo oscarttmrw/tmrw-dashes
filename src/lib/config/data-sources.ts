@@ -295,54 +295,78 @@ export const tableauSchema: CsvSchema = {
   ],
 };
 
-export const metaSchema: CsvSchema = {
-  source: 'meta',
-  // The Meta processor requires Day (parseable date — populates the canonical
-  // `date` column, which is NOT NULL in Supabase), Ad Set Name, and Amount
-  // Spent (under any of its known labels). Reporting Starts/Ends are not
-  // consumed by the processor.
+export const metaAdsSchema: CsvSchema = {
+  source: 'meta_ads',
+  // TMRW_MARKETING workbook → Meta Ads sheet. Daily aggregate. One row per day.
   requiredColumns: [
-    'Day',
-    'Ad Set Name',
-    // Spend ships under multiple labels depending on currency and which
-    // "Customise columns" tickbox the operator used.
-    ['Amount Spent (AUD)', 'Amount spent (AUD)', 'Amount spent', 'Amount Spent'],
+    'Date',
+    ['Spend ($)', 'Spend'],
   ],
   optionalColumns: [
-    'Campaign Name',
     'Impressions',
-    'Clicks (All)',
-    'Clicks (all)',
-    'CTR (All)',
-    'Reach',
-    'Frequency',
-    'Result Type',
-    'Results',
-    'Cost per Result (AUD)',
+    'CTR (%)',
+    'Clicks',
     'Landing Page Views',
-    'Cost per Landing Page View (AUD)',
-    'Delivery Status',
-    'Reporting Starts',
-    'Reporting Ends',
-    'Starts',
-    'Ends',
+    'Cost per LPV ($)',
+    'Conversions (Leads)',
+    'Cost per Conversion ($)',
+    'Video Views',
+    'Post Engagements',
   ],
   strippedColumns: [],
   canonicalColumns: [
     'date',
-    'ad_set_name',
-    'spend_aud',
+    'spend',
     'impressions',
-    'clicks',
     'ctr',
-    'reach',
-    'frequency',
-    'result_type',
-    'results',
-    'cost_per_result',
+    'clicks',
     'landing_page_views',
-    'cost_per_landing_page_view',
-    'delivery_status',
+    'cost_per_lpv',
+    'conversions_leads',
+    'cost_per_conversion',
+    'video_views',
+    'post_engagements',
+  ],
+};
+
+export const socialFollowersSchema: CsvSchema = {
+  source: 'social_followers',
+  // TMRW_MARKETING workbook → Social Followers sheet.
+  // No Date column — processor stamps with upload date.
+  requiredColumns: [
+    'Platform',
+    'Followers',
+  ],
+  optionalColumns: [
+    'Notes',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'date',
+    'platform',
+    'followers',
+    'notes',
+  ],
+};
+
+export const socialViewsSchema: CsvSchema = {
+  source: 'social_views',
+  // TMRW_MARKETING workbook → Social Views sheet. Daily aggregate.
+  requiredColumns: [
+    'Date',
+    ['Page Views', 'Video Views', 'Post Engagements'],
+  ],
+  optionalColumns: [
+    'Page Views',
+    'Video Views',
+    'Post Engagements',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'date',
+    'page_views',
+    'video_views',
+    'post_engagements',
   ],
 };
 
@@ -399,7 +423,9 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   stripe: stripeSchema,
   zendesk: zendeskSchema,
   tableau: tableauSchema,
-  meta: metaSchema,
+  meta_ads: metaAdsSchema,
+  social_followers: socialFollowersSchema,
+  social_views: socialViewsSchema,
   pelagonia: pelagoniaSchema,
 };
 
@@ -507,17 +533,31 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
     ],
     poweredMetrics: getMetricsPoweredBy('zendesk'),
   },
-  meta: {
-    name: 'Meta for Business',
+  meta_ads: {
+    name: 'Meta Ads',
     exportSteps: [
-      'Log in to business.facebook.com and open Ads Manager.',
-      'Select the ad account for TMRW.',
-      'Set your date range in the top-right date picker.',
-      'Click the Columns dropdown → Customise columns. Add: Ad Set Name, Amount Spent, Impressions, Clicks (All), Landing Page Views, Cost per Landing Page View, Results, Cost per Result, CTR (All), Reporting Starts, Reporting Ends.',
-      'Click the Export button (top right) → Export Table Data → .csv.',
-      'Drop the downloaded file into the upload zone below.',
+      'Open the TMRW_MARKETING workbook.',
+      'Meta Ads sheet — Date, Spend ($), Impressions, CTR (%), Clicks, Landing Page Views, Cost per LPV ($), Conversions (Leads), Cost per Conversion ($), Video Views, Post Engagements.',
+      'Drop the .xlsx file into the upload zone below.',
     ],
-    poweredMetrics: getMetricsPoweredBy('meta'),
+    poweredMetrics: [],
+  },
+  social_followers: {
+    name: 'Social Followers',
+    exportSteps: [
+      'TMRW_MARKETING workbook → Social Followers sheet.',
+      'Required columns: Platform, Followers. Optional: Notes.',
+      'Snapshot date is stamped with the upload date.',
+    ],
+    poweredMetrics: [],
+  },
+  social_views: {
+    name: 'Social Views',
+    exportSteps: [
+      'TMRW_MARKETING workbook → Social Views sheet.',
+      'Required: Date and at least one of Page Views / Video Views / Post Engagements.',
+    ],
+    poweredMetrics: [],
   },
   pelagonia: {
     name: 'Pelagonia (GoHighLevel)',

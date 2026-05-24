@@ -3,7 +3,9 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { createClient as createServerSupabase } from '@/lib/supabase/server'
 
 type SourceKey =
-  | 'meta'
+  | 'meta_ads'
+  | 'social_followers'
+  | 'social_views'
   | 'stripe'
   | 'hubspot_contacts'
   | 'ghl_opportunities'
@@ -13,7 +15,9 @@ type SourceKey =
   | 'zendesk'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
-  meta: 'meta_data',
+  meta_ads: 'meta_ads',
+  social_followers: 'social_followers',
+  social_views: 'social_views',
   stripe: 'stripe_data',
   hubspot_contacts: 'hubspot_contacts',
   ghl_opportunities: 'ghl_opportunities',
@@ -24,7 +28,9 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
 }
 
 const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
-  meta: 'date',
+  meta_ads: 'date',
+  social_followers: 'date',
+  social_views: 'date',
   stripe: 'created',
   hubspot_contacts: 'create_date',
   ghl_opportunities: 'created_on',
@@ -44,7 +50,9 @@ export async function GET() {
 
   const supabase = createServiceClient()
   const sources: SourceKey[] = [
-    'meta',
+    'meta_ads',
+    'social_followers',
+    'social_views',
     'stripe',
     'hubspot_contacts',
     'ghl_opportunities',
