@@ -49,6 +49,10 @@ export interface DashboardData {
   pelagonia: CanonicalRow[]
   tableau: CanonicalRow[]
   zendesk: CanonicalRow[]
+  hubspot_contacts: CanonicalRow[]
+  ghl_opportunities: CanonicalRow[]
+  operational_data: CanonicalRow[]
+  plan_targets: CanonicalRow[]
 
   lastRefresh: Record<string, string | null>
   // Legacy alias for code that still references `lastRefreshed`.
@@ -76,6 +80,9 @@ const emptyLastRefresh: Record<string, string | null> = {
   pelagonia: null,
   tableau: null,
   zendesk: null,
+  hubspot_contacts: null,
+  ghl_opportunities: null,
+  operational_data: null,
 }
 
 const defaultData: DashboardData = {
@@ -96,6 +103,10 @@ const defaultData: DashboardData = {
   pelagonia: [],
   tableau: [],
   zendesk: [],
+  hubspot_contacts: [],
+  ghl_opportunities: [],
+  operational_data: [],
+  plan_targets: [],
   lastRefresh: { ...emptyLastRefresh },
   lastRefreshed: { ...emptyLastRefresh },
 }
@@ -172,6 +183,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
         pelagonia: asRows(body.pelagonia),
         tableau: asRows(body.tableau),
         zendesk: asRows(body.zendesk),
+        hubspot_contacts: asRows(body.hubspot_contacts),
+        ghl_opportunities: asRows(body.ghl_opportunities),
+        operational_data: asRows(body.operational_data),
+        plan_targets: asRows(body.plan_targets),
         lastRefresh,
         lastRefreshed: lastRefresh,
       }))
