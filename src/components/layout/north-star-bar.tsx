@@ -1,21 +1,49 @@
 'use client'
 
+import { useMemo } from 'react'
 import { Star } from 'lucide-react'
+import { useDashboardData } from '@/lib/context/data-context'
+
+const num = (v: unknown): number => {
+  if (v === null || v === undefined) return 0
+  const n = typeof v === 'number' ? v : Number(v)
+  return isNaN(n) ? 0 : n
+}
+
+const fmt = (n: number): string => n.toLocaleString('en-US', { maximumFractionDigits: 0 })
 
 export function NorthStarBar() {
+  const { operational_data } = useDashboardData()
+
+  // Latest total_casebook snapshot — the cumulative customer count as of the
+  // most recent operational_data row.
+  const totalCasebook = useMemo(() => {
+    if (!operational_data.length) return null
+    const sorted = [...operational_data].sort((a, b) =>
+      String(b.date ?? '').localeCompare(String(a.date ?? ''))
+    )
+    return num(sorted[0].total_casebook)
+  }, [operational_data])
+
+  // Lifetime sum of pods dispatched across every operational_data row.
+  const podsDispatched = useMemo(() => {
+    if (!operational_data.length) return null
+    return operational_data.reduce((s, r) => s + num(r.pod_dispatched), 0)
+  }, [operational_data])
+
   return (
     <div className="border-b border-dash-border bg-dash-surface/50 px-6 py-3">
       <div className="mx-auto flex max-w-[1440px] gap-8">
         <NorthStarMetric
-          label="BETTER TOMORROWS CREATED"
-          value="TBC"
-          subtitle="Active members x days active"
+          label="TOTAL CASEBOOK"
+          value={totalCasebook === null ? '—' : fmt(totalCasebook)}
+          subtitle="Cumulative customers (all time)"
         />
         <div className="w-px bg-dash-border" />
         <NorthStarMetric
-          label="COHORT RETENTION POST-2ND"
-          value="TBC"
-          subtitle="Target: 75%+"
+          label="PODS DISPATCHED"
+          value={podsDispatched === null ? '—' : fmt(podsDispatched)}
+          subtitle="Lifetime sum"
         />
       </div>
     </div>
@@ -37,7 +65,7 @@ function NorthStarMetric({
         <Star size={14} className="text-dash-red" />
       </div>
       <div className="border-l-[3px] border-dash-red pl-3">
-        <span className="font-sans text-[11px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary">
+        <span className="font-ui text-[11px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary">
           {label}
         </span>
         <div className="flex items-baseline gap-2">
