@@ -182,6 +182,13 @@ export default function DashboardPage() {
     }) ?? null
   }, [plan_targets, periodStart])
 
+  // Days in the period's calendar month — used to derive a daily target
+  // overlay on Section 1 sparklines (monthly target ÷ days in month).
+  const daysInPeriodMonth = useMemo(
+    () => new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, 0).getDate(),
+    [periodStart]
+  )
+
   /* ── Section 1 — Headline Growth ── */
   // customerRows is still needed for Section 2 / Section 3 (eScript, Blood
   // Dashboards, Epi Dashboards, churn rate denominator fallback) — pulled
@@ -543,14 +550,17 @@ export default function DashboardPage() {
               ? `${registrationsCurrent} / ${registrationsTarget}`
               : String(registrationsCurrent)}
             target={registrationsTarget
-              ? `target ${registrationsTarget} this month`
+              ? `${Math.round((registrationsCurrent / registrationsTarget) * 100)}% of ${registrationsTarget} target`
               : 'no target set'}
             status={registrationsTarget
               ? statusPctVsTarget(registrationsCurrent, registrationsTarget)
               : (registrationsCurrent > 0 ? 'green' : 'grey')}
             delta={registrationsDelta === null ? null : { value: Math.round(registrationsDelta), period: 'vs previous' }}
             href="/members"
-            chart={<TileChart data={registrationsSeries} />}
+            chart={<TileChart
+              data={registrationsSeries}
+              referenceLine={registrationsTarget ? registrationsTarget / daysInPeriodMonth : undefined}
+            />}
           />
           <MetricTile
             label="Gross Revenue"
@@ -558,14 +568,18 @@ export default function DashboardPage() {
               ? fmtCurrency(grossRevenueCurrent, { compact: true })
               : '—'}
             target={grossRevenueTarget
-              ? `target ${fmtCurrency(grossRevenueTarget, { compact: true })}`
-              : 'this month'}
+              ? `${Math.round((grossRevenueCurrent / grossRevenueTarget) * 100)}% of ${fmtCurrency(grossRevenueTarget, { compact: true })} target`
+              : 'no target set'}
             status={grossRevenueTarget
               ? statusPctVsTarget(grossRevenueCurrent, grossRevenueTarget)
               : (grossRevenueCurrent > 0 ? 'green' : 'grey')}
             delta={grossRevenueDelta === null ? null : { value: Math.round(grossRevenueDelta), period: 'vs previous' }}
             href="/financial"
-            chart={<TileChart data={grossRevenueSeries} formatValue={(n) => fmtCurrency(n, { compact: true })} />}
+            chart={<TileChart
+              data={grossRevenueSeries}
+              formatValue={(n) => fmtCurrency(n, { compact: true })}
+              referenceLine={grossRevenueTarget ? grossRevenueTarget / daysInPeriodMonth : undefined}
+            />}
           />
           <LockedTile
             label="Net Revenue"

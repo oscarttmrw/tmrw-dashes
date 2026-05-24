@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import {
-  Area, AreaChart, Line, LineChart, ResponsiveContainer, Tooltip,
+  Area, AreaChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip,
 } from 'recharts'
 
 type Variant = 'line' | 'area'
@@ -32,12 +32,13 @@ export function TileChart({
   height = 48,
   referenceLine,
 }: TileChartProps) {
-  // Suppress unused-warning until plan-target overlay (PR D) lands.
-  void referenceLine
-
   const cleaned = useMemo(() => data.filter(d => isFinite(d.value)), [data])
 
   if (cleaned.length === 0) return null
+
+  const refLine = typeof referenceLine === 'number' && isFinite(referenceLine)
+    ? <ReferenceLine y={referenceLine} stroke="#D9D9D9" strokeDasharray="3 3" strokeWidth={1} />
+    : null
 
   if (variant === 'line') {
     return (
@@ -48,6 +49,7 @@ export function TileChart({
               cursor={{ stroke: '#A3A3A3', strokeDasharray: '2 2' }}
               content={<SparkTooltip formatValue={formatValue} />}
             />
+            {refLine}
             <Line
               type="monotone"
               dataKey="value"
@@ -76,6 +78,7 @@ export function TileChart({
             cursor={{ stroke: '#A3A3A3', strokeDasharray: '2 2' }}
             content={<SparkTooltip formatValue={formatValue} />}
           />
+          {refLine}
           <Area
             type="monotone"
             dataKey="value"
