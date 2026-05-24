@@ -48,13 +48,17 @@ export function processOperationalDataXlsx(
       return
     }
 
+    // Preserve null for missing/blank cells so downstream tiles can
+    // distinguish "no data yet for this future date" from a real zero.
+    // Aggregations (SUM) treat null as 0 via the num() helper, so totals
+    // stay correct.
     validRows.push({
       date,
-      customers_registered: int(lc['customers_registered']) ?? 0,
-      total_casebook: int(lc['total_casebook']) ?? 0,
-      pod_created: int(lc['pod_created']) ?? 0,
-      pod_dispatched: int(lc['pod_dispatched']) ?? 0,
-      churned_members: int(lc['churned members']) ?? 0,
+      customers_registered: int(lc['customers_registered']),
+      total_casebook: int(lc['total_casebook']),
+      pod_created: int(lc['pod_created']),
+      pod_dispatched: int(lc['pod_dispatched']),
+      churned_members: int(lc['churned members']),
     })
   })
 

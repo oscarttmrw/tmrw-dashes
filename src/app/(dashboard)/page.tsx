@@ -312,10 +312,13 @@ export default function DashboardPage() {
     [operational_data, prevPeriodStart, prevPeriodEnd]
   )
   const latestTotalCasebook = (asOf: Date): number => {
+    // Pick most recent row whose date <= asOf AND has a real total_casebook
+    // value (skip future-date placeholder rows whose cells are blank).
     const rows = operational_data
       .filter(r => {
         const t = r.date ? new Date(String(r.date)).getTime() : NaN
-        return !isNaN(t) && t <= asOf.getTime()
+        if (isNaN(t) || t > asOf.getTime()) return false
+        return r.total_casebook !== null && r.total_casebook !== undefined && num(r.total_casebook) > 0
       })
       .sort((a, b) => String(b.date).localeCompare(String(a.date)))
     return rows[0] ? num(rows[0].total_casebook) : 0

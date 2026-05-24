@@ -15,11 +15,15 @@ const fmt = (n: number): string => n.toLocaleString('en-US', { maximumFractionDi
 export function NorthStarBar() {
   const { operational_data } = useDashboardData()
 
-  // Latest total_casebook snapshot — the cumulative customer count as of the
-  // most recent operational_data row.
+  // Latest total_casebook snapshot. The xlsx ships with trailing future-date
+  // rows whose value cells are blank — skip those so the snapshot picks the
+  // most recent date that actually has a casebook number.
   const totalCasebook = useMemo(() => {
-    if (!operational_data.length) return null
-    const sorted = [...operational_data].sort((a, b) =>
+    const withValue = operational_data.filter(r =>
+      r.total_casebook !== null && r.total_casebook !== undefined && num(r.total_casebook) > 0
+    )
+    if (!withValue.length) return null
+    const sorted = [...withValue].sort((a, b) =>
       String(b.date ?? '').localeCompare(String(a.date ?? ''))
     )
     return num(sorted[0].total_casebook)
