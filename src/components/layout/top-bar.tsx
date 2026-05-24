@@ -104,9 +104,15 @@ export function TopBar({ onCommandBarOpen, onMobileMenuOpen }: TopBarProps) {
           </button>
         )}
         {/* TMRW brand visible only on mobile (desktop has it in sidebar) */}
-        <h1 className="font-display text-[18px] font-normal uppercase tracking-[0.04em] text-white md:hidden">
-          TMRW
-        </h1>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="https://res.cloudinary.com/dkbhatjde/image/upload/v1774156339/TMRW_Wordmark_White_feybxl.svg"
+          alt="TMRW Health"
+          width={90}
+          height={20}
+          style={{ height: 20, width: 'auto' }}
+          className="md:hidden"
+        />
       </div>
 
       <div className="flex items-center gap-2 md:gap-3">
