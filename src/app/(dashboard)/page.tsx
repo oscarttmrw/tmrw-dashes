@@ -159,16 +159,13 @@ export default function DashboardPage() {
     stripe,
     hubspot_contacts,
     ghl_opportunities,
-    operational_data: _operational_data,
+    operational_data,
     plan_targets,
     lastRefresh,
     loading,
     error,
     refresh,
   } = useDashboardData()
-
-  // Suppress unused-var warning — operational_data is wired in for PR D.
-  void _operational_data
 
   // User-controlled date range picker (PR C). Independent state per page.
   const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
@@ -186,18 +183,27 @@ export default function DashboardPage() {
   }, [plan_targets, periodStart])
 
   /* ── Section 1 — Headline Growth ── */
-  // 1.1 Registrations
+  // customerRows is still needed for Section 2 / Section 3 (eScript, Blood
+  // Dashboards, Epi Dashboards, churn rate denominator fallback) — pulled
+  // from HubSpot. Registrations + Churn count tiles below switch to
+  // operational_data per the source-of-truth decision.
   const customerRows = useMemo(
     () => hubspot_contacts.filter(r => r.lifecycle_stage === 'Customer'),
     [hubspot_contacts]
   )
+
+  // 1.1 Registrations — SUM(customers_registered) from operational_data daily roll-up.
   const registrationsCurrent = useMemo(
-    () => customerRows.filter(r => inPeriod(r.customer_entered_at, periodStart, periodEnd)).length,
-    [customerRows, periodStart, periodEnd]
+    () => operational_data
+      .filter(r => inPeriod(r.date, periodStart, periodEnd))
+      .reduce((s, r) => s + num(r.customers_registered), 0),
+    [operational_data, periodStart, periodEnd]
   )
   const registrationsPrev = useMemo(
-    () => customerRows.filter(r => inPeriod(r.customer_entered_at, prevPeriodStart, prevPeriodEnd)).length,
-    [customerRows, prevPeriodStart, prevPeriodEnd]
+    () => operational_data
+      .filter(r => inPeriod(r.date, prevPeriodStart, prevPeriodEnd))
+      .reduce((s, r) => s + num(r.customers_registered), 0),
+    [operational_data, prevPeriodStart, prevPeriodEnd]
   )
   const registrationsTarget = currentPlanTarget ? num(currentPlanTarget.registrations_target) : null
   const registrationsDelta = deltaPct(registrationsCurrent, registrationsPrev)
@@ -289,17 +295,35 @@ export default function DashboardPage() {
       : null
 
   /* ── Section 3 — Retention ── */
-  // Monthly Churn Rate (Formula B, cumulative naive)
+  // Monthly Churn Rate — operational_data daily roll-up.
+  // Numerator: SUM(churned_members) in period.
+  // Denominator: latest total_casebook snapshot on or before period end
+  //   (the cumulative customer count at that point in time).
   const churnCurrentCount = useMemo(
-    () => customerRows.filter(r => inPeriod(r.churn_date, periodStart, periodEnd)).length,
-    [customerRows, periodStart, periodEnd]
+    () => operational_data
+      .filter(r => inPeriod(r.date, periodStart, periodEnd))
+      .reduce((s, r) => s + num(r.churned_members), 0),
+    [operational_data, periodStart, periodEnd]
   )
   const churnPrevCount = useMemo(
-    () => customerRows.filter(r => inPeriod(r.churn_date, prevPeriodStart, prevPeriodEnd)).length,
-    [customerRows, prevPeriodStart, prevPeriodEnd]
+    () => operational_data
+      .filter(r => inPeriod(r.date, prevPeriodStart, prevPeriodEnd))
+      .reduce((s, r) => s + num(r.churned_members), 0),
+    [operational_data, prevPeriodStart, prevPeriodEnd]
   )
-  const monthlyChurnRate = totalCustomers > 0 ? (churnCurrentCount / totalCustomers) * 100 : 0
-  const prevChurnRate = totalCustomers > 0 ? (churnPrevCount / totalCustomers) * 100 : 0
+  const latestTotalCasebook = (asOf: Date): number => {
+    const rows = operational_data
+      .filter(r => {
+        const t = r.date ? new Date(String(r.date)).getTime() : NaN
+        return !isNaN(t) && t <= asOf.getTime()
+      })
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    return rows[0] ? num(rows[0].total_casebook) : 0
+  }
+  const denomCurrent = latestTotalCasebook(periodEnd)
+  const denomPrev = latestTotalCasebook(prevPeriodEnd)
+  const monthlyChurnRate = denomCurrent > 0 ? (churnCurrentCount / denomCurrent) * 100 : 0
+  const prevChurnRate = denomPrev > 0 ? (churnPrevCount / denomPrev) * 100 : 0
   const churnDelta = deltaPct(monthlyChurnRate, prevChurnRate)
 
   /* ── Section 4 — Economics ── */
@@ -377,9 +401,9 @@ export default function DashboardPage() {
 
   /* ── Sparkline series (one per active tile) ── */
   const registrationsSeries = useMemo(
-    () => bucketByDay(customerRows, 'customer_entered_at', periodStart, periodEnd,
-      (rows) => rows.length),
-    [customerRows, periodStart, periodEnd]
+    () => bucketByDay(operational_data, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.customers_registered), 0)),
+    [operational_data, periodStart, periodEnd]
   )
   const grossRevenueSeries = useMemo(
     () => bucketByDay(stripe, 'created', periodStart, periodEnd,
@@ -392,9 +416,9 @@ export default function DashboardPage() {
     [customerRows, periodStart, periodEnd]
   )
   const churnSeries = useMemo(
-    () => bucketByDay(customerRows, 'churn_date', periodStart, periodEnd,
-      (rows) => rows.length),
-    [customerRows, periodStart, periodEnd]
+    () => bucketByDay(operational_data, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.churned_members), 0)),
+    [operational_data, periodStart, periodEnd]
   )
   const costPerLeadSeries = useMemo(
     () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
@@ -610,10 +634,10 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
           <MetricTile
             label="Monthly Churn Rate"
-            value={totalCustomers === 0 ? '—' : `${monthlyChurnRate.toFixed(1)}%`}
+            value={denomCurrent === 0 ? '—' : `${monthlyChurnRate.toFixed(1)}%`}
             target="target <5%"
             status={
-              totalCustomers === 0 ? 'grey'
+              denomCurrent === 0 ? 'grey'
               : monthlyChurnRate <= 5 ? 'green'
               : monthlyChurnRate <= 8 ? 'amber' : 'red'
             }
