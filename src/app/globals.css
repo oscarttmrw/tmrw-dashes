@@ -1,10 +1,28 @@
 @import "tailwindcss";
 @source "../../node_modules/@tremor/react/dist/**/*.js";
 
+@font-face {
+  font-family: 'ApocRevelations';
+  src: url('https://res.cloudinary.com/dkbhatjde/raw/upload/v1774155589/ApocRevelations-Regular_wnz2nv.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Brown';
+  src: url('https://res.cloudinary.com/dkbhatjde/raw/upload/v1774155996/Brown-Regular_wkp3tt.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --font-serif: 'Crimson Text', Georgia, serif;
+  --font-display: 'ApocRevelations', serif;
+  --font-ui: 'Brown', ui-sans-serif, system-ui, sans-serif;
 
   /* Surfaces — INCREASED CONTRAST */
   --color-dash-bg: #FFFFFF;
@@ -29,6 +47,10 @@
   --color-dash-red: #8B0000;
   --color-dash-red-light: #8B000015;
   --color-dash-black: #1A1A1A;
+
+  /* TMRW brand accents */
+  --color-tmrw-syringe: #E61317;
+  --color-tmrw-syringe-light: #E6131715;
 
   /* Status */
   --color-status-green: #16A34A;
