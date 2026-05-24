@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { SectionHeading } from '@/components/dashboard/section-heading'
+import { TrendIndicator } from '@/components/dashboard/trend-indicator'
 import { useDashboardData } from '@/lib/context/data-context'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
@@ -13,6 +14,7 @@ import {
   defaultDateRangePicker,
   type DateRangePickerValue,
 } from '@/components/dashboard/date-range-picker'
+import { TileChart, bucketByDay } from '@/components/dashboard/tile-chart'
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
 
@@ -40,20 +42,37 @@ function inPeriod(value: unknown, start: Date, end: Date): boolean {
   return t >= start.getTime() && t <= end.getTime()
 }
 
+function deltaPct(current: number, previous: number): number | null {
+  if (previous === 0) return null
+  return ((current - previous) / previous) * 100
+}
+
 /* ─── Tile ────────────────────────────────────────────────────────── */
 
 interface KpiTileProps {
   label: string
   value: string
   sublabel?: string
+  delta?: number | null
+  direction?: 'higher-better' | 'lower-better'
+  chart?: React.ReactNode
 }
 
-function KpiTile({ label, value, sublabel }: KpiTileProps) {
+function KpiTile({ label, value, sublabel, delta, direction = 'higher-better', chart }: KpiTileProps) {
   return (
-    <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+    <div className="flex h-full flex-col rounded-lg border border-dash-border bg-dash-surface p-4">
       <p className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary">{label}</p>
-      <p className="mt-2 font-mono text-2xl font-bold text-dash-text">{value}</p>
-      {sublabel && <p className="mt-1 text-xs text-dash-text-secondary">{sublabel}</p>}
+      <div className="mt-2 flex items-baseline gap-2">
+        <p className="font-mono text-2xl font-bold text-dash-text">{value}</p>
+        {delta !== null && delta !== undefined && (
+          <TrendIndicator value={Math.round(delta)} direction={direction} />
+        )}
+      </div>
+      {chart && <div className="mt-2">{chart}</div>}
+      <div className="mt-auto pt-1.5 flex items-center justify-between text-[11px] text-dash-text-muted">
+        {sublabel ? <span>{sublabel}</span> : <span />}
+        {delta !== null && delta !== undefined && <span className="font-sans">vs previous</span>}
+      </div>
     </div>
   )
 }
@@ -67,22 +86,23 @@ export default function MarketingPage() {
   const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
   const periodStart = pickerValue.period.start
   const periodEnd = pickerValue.period.end
+  const prevStart = pickerValue.comparison.start
+  const prevEnd = pickerValue.comparison.end
 
-  /* ── Paid — Meta Ads (aggregated over period) ── */
+  /* ── Paid — Meta Ads ── */
   const metaInPeriod = useMemo(
     () => meta_ads.filter(r => inPeriod(r.date, periodStart, periodEnd)),
     [meta_ads, periodStart, periodEnd]
   )
+  const metaInPrev = useMemo(
+    () => meta_ads.filter(r => inPeriod(r.date, prevStart, prevEnd)),
+    [meta_ads, prevStart, prevEnd]
+  )
 
-  const metaAgg = useMemo(() => {
-    let spend = 0
-    let impressions = 0
-    let clicks = 0
-    let lpv = 0
-    let conversions = 0
-    let videoViews = 0
-    let postEngagements = 0
-    for (const r of metaInPeriod) {
+  const aggregateMeta = (rows: typeof meta_ads) => {
+    let spend = 0, impressions = 0, clicks = 0, lpv = 0
+    let conversions = 0, videoViews = 0, postEngagements = 0
+    for (const r of rows) {
       spend += num(r.spend)
       impressions += num(r.impressions)
       clicks += num(r.clicks)
@@ -91,12 +111,60 @@ export default function MarketingPage() {
       videoViews += num(r.video_views)
       postEngagements += num(r.post_engagements)
     }
-    // Weighted ratios — more accurate than averaging daily ratios.
-    const ctr = impressions > 0 ? (clicks / impressions) * 100 : null
-    const costPerLpv = lpv > 0 ? spend / lpv : null
-    const costPerConversion = conversions > 0 ? spend / conversions : null
+    const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0
+    const costPerLpv = lpv > 0 ? spend / lpv : 0
+    const costPerConversion = conversions > 0 ? spend / conversions : 0
     return { spend, impressions, clicks, ctr, lpv, costPerLpv, conversions, costPerConversion, videoViews, postEngagements }
-  }, [metaInPeriod])
+  }
+
+  const metaAgg = useMemo(() => aggregateMeta(metaInPeriod), [metaInPeriod])
+  const metaPrev = useMemo(() => aggregateMeta(metaInPrev), [metaInPrev])
+
+  /* ── Daily series per Meta tile ── */
+  const sparkMeta = (field: keyof typeof metaAgg) => bucketByDay(
+    meta_ads, 'date', periodStart, periodEnd,
+    (rows) => {
+      // For ratio tiles, recompute the ratio on the day's rows.
+      if (field === 'ctr') {
+        const imp = rows.reduce((s, r) => s + num(r.impressions), 0)
+        const clk = rows.reduce((s, r) => s + num(r.clicks), 0)
+        return imp > 0 ? (clk / imp) * 100 : 0
+      }
+      if (field === 'costPerLpv') {
+        const sp = rows.reduce((s, r) => s + num(r.spend), 0)
+        const v = rows.reduce((s, r) => s + num(r.landing_page_views), 0)
+        return v > 0 ? sp / v : 0
+      }
+      if (field === 'costPerConversion') {
+        const sp = rows.reduce((s, r) => s + num(r.spend), 0)
+        const v = rows.reduce((s, r) => s + num(r.conversions_leads), 0)
+        return v > 0 ? sp / v : 0
+      }
+      // Sum tiles map cleanly to column names
+      const colByField: Record<string, string> = {
+        spend: 'spend',
+        impressions: 'impressions',
+        clicks: 'clicks',
+        lpv: 'landing_page_views',
+        conversions: 'conversions_leads',
+        videoViews: 'video_views',
+        postEngagements: 'post_engagements',
+      }
+      const col = colByField[field as string]
+      return col ? rows.reduce((s, r) => s + num((r as Record<string, unknown>)[col]), 0) : 0
+    }
+  )
+
+  const sparkSpend           = useMemo(() => sparkMeta('spend'),             [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
+  const sparkImpressions     = useMemo(() => sparkMeta('impressions'),       [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
+  const sparkClicks          = useMemo(() => sparkMeta('clicks'),            [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
+  const sparkCtr             = useMemo(() => sparkMeta('ctr'),               [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
+  const sparkLpv             = useMemo(() => sparkMeta('lpv'),               [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
+  const sparkCostPerLpv      = useMemo(() => sparkMeta('costPerLpv'),        [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
+  const sparkConversions     = useMemo(() => sparkMeta('conversions'),       [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
+  const sparkCostPerConv     = useMemo(() => sparkMeta('costPerConversion'), [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
+  const sparkVideoViewsMeta  = useMemo(() => sparkMeta('videoViews'),        [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
+  const sparkPostEngMeta     = useMemo(() => sparkMeta('postEngagements'),   [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Organic — Social Followers (latest snapshot per platform) ── */
   const followersByPlatform = useMemo(() => {
@@ -123,18 +191,38 @@ export default function MarketingPage() {
     () => social_views.filter(r => inPeriod(r.date, periodStart, periodEnd)),
     [social_views, periodStart, periodEnd]
   )
+  const viewsInPrev = useMemo(
+    () => social_views.filter(r => inPeriod(r.date, prevStart, prevEnd)),
+    [social_views, prevStart, prevEnd]
+  )
 
-  const viewsAgg = useMemo(() => {
-    let pageViews = 0
-    let videoViews = 0
-    let postEngagements = 0
-    for (const r of viewsInPeriod) {
+  const aggregateViews = (rows: typeof social_views) => {
+    let pageViews = 0, videoViews = 0, postEngagements = 0
+    for (const r of rows) {
       pageViews += num(r.page_views)
       videoViews += num(r.video_views)
       postEngagements += num(r.post_engagements)
     }
     return { pageViews, videoViews, postEngagements }
-  }, [viewsInPeriod])
+  }
+  const viewsAgg = useMemo(() => aggregateViews(viewsInPeriod), [viewsInPeriod])
+  const viewsPrev = useMemo(() => aggregateViews(viewsInPrev), [viewsInPrev])
+
+  const sparkPageViews = useMemo(
+    () => bucketByDay(social_views, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.page_views), 0)),
+    [social_views, periodStart, periodEnd]
+  )
+  const sparkVideoViewsSocial = useMemo(
+    () => bucketByDay(social_views, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.video_views), 0)),
+    [social_views, periodStart, periodEnd]
+  )
+  const sparkPostEngSocial = useMemo(
+    () => bucketByDay(social_views, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.post_engagements), 0)),
+    [social_views, periodStart, periodEnd]
+  )
 
   /* ── Engagement trend chart — daily series ── */
   const trendData = useMemo(() => {
@@ -161,16 +249,70 @@ export default function MarketingPage() {
       <section>
         <SectionHeading number={1} title="Paid — Meta Ads" />
         <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-5">
-          <KpiTile label="Spend" value={fmtCurrency(metaAgg.spend, { compact: true, digits: 0 })} />
-          <KpiTile label="Impressions" value={fmtNum(metaAgg.impressions)} />
-          <KpiTile label="Clicks" value={fmtNum(metaAgg.clicks)} />
-          <KpiTile label="CTR" value={metaAgg.ctr === null ? '—' : fmtPct(metaAgg.ctr)} sublabel="clicks ÷ impressions" />
-          <KpiTile label="Landing Page Views" value={fmtNum(metaAgg.lpv)} />
-          <KpiTile label="Cost per LPV" value={metaAgg.costPerLpv === null ? '—' : fmtCurrency(metaAgg.costPerLpv)} />
-          <KpiTile label="Conversions (Leads)" value={fmtNum(metaAgg.conversions)} />
-          <KpiTile label="Cost per Conversion" value={metaAgg.costPerConversion === null ? '—' : fmtCurrency(metaAgg.costPerConversion)} />
-          <KpiTile label="Video Views" value={fmtNum(metaAgg.videoViews)} />
-          <KpiTile label="Post Engagements" value={fmtNum(metaAgg.postEngagements)} />
+          <KpiTile
+            label="Spend"
+            value={fmtCurrency(metaAgg.spend, { compact: true, digits: 0 })}
+            delta={deltaPct(metaAgg.spend, metaPrev.spend)}
+            direction="lower-better"
+            chart={<TileChart data={sparkSpend} formatValue={(n) => fmtCurrency(n, { compact: true })} />}
+          />
+          <KpiTile
+            label="Impressions"
+            value={fmtNum(metaAgg.impressions)}
+            delta={deltaPct(metaAgg.impressions, metaPrev.impressions)}
+            chart={<TileChart data={sparkImpressions} />}
+          />
+          <KpiTile
+            label="Clicks"
+            value={fmtNum(metaAgg.clicks)}
+            delta={deltaPct(metaAgg.clicks, metaPrev.clicks)}
+            chart={<TileChart data={sparkClicks} />}
+          />
+          <KpiTile
+            label="CTR"
+            value={metaAgg.impressions === 0 ? '—' : fmtPct(metaAgg.ctr)}
+            sublabel="clicks ÷ impressions"
+            delta={deltaPct(metaAgg.ctr, metaPrev.ctr)}
+            chart={<TileChart data={sparkCtr} variant="line" formatValue={(n) => fmtPct(n)} />}
+          />
+          <KpiTile
+            label="Landing Page Views"
+            value={fmtNum(metaAgg.lpv)}
+            delta={deltaPct(metaAgg.lpv, metaPrev.lpv)}
+            chart={<TileChart data={sparkLpv} />}
+          />
+          <KpiTile
+            label="Cost per LPV"
+            value={metaAgg.lpv === 0 ? '—' : fmtCurrency(metaAgg.costPerLpv)}
+            delta={deltaPct(metaAgg.costPerLpv, metaPrev.costPerLpv)}
+            direction="lower-better"
+            chart={<TileChart data={sparkCostPerLpv} variant="line" formatValue={(n) => fmtCurrency(n)} />}
+          />
+          <KpiTile
+            label="Conversions (Leads)"
+            value={fmtNum(metaAgg.conversions)}
+            delta={deltaPct(metaAgg.conversions, metaPrev.conversions)}
+            chart={<TileChart data={sparkConversions} />}
+          />
+          <KpiTile
+            label="Cost per Conversion"
+            value={metaAgg.conversions === 0 ? '—' : fmtCurrency(metaAgg.costPerConversion)}
+            delta={deltaPct(metaAgg.costPerConversion, metaPrev.costPerConversion)}
+            direction="lower-better"
+            chart={<TileChart data={sparkCostPerConv} variant="line" formatValue={(n) => fmtCurrency(n)} />}
+          />
+          <KpiTile
+            label="Video Views"
+            value={fmtNum(metaAgg.videoViews)}
+            delta={deltaPct(metaAgg.videoViews, metaPrev.videoViews)}
+            chart={<TileChart data={sparkVideoViewsMeta} />}
+          />
+          <KpiTile
+            label="Post Engagements"
+            value={fmtNum(metaAgg.postEngagements)}
+            delta={deltaPct(metaAgg.postEngagements, metaPrev.postEngagements)}
+            chart={<TileChart data={sparkPostEngMeta} />}
+          />
         </div>
       </section>
 
@@ -190,9 +332,24 @@ export default function MarketingPage() {
       <section>
         <SectionHeading number={3} title="Organic — Social Views" />
         <div className="grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
-          <KpiTile label="Page Views" value={fmtNum(viewsAgg.pageViews)} />
-          <KpiTile label="Video Views" value={fmtNum(viewsAgg.videoViews)} />
-          <KpiTile label="Post Engagements" value={fmtNum(viewsAgg.postEngagements)} />
+          <KpiTile
+            label="Page Views"
+            value={fmtNum(viewsAgg.pageViews)}
+            delta={deltaPct(viewsAgg.pageViews, viewsPrev.pageViews)}
+            chart={<TileChart data={sparkPageViews} />}
+          />
+          <KpiTile
+            label="Video Views"
+            value={fmtNum(viewsAgg.videoViews)}
+            delta={deltaPct(viewsAgg.videoViews, viewsPrev.videoViews)}
+            chart={<TileChart data={sparkVideoViewsSocial} />}
+          />
+          <KpiTile
+            label="Post Engagements"
+            value={fmtNum(viewsAgg.postEngagements)}
+            delta={deltaPct(viewsAgg.postEngagements, viewsPrev.postEngagements)}
+            chart={<TileChart data={sparkPostEngSocial} />}
+          />
         </div>
       </section>
 
