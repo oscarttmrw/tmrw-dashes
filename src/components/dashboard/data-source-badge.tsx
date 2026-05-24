@@ -2,10 +2,23 @@
 
 import { cn } from '@/lib/utils'
 
-type Source = 'hubspot' | 'stripe' | 'zendesk' | 'manual' | 'tableau' | 'meta' | 'pelagonia'
+type Source =
+  | 'hubspot'
+  | 'hubspot_contacts'
+  | 'ghl_opportunities'
+  | 'operational_data'
+  | 'stripe'
+  | 'zendesk'
+  | 'manual'
+  | 'tableau'
+  | 'meta'
+  | 'pelagonia'
 
 const sourceConfig: Record<Source, { label: string; color: string }> = {
   hubspot: { label: 'HubSpot', color: 'bg-src-hubspot/15 text-src-hubspot' },
+  hubspot_contacts: { label: 'HubSpot Contacts', color: 'bg-src-hubspot/15 text-src-hubspot' },
+  ghl_opportunities: { label: 'GHL Opportunities', color: 'bg-src-zendesk/15 text-src-zendesk' },
+  operational_data: { label: 'Operational Data', color: 'bg-src-manual/15 text-src-manual' },
   stripe: { label: 'Stripe', color: 'bg-src-stripe/15 text-src-stripe' },
   zendesk: { label: 'Zendesk', color: 'bg-src-zendesk/15 text-src-zendesk' },
   manual: { label: 'Manual', color: 'bg-src-manual/15 text-src-manual' },

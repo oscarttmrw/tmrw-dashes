@@ -2,12 +2,22 @@ import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { createClient as createServerSupabase } from '@/lib/supabase/server'
 
-type SourceKey = 'meta' | 'stripe' | 'hubspot' | 'pelagonia' | 'tableau' | 'zendesk'
+type SourceKey =
+  | 'meta'
+  | 'stripe'
+  | 'hubspot_contacts'
+  | 'ghl_opportunities'
+  | 'operational_data'
+  | 'pelagonia'
+  | 'tableau'
+  | 'zendesk'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
   meta: 'meta_data',
   stripe: 'stripe_data',
-  hubspot: 'hubspot_data',
+  hubspot_contacts: 'hubspot_contacts',
+  ghl_opportunities: 'ghl_opportunities',
+  operational_data: 'operational_data',
   pelagonia: 'pelagonia_data',
   tableau: 'tableau_data',
   zendesk: 'zendesk_data',
@@ -16,7 +26,9 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
 const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
   meta: 'date',
   stripe: 'created_at',
-  hubspot: 'hubspot_created_at',
+  hubspot_contacts: 'create_date',
+  ghl_opportunities: 'created_on',
+  operational_data: 'date',
   pelagonia: 'pelagonia_created_at',
   tableau: 'event_date',
   zendesk: 'zendesk_created_at',
@@ -31,7 +43,16 @@ export async function GET() {
   }
 
   const supabase = createServiceClient()
-  const sources: SourceKey[] = ['meta', 'stripe', 'hubspot', 'pelagonia', 'tableau', 'zendesk']
+  const sources: SourceKey[] = [
+    'meta',
+    'stripe',
+    'hubspot_contacts',
+    'ghl_opportunities',
+    'operational_data',
+    'pelagonia',
+    'tableau',
+    'zendesk',
+  ]
 
   const results = await Promise.all(
     sources.map(s =>
@@ -55,6 +76,12 @@ export async function GET() {
     )
   )
 
+  // plan_targets is a small admin-managed table — fetch all rows.
+  const planTargetsRes = await supabase
+    .from('plan_targets')
+    .select('*')
+    .order('month', { ascending: false })
+
   const out: Record<string, unknown> = {}
   const errors: { source: string; message: string }[] = []
   const lastRefresh: Record<string, string | null> = {}
@@ -70,6 +97,13 @@ export async function GET() {
     const log = refreshLogs[i].data
     lastRefresh[s] = (log?.uploaded_at as string | undefined) ?? null
   })
+
+  if (planTargetsRes.error) {
+    errors.push({ source: 'plan_targets', message: planTargetsRes.error.message })
+    out.plan_targets = []
+  } else {
+    out.plan_targets = planTargetsRes.data ?? []
+  }
 
   out.lastRefresh = lastRefresh
   if (errors.length > 0) out.errors = errors

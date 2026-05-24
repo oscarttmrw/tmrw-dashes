@@ -5,21 +5,32 @@ import {
   fullReplaceStrategy,
   dateRangeReplaceStrategy,
   upsertStrategy,
-  appendStrategy,
 } from '@/lib/upload-strategies'
 import { processMetaToCanonical } from '@/lib/processors/meta-processor'
 import { processStripeToCanonical } from '@/lib/processors/stripe-processor'
-import { processHubspotToCanonical } from '@/lib/processors/hubspot-processor'
+import { processHubspotContactsToCanonical } from '@/lib/processors/hubspot-contacts-processor'
+import { processGhlToCanonical } from '@/lib/processors/ghl-processor'
+import { processOperationalDataToCanonical } from '@/lib/processors/operational-data-processor'
 import { processPelagoniaToCanonical } from '@/lib/processors/pelagonia-processor'
 import { processTableauToCanonical } from '@/lib/processors/tableau-processor'
 import { processZendeskToCanonical } from '@/lib/processors/zendesk-processor'
 import type { ProcessorResult } from '@/lib/processors/_canonical-helpers'
 
-type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta' | 'pelagonia'
+type SourceKey =
+  | 'tableau'
+  | 'hubspot_contacts'
+  | 'ghl_opportunities'
+  | 'operational_data'
+  | 'stripe'
+  | 'zendesk'
+  | 'meta'
+  | 'pelagonia'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
   tableau: 'tableau_data',
-  hubspot: 'hubspot_data',
+  hubspot_contacts: 'hubspot_contacts',
+  ghl_opportunities: 'ghl_opportunities',
+  operational_data: 'operational_data',
   stripe: 'stripe_data',
   zendesk: 'zendesk_data',
   meta: 'meta_data',
@@ -28,7 +39,9 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
 
 const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   tableau: null,
-  hubspot: null,
+  hubspot_contacts: null,
+  ghl_opportunities: 'created_on',
+  operational_data: 'date',
   stripe: 'created_at',
   zendesk: null,
   meta: 'date',
@@ -38,7 +51,9 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
 const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => ProcessorResult> = {
   meta: processMetaToCanonical,
   stripe: processStripeToCanonical,
-  hubspot: processHubspotToCanonical,
+  hubspot_contacts: processHubspotContactsToCanonical,
+  ghl_opportunities: processGhlToCanonical,
+  operational_data: processOperationalDataToCanonical,
   pelagonia: processPelagoniaToCanonical,
   tableau: processTableauToCanonical,
   zendesk: processZendeskToCanonical,
@@ -53,8 +68,12 @@ async function applyWriteStrategy(
   const table = SOURCE_TABLE[source]
   switch (source) {
     case 'tableau':
-    case 'hubspot':
+    case 'hubspot_contacts':
       return fullReplaceStrategy(supabase, table, batchId, rows)
+    case 'ghl_opportunities':
+      return upsertStrategy(supabase, table, batchId, rows, 'opportunity_id')
+    case 'operational_data':
+      return upsertStrategy(supabase, table, batchId, rows, 'date')
     case 'stripe':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created_at')
     case 'meta':
@@ -113,8 +132,19 @@ export async function POST(request: NextRequest) {
     if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
       const { default: XLSX } = await import('xlsx')
       const wb = XLSX.read(buffer, { type: 'array' })
-      const ws = wb.Sheets[wb.SheetNames[0]]
-      rawRows = XLSX.utils.sheet_to_json(ws, { defval: null }) as Record<string, unknown>[]
+      // Operational Data ships on Sheet2; other xlsx files use the first sheet.
+      const sheetName =
+        source === 'operational_data' && wb.SheetNames.includes('Sheet2')
+          ? 'Sheet2'
+          : wb.SheetNames[0]
+      const ws = wb.Sheets[sheetName]
+      // Operational Data needs raw Excel serial numbers to come through as
+      // numbers, not pre-formatted strings — set raw:true for this source.
+      const sheetOpts =
+        source === 'operational_data'
+          ? { defval: null, raw: true }
+          : { defval: null }
+      rawRows = XLSX.utils.sheet_to_json(ws, sheetOpts) as Record<string, unknown>[]
     } else {
       let text: string
       try {

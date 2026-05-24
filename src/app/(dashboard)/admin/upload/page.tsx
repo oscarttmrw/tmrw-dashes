@@ -28,7 +28,9 @@ const DATE_COL: Partial<Record<string, string>> = {
   meta: 'reporting starts',
   stripe: 'created',
   zendesk: 'created at',
-  hubspot: 'created at',
+  hubspot_contacts: 'create date',
+  ghl_opportunities: 'created on',
+  operational_data: 'date',
   pelagonia: 'created at',
 }
 
@@ -84,7 +86,15 @@ function formatDateLabel(from: string | null, to: string | null): string {
 // Types
 // ---------------------------------------------------------------------------
 
-type SourceKey = 'tableau' | 'hubspot' | 'stripe' | 'zendesk' | 'meta' | 'pelagonia'
+type SourceKey =
+  | 'tableau'
+  | 'hubspot_contacts'
+  | 'ghl_opportunities'
+  | 'operational_data'
+  | 'stripe'
+  | 'zendesk'
+  | 'meta'
+  | 'pelagonia'
 
 interface PendingUpload {
   file: File
@@ -120,12 +130,14 @@ interface DataSourceConfig {
 // Sorted descending by metrics powered
 const dataSources: DataSourceConfig[] = (
   [
-    { key: 'pelagonia', name: 'PELAGONIA (GOHIGHLEVEL)', recordLabel: 'opportunities', columnLabel: 'columns' },
-    { key: 'meta',      name: 'META FOR BUSINESS',       recordLabel: 'ad sets',       columnLabel: 'columns' },
-    { key: 'zendesk',   name: 'ZENDESK',                 recordLabel: 'records',        columnLabel: 'columns' },
-    { key: 'hubspot',   name: 'HUBSPOT',                 recordLabel: 'records',        columnLabel: 'columns' },
-    { key: 'stripe',    name: 'STRIPE',                  recordLabel: 'transactions',   columnLabel: 'columns' },
-    { key: 'tableau',   name: 'TABLEAU',                 recordLabel: 'members',        columnLabel: 'measures', note: 'TSV file with UTF-16 encoding handled automatically' },
+    { key: 'hubspot_contacts',  name: 'HUBSPOT CONTACTS',       recordLabel: 'contacts',       columnLabel: 'columns' },
+    { key: 'ghl_opportunities', name: 'GHL OPPORTUNITIES',      recordLabel: 'opportunities', columnLabel: 'columns' },
+    { key: 'operational_data',  name: 'OPERATIONAL DATA',        recordLabel: 'days',           columnLabel: 'columns', note: 'xlsx — reads Sheet2, dates are Excel serial numbers' },
+    { key: 'meta',              name: 'META FOR BUSINESS',       recordLabel: 'ad sets',        columnLabel: 'columns' },
+    { key: 'stripe',            name: 'STRIPE',                  recordLabel: 'transactions',   columnLabel: 'columns' },
+    { key: 'pelagonia',         name: 'PELAGONIA (GOHIGHLEVEL)', recordLabel: 'opportunities', columnLabel: 'columns', note: 'Currently unused — kept for future' },
+    { key: 'zendesk',           name: 'ZENDESK',                 recordLabel: 'records',        columnLabel: 'columns', note: 'Currently unused — kept for future' },
+    { key: 'tableau',           name: 'TABLEAU',                 recordLabel: 'members',        columnLabel: 'measures', note: 'TSV file with UTF-16 encoding handled automatically' },
   ] as DataSourceConfig[]
 ).sort((a, b) => getMetricsPoweredBy(b.key).length - getMetricsPoweredBy(a.key).length)
 

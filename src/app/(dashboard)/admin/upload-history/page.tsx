@@ -25,7 +25,18 @@ interface UploadLogRow {
   data_period_label: string | null
 }
 
-const ALL_SOURCES = ['pelagonia', 'meta', 'zendesk', 'hubspot', 'stripe', 'tableau'] as const
+const ALL_SOURCES = [
+  'hubspot_contacts',
+  'ghl_opportunities',
+  'operational_data',
+  'meta',
+  'stripe',
+  'pelagonia',
+  'zendesk',
+  'tableau',
+  // Legacy — historical uploads pre-redesign still show up under the old key
+  'hubspot',
+] as const
 const ALL_STATUSES = ['complete', 'pending', 'failed'] as const
 
 // ---------------------------------------------------------------------------
