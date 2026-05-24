@@ -23,6 +23,8 @@ export interface NavItem {
   icon: any;
   section: 'home' | 'operations' | 'management' | 'admin';
   badge?: number;
+  /** Small text pill shown next to the label. e.g. 'DEMO', 'WIP'. */
+  tag?: string;
   disabled?: boolean;
   disabledReason?: string;
 }
@@ -30,11 +32,11 @@ export interface NavItem {
 export const navigation: NavItem[] = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, section: 'home' },
 
-  { label: 'Financial', href: '/financial', icon: DollarSign, section: 'operations' },
-  { label: 'Members', href: '/members', icon: Users, section: 'operations' },
-  { label: 'Delivery', href: '/clinical', icon: Stethoscope, section: 'operations' },
-  { label: 'Retention', href: '/retention', icon: RefreshCw, section: 'operations' },
-  { label: 'Support', href: '/support', icon: HeadphonesIcon, section: 'operations' },
+  { label: 'Financial', href: '/financial', icon: DollarSign, section: 'operations', tag: 'DEMO' },
+  { label: 'Members', href: '/members', icon: Users, section: 'operations', tag: 'DEMO' },
+  { label: 'Delivery', href: '/clinical', icon: Stethoscope, section: 'operations', tag: 'DEMO' },
+  { label: 'Retention', href: '/retention', icon: RefreshCw, section: 'operations', tag: 'DEMO' },
+  { label: 'Support', href: '/support', icon: HeadphonesIcon, section: 'operations', tag: 'DEMO' },
   { label: 'Marketing', href: '/marketing', icon: Megaphone, section: 'operations' },
 
   { label: 'Strategy', href: '/strategy', icon: Target, section: 'management', disabled: true, disabledReason: 'Coming in Phase 2.' },

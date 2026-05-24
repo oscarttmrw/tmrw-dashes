@@ -114,6 +114,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   )}
                   <Icon size={16} className="shrink-0" strokeWidth={isActive ? 2 : 1.5} />
                   {!collapsed && <span>{item.label}</span>}
+                  {!collapsed && item.tag && (
+                    <span className="ml-auto rounded-full border border-status-amber/40 bg-status-amber/10 px-1.5 py-px font-mono text-[9px] font-medium uppercase tracking-wider text-status-amber">
+                      {item.tag}
+                    </span>
+                  )}
                   {item.badge && item.badge > 0 && (
                     <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-status-red px-1.5 font-mono text-[10px] font-medium text-white">
                       {item.badge}
