@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { SectionHeading } from '@/components/dashboard/section-heading'
 import { useDashboardData } from '@/lib/context/data-context'
@@ -8,6 +8,11 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
 import { axisTickStyle, axisLineStyle, gridStyle, TMRW_COLORS } from '@/lib/utils/chart-styles'
+import {
+  DateRangePicker,
+  defaultDateRangePicker,
+  type DateRangePickerValue,
+} from '@/components/dashboard/date-range-picker'
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
 
@@ -58,18 +63,10 @@ function KpiTile({ label, value, sublabel }: KpiTileProps) {
 export default function MarketingPage() {
   const { meta_ads, social_followers, social_views } = useDashboardData()
 
-  // Date filter — hardcoded for PR B. PR C wires the user-controlled range picker.
-  const { periodStart, periodEnd, periodLabel } = useMemo(() => {
-    const now = new Date()
-    const start = new Date(now.getFullYear(), now.getMonth(), 1)
-    const fmt = (d: Date) =>
-      d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
-    return {
-      periodStart: start,
-      periodEnd: now,
-      periodLabel: `${fmt(start)} – ${fmt(now)}, ${now.getFullYear()}`,
-    }
-  }, [])
+  // User-controlled date range picker. Independent state per page.
+  const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
+  const periodStart = pickerValue.period.start
+  const periodEnd = pickerValue.period.end
 
   /* ── Paid — Meta Ads (aggregated over period) ── */
   const metaInPeriod = useMemo(
@@ -155,14 +152,9 @@ export default function MarketingPage() {
 
   return (
     <div className="space-y-6 md:space-y-10">
-      <Breadcrumb items={[{ label: 'Home', href: '/' }, { label: 'Marketing' }]} />
-
-      {/* Date-filter placeholder strip — PR C wires the picker UI. */}
-      <div className="flex items-center justify-between rounded-md border border-dashed border-dash-border bg-dash-surface/40 px-4 py-2">
-        <span className="font-ui text-[10px] uppercase tracking-[0.05em] text-dash-text-muted">
-          Period (placeholder — PR C wires a picker)
-        </span>
-        <span className="font-mono text-xs text-dash-text">{periodLabel}</span>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <Breadcrumb items={[{ label: 'Home', href: '/' }, { label: 'Marketing' }]} />
+        <DateRangePicker value={pickerValue} onChange={setPickerValue} />
       </div>
 
       {/* ── Section 1 — Paid — Meta Ads ── */}
