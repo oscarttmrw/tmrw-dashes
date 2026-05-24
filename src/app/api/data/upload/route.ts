@@ -101,6 +101,30 @@ function dataPeriodBounds(
   }
 }
 
+/**
+ * Pull a usable string out of any thrown value. `String(err)` on a Supabase
+ * error object yields "[object Object]" — this helper unwraps Error / string
+ * / plain-object payloads so the API and upload_log both surface real messages.
+ */
+function extractErrorMessage(err: unknown): string {
+  if (err === null || err === undefined) return 'Unknown error'
+  if (err instanceof Error) return err.message
+  if (typeof err === 'string') return err
+  if (typeof err === 'object') {
+    const maybe = err as { message?: unknown; error?: unknown; details?: unknown; hint?: unknown }
+    if (typeof maybe.message === 'string') return maybe.message
+    if (typeof maybe.error === 'string') return maybe.error
+    if (typeof maybe.details === 'string') return maybe.details
+    if (typeof maybe.hint === 'string') return maybe.hint
+    try {
+      return JSON.stringify(err)
+    } catch {
+      return Object.prototype.toString.call(err)
+    }
+  }
+  return String(err)
+}
+
 export async function POST(request: NextRequest) {
   let batchId: string | null = null
   const supabase = createClient()
@@ -231,14 +255,15 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     })
   } catch (err) {
+    const message = extractErrorMessage(err)
     if (batchId) {
       const supabase2 = createClient()
       await supabase2
         .from('upload_log')
-        .update({ status: 'failed', error: String(err) })
+        .update({ status: 'failed', error: message })
         .eq('id', batchId)
     }
     console.error('Upload error:', err)
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
