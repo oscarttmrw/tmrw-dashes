@@ -4,605 +4,488 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
-import { DataSourceBadge } from '@/components/dashboard/data-source-badge'
-import { SectionHeading } from '@/components/dashboard/section-heading'
 import { useDashboardData } from '@/lib/context/data-context'
-import { dataSourceSchemas, validateRequiredColumns, dataSourceConfigs } from '@/lib/config/data-sources'
+import { getSchema, validateRequiredColumns } from '@/lib/config/data-sources'
 import { createClient } from '@/lib/supabase/client'
-import { Upload, CheckCircle, AlertTriangle, X } from 'lucide-react'
-import { cn } from '@/lib/utils'
-
-// ---------------------------------------------------------------------------
-// Source auto-detection
-// ---------------------------------------------------------------------------
-//
-// The upload page is a single FileDrop tile. When a file is dropped, its
-// headers are inspected and matched against every registered schema's
-// required-columns list. The first schema whose required columns are ALL
-// present (case-insensitive) is the detected source. The user is then shown
-// a confirmation modal and the file is POSTed to /api/data/upload with the
-// detected source key.
 
 type SourceKey =
-  | 'tableau'
+  | 'meta_ads'
+  | 'social_followers'
+  | 'social_views'
+  | 'stripe'
   | 'hubspot_contacts'
   | 'ghl_opportunities'
   | 'operational_data'
-  | 'stripe'
-  | 'zendesk'
-  | 'meta'
   | 'pelagonia'
+  | 'tableau'
+  | 'zendesk'
 
-// Date-detection column for the preview/modal (case-insensitive header).
+// Sheet-name shortcuts — speed up auto-routing when a workbook uses a known
+// sheet name even if its headers are slightly off. Header-signature matching
+// is the fallback below.
+const SHEET_NAME_TO_SOURCE: Record<string, SourceKey> = {
+  'meta ads': 'meta_ads',
+  'social media followers': 'social_followers',
+  'social followers': 'social_followers',
+  'social media views': 'social_views',
+  'social views': 'social_views',
+}
+
+const VALID_SOURCES: SourceKey[] = [
+  'meta_ads',
+  'social_followers',
+  'social_views',
+  'stripe',
+  'hubspot_contacts',
+  'ghl_opportunities',
+  'operational_data',
+  'pelagonia',
+  'tableau',
+  'zendesk',
+]
+
+// Column the schema's date filter keys off. Used to auto-fill the from/to
+// pickers in the confirm modal.
 const DATE_COL: Partial<Record<SourceKey, string>> = {
-  meta: 'reporting starts',
+  meta_ads: 'date',
+  social_views: 'date',
   stripe: 'created',
-  zendesk: 'created at',
   hubspot_contacts: 'create date',
   ghl_opportunities: 'created on',
   operational_data: 'date',
   pelagonia: 'created at',
+  zendesk: 'created at',
 }
 
-function detectSourceByHeaders(headers: string[]): SourceKey | null {
-  // Walk schemas in a stable order — most-specific (most required columns)
-  // first, so a CSV that satisfies both a narrow and a broad schema picks
-  // the narrow one.
-  const ranked = (Object.entries(dataSourceSchemas) as [SourceKey, typeof dataSourceSchemas[string]][])
-    .slice()
-    .sort(([, a], [, b]) => b.requiredColumns.length - a.requiredColumns.length)
-  for (const [key, schema] of ranked) {
-    const missing = validateRequiredColumns(schema, headers)
-    if (missing.length === 0) return key
-  }
-  return null
+// lastRefresh returns one key per source. Same snake_case keys context-side.
+const REFRESH_KEY: Record<SourceKey, string> = {
+  meta_ads: 'meta_ads',
+  social_followers: 'social_followers',
+  social_views: 'social_views',
+  stripe: 'stripe',
+  hubspot_contacts: 'hubspot_contacts',
+  ghl_opportunities: 'ghl_opportunities',
+  operational_data: 'operational_data',
+  pelagonia: 'pelagonia',
+  tableau: 'tableau',
+  zendesk: 'zendesk',
 }
 
-function detectDateRange(
-  rows: Record<string, string>[],
-  source: SourceKey
-): { from: string | null; to: string | null } {
-  const targetCol = DATE_COL[source]
-  if (!rows.length || !targetCol) return { from: null, to: null }
-
-  const matchingKey = Object.keys(rows[0]).find(k => k.toLowerCase().trim() === targetCol)
-  if (!matchingKey) return { from: null, to: null }
-
-  const timestamps: number[] = []
-  for (const row of rows) {
-    const val = row[matchingKey]
-    if (val) {
-      const d = new Date(val)
-      if (!isNaN(d.getTime())) timestamps.push(d.getTime())
-    }
-  }
-  if (!timestamps.length) return { from: null, to: null }
-
-  let maxTs = Math.max(...timestamps)
-  if (source === 'meta') {
-    const endKey = Object.keys(rows[0]).find(k => k.toLowerCase().trim() === 'reporting ends')
-    if (endKey) {
-      for (const row of rows) {
-        const d = new Date(row[endKey])
-        if (!isNaN(d.getTime())) maxTs = Math.max(maxTs, d.getTime())
-      }
-    }
-  }
-
-  return {
-    from: new Date(Math.min(...timestamps)).toISOString().split('T')[0],
-    to: new Date(maxTs).toISOString().split('T')[0],
-  }
-}
-
-/**
- * Pull a usable string out of any thrown value or API error payload. The
- * native `String(err)` of a Supabase / fetch error object yields the dreaded
- * "[object Object]" — this helper handles Error instances, strings, and
- * arbitrary plain objects.
- */
-function extractErrorMessage(err: unknown): string | null {
-  if (err === null || err === undefined) return null
-  if (err instanceof Error) return err.message
-  if (typeof err === 'string') return err
-  if (typeof err === 'object') {
-    const maybe = err as { message?: unknown; error?: unknown; reason?: unknown }
-    if (typeof maybe.message === 'string') return maybe.message
-    if (typeof maybe.error === 'string') return maybe.error
-    if (typeof maybe.reason === 'string') return maybe.reason
-    try {
-      return JSON.stringify(err)
-    } catch {
-      return String(err)
-    }
-  }
-  return String(err)
-}
-
-function formatDateLabel(from: string | null, to: string | null): string {
-  if (!from || !to) return ''
-  const f = new Date(from + 'T00:00:00')
-  const t = new Date(to + 'T00:00:00')
-  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' }
-  const optsFull: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }
-  if (from === to) return f.toLocaleDateString('en-AU', optsFull)
-  return `${f.toLocaleDateString('en-AU', opts)} – ${t.toLocaleDateString('en-AU', optsFull)}`
-}
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface PendingUpload {
+interface DetectedSheet {
   file: File
-  source: SourceKey | null
+  sheetName: string
+  rows: Record<string, unknown>[]
+  headers: string[]
+  detectedSource: SourceKey | null
   rowCount: number
-  columnCount: number
-  detectedFrom: string | null
-  detectedTo: string | null
-  parsedRows: Record<string, string>[]
 }
 
-interface UploadState {
-  status: 'idle' | 'validating' | 'modal' | 'uploading' | 'success' | 'error'
-  pending?: PendingUpload
-  resultCount?: number
-  errors?: string[]
-  detectedSource?: SourceKey
+interface SheetSubmissionState extends DetectedSheet {
+  chosenSource: SourceKey | 'skip'
+  missingColumns: string[]
+  periodFrom: string
+  periodTo: string
 }
-
-const SOURCE_OPTIONS: { key: SourceKey; label: string }[] = [
-  { key: 'hubspot_contacts',  label: 'HubSpot Contacts' },
-  { key: 'ghl_opportunities', label: 'GHL Opportunities' },
-  { key: 'operational_data',  label: 'Operational Data' },
-  { key: 'stripe',            label: 'Stripe Charges' },
-  { key: 'meta',              label: 'Meta Ads' },
-  { key: 'zendesk',           label: 'Zendesk' },
-  { key: 'pelagonia',         label: 'Pelagonia' },
-  { key: 'tableau',           label: 'Tableau' },
-]
 
 interface ModalForm {
   uploadedBy: string
-  periodFrom: string
-  periodTo: string
-  periodLabel: string
-  source: SourceKey | null
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
 export default function UploadPage() {
-  const { dataMode, lastRefreshed, refresh } = useDashboardData()
-  const [isFileBeingDragged, setIsFileBeingDragged] = useState(false)
-  const [isDraggingOver, setIsDraggingOver] = useState(false)
-  const [currentUserEmail, setCurrentUserEmail] = useState('')
-  const [state, setState] = useState<UploadState>({ status: 'idle' })
-  const [modalForm, setModalForm] = useState<ModalForm>({ uploadedBy: '', periodFrom: '', periodTo: '', periodLabel: '', source: null })
+  const { lastRefreshed, refresh } = useDashboardData()
+  const [sheets, setSheets] = useState<SheetSubmissionState[] | null>(null)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [modalForm, setModalForm] = useState<ModalForm>({ uploadedBy: '' })
+  const [results, setResults] = useState<{ source: string; success: boolean; message: string }[]>([])
+  const [isDragging, setIsDragging] = useState(false)
+  const [parseError, setParseError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const dragCounter = useRef(0)
 
   useEffect(() => {
     createClient().auth.getUser().then(({ data }) => {
-      if (data.user?.email) setCurrentUserEmail(data.user.email)
+      if (data.user?.email) setModalForm(f => ({ ...f, uploadedBy: data.user!.email! }))
     })
   }, [])
-
-  useEffect(() => {
-    const onDragEnter = (e: DragEvent) => {
-      if (e.dataTransfer?.types.includes('Files')) { dragCounter.current += 1; setIsFileBeingDragged(true) }
-    }
-    const onDragLeaveWin = () => {
-      dragCounter.current -= 1
-      if (dragCounter.current <= 0) { dragCounter.current = 0; setIsFileBeingDragged(false) }
-    }
-    const onDropWin = () => { dragCounter.current = 0; setIsFileBeingDragged(false) }
-    window.addEventListener('dragenter', onDragEnter)
-    window.addEventListener('dragleave', onDragLeaveWin)
-    window.addEventListener('drop', onDropWin)
-    return () => {
-      window.removeEventListener('dragenter', onDragEnter)
-      window.removeEventListener('dragleave', onDragLeaveWin)
-      window.removeEventListener('drop', onDropWin)
-    }
-  }, [])
-
-  const openModal = useCallback((pending: PendingUpload) => {
-    const label = formatDateLabel(pending.detectedFrom, pending.detectedTo)
-    setModalForm({
-      uploadedBy: currentUserEmail,
-      periodFrom: pending.detectedFrom ?? '',
-      periodTo: pending.detectedTo ?? '',
-      periodLabel: label,
-      source: pending.source,
-    })
-    setState({
-      status: 'modal',
-      pending,
-      detectedSource: pending.source ?? undefined,
-    })
-  }, [currentUserEmail])
 
   const handleFile = useCallback(async (file: File) => {
-    setState({ status: 'validating' })
-
+    setParseError(null)
     try {
-      const name = file.name.toLowerCase()
-      const isXlsx = name.endsWith('.xlsx') || name.endsWith('.xls')
-
-      let rows: Record<string, string>[]
-      if (isXlsx) {
-        const buffer = await file.arrayBuffer()
-        const wb = XLSX.read(buffer, { type: 'array' })
-        // Detection sweeps every sheet — pick the first sheet whose headers
-        // satisfy a known schema. The server-side upload route picks the
-        // correct sheet again at processing time (see route.ts).
-        let chosenRows: Record<string, string>[] | null = null
-        for (const sheetName of wb.SheetNames) {
-          const ws = wb.Sheets[sheetName]
-          const sheetRows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, string>[]
-          if (sheetRows.length === 0) continue
-          const headers = Object.keys(sheetRows[0])
-          if (detectSourceByHeaders(headers)) {
-            chosenRows = sheetRows
-            break
-          }
-        }
-        if (!chosenRows) {
-          const firstWs = wb.Sheets[wb.SheetNames[0]]
-          chosenRows = XLSX.utils.sheet_to_json(firstWs, { defval: '' }) as Record<string, string>[]
-        }
-        rows = chosenRows
-      } else {
-        // CSV / TSV — read as text, detect delimiter, parse.
-        const buffer = await file.arrayBuffer()
-        let text: string
-        try {
-          text = new TextDecoder('utf-16le').decode(buffer)
-          if (!text.includes('\t') && !text.includes(',')) throw new Error('not utf-16')
-        } catch {
-          text = new TextDecoder('utf-8').decode(buffer)
-        }
-        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1)
-        const delimiter = text.includes('\t') ? '\t' : ','
-        const result = Papa.parse<Record<string, string>>(text, {
-          header: true,
-          skipEmptyLines: true,
-          delimiter,
-        })
-        rows = result.data
-      }
-
-      if (!rows.length) {
-        setState({ status: 'error', errors: ['File contains no data rows'] })
+      const detected = await parseDroppedFile(file)
+      if (detected.length === 0) {
+        setParseError('File contains no readable sheets.')
         return
       }
-
-      const headers = Object.keys(rows[0])
-      const source = detectSourceByHeaders(headers)
-      const { from, to } = source ? detectDateRange(rows, source) : { from: null, to: null }
-      openModal({
-        file,
-        source,
-        rowCount: rows.length,
-        columnCount: headers.length,
-        detectedFrom: from,
-        detectedTo: to,
-        parsedRows: rows,
+      const withValidation: SheetSubmissionState[] = detected.map(s => {
+        const chosen: SourceKey | 'skip' = s.detectedSource ?? 'skip'
+        const missing = chosen !== 'skip' ? validateSheet(s, chosen) : []
+        const { from, to } = chosen !== 'skip' ? detectDateRange(s.rows, chosen) : { from: '', to: '' }
+        return { ...s, chosenSource: chosen, missingColumns: missing, periodFrom: from, periodTo: to }
       })
+      setSheets(withValidation)
+      setModalOpen(true)
     } catch (err) {
-      setState({ status: 'error', errors: [`Read error: ${err instanceof Error ? err.message : String(err)}`] })
+      setParseError(`Parse error: ${err instanceof Error ? err.message : String(err)}`)
     }
-  }, [openModal])
+  }, [])
 
-  const handleConfirm = useCallback(async () => {
-    if (!state.pending || !modalForm.source) return
-    const chosenSource = modalForm.source
-    setState(prev => ({ ...prev, status: 'uploading' }))
+  const handleSourceChange = (idx: number, source: SourceKey | 'skip') => {
+    setSheets(prev => {
+      if (!prev) return prev
+      const copy = [...prev]
+      const sheet = copy[idx]
+      const missing = source !== 'skip' ? validateSheet(sheet, source) : []
+      const { from, to } = source !== 'skip' ? detectDateRange(sheet.rows, source) : { from: '', to: '' }
+      copy[idx] = { ...sheet, chosenSource: source, missingColumns: missing, periodFrom: from, periodTo: to }
+      return copy
+    })
+  }
 
-    const form = new FormData()
-    form.append('source', chosenSource)
-    form.append('file', state.pending.file)
-    form.append('file_name', state.pending.file.name)
-    form.append('uploaded_by', modalForm.uploadedBy)
-    form.append('data_period_from', modalForm.periodFrom)
-    form.append('data_period_to', modalForm.periodTo)
-    form.append('data_period_label', modalForm.periodLabel)
+  const handlePeriodChange = (idx: number, field: 'periodFrom' | 'periodTo', value: string) => {
+    setSheets(prev => {
+      if (!prev) return prev
+      const copy = [...prev]
+      copy[idx] = { ...copy[idx], [field]: value }
+      return copy
+    })
+  }
 
-    try {
-      const res = await fetch('/api/data/upload', { method: 'POST', body: form })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        const message = extractErrorMessage(body?.error) ?? `Upload failed (HTTP ${res.status})`
-        setState({ status: 'error', errors: [message] })
-        return
+  const canSubmit = (sheets?.every(s =>
+    s.chosenSource === 'skip' || s.missingColumns.length === 0
+  ) ?? false)
+    && (sheets?.some(s => s.chosenSource !== 'skip') ?? false)
+    && modalForm.uploadedBy.trim().length > 0
+
+  const handleSubmit = async () => {
+    if (!sheets) return
+    setSubmitting(true)
+    setResults([])
+    const out: typeof results = []
+    for (const sheet of sheets) {
+      if (sheet.chosenSource === 'skip') continue
+      try {
+        const res = await submitSheet(sheet, sheet.chosenSource, modalForm)
+        out.push({
+          source: sheet.chosenSource,
+          success: !!res.success,
+          message: res.success ? `Uploaded ${res.rowCount} rows` : (res.error ?? 'Unknown error'),
+        })
+      } catch (err) {
+        out.push({ source: sheet.chosenSource, success: false, message: String(err) })
       }
-      const body = await res.json().catch(() => ({}))
-      const rowCount = typeof body.rowCount === 'number' ? body.rowCount : state.pending.rowCount
-      const apiErrors = Array.isArray(body.errors)
-        ? (body.errors as Array<unknown>).map(e => extractErrorMessage(e) ?? '').filter(Boolean)
-        : []
-      await refresh()
-      if (apiErrors.length > 0) {
-        setState({ status: 'success', resultCount: rowCount, detectedSource: chosenSource, errors: apiErrors.slice(0, 10) })
-      } else {
-        setState({ status: 'success', resultCount: rowCount, detectedSource: chosenSource })
-      }
-    } catch (err) {
-      setState({ status: 'error', errors: [`Network error: ${extractErrorMessage(err) ?? 'unknown error'}`] })
     }
-  }, [state.pending, modalForm, refresh])
-
-  const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) handleFile(file)
-    if (fileRef.current) fileRef.current.value = ''
-  }, [handleFile])
-
-  const onDragOver  = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDraggingOver(true) }, [])
-  const onDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDraggingOver(false) }, [])
-  const onDrop      = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setIsDraggingOver(false)
-    const file = e.dataTransfer.files[0]
-    if (file) handleFile(file)
-  }, [handleFile])
-
-  const canConfirm =
-    modalForm.uploadedBy.trim().length > 0
-    && modalForm.source !== null
-    && state.status !== 'uploading'
-  const detectedName = state.detectedSource ? (dataSourceConfigs[state.detectedSource]?.name ?? state.detectedSource) : ''
+    setResults(out)
+    setSubmitting(false)
+    setModalOpen(false)
+    setSheets(null)
+    refresh()
+  }
 
   return (
-    <div className="space-y-10">
-      <Breadcrumb items={[{ label: 'Home', href: '/' }, { label: 'Admin', href: '/admin' }, { label: 'Data Upload' }]} />
+    <div className="space-y-8">
+      <Breadcrumb items={[{ label: 'Home', href: '/' }, { label: 'Admin', href: '/admin' }, { label: 'Upload' }]} />
 
-      {dataMode === 'demo' && (
-        <div className="rounded-lg border border-status-amber/30 bg-status-amber-light px-4 py-3">
-          <p className="font-sans text-sm text-status-amber">
-            Currently displaying demo data. Upload real CSV files and switch to Actual mode.
-          </p>
+      <section>
+        <h1 className="mb-1 font-sans text-base font-semibold text-dash-text">Upload data</h1>
+        <p className="mb-4 text-xs text-dash-text-muted">
+          Drop a workbook (xlsx) or single file (csv/tsv). Sheets are auto-routed by name or column signature where possible — you&apos;ll confirm before anything is written.
+        </p>
+
+        <div
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setIsDragging(false)
+            const f = e.dataTransfer.files[0]
+            if (f) void handleFile(f)
+          }}
+          onClick={() => fileRef.current?.click()}
+          className={`flex h-40 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
+            isDragging ? 'border-dash-red bg-dash-red/5' : 'border-dash-border bg-dash-surface hover:border-dash-text-muted'
+          }`}
+        >
+          <p className="text-sm text-dash-text">Drop file here or click to browse</p>
+          <p className="mt-1 text-xs text-dash-text-muted">xlsx, csv, tsv</p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls,.csv,.tsv"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f); if (fileRef.current) fileRef.current.value = '' }}
+          />
         </div>
-      )}
-      {dataMode === 'actual' && (
-        <div className="rounded-lg border border-dash-border bg-dash-surface px-4 py-3">
-          <p className="text-sm text-dash-text-secondary">
-            Showing real data — last updated:{' '}
-            {Object.entries(lastRefreshed)
-              .filter(([, ts]) => ts)
-              .map(([src, ts]) => `${src}: ${new Date(ts!).toLocaleDateString('en-AU')}`)
-              .join(' · ') || 'no uploads yet'}
-          </p>
+
+        {parseError && (
+          <p className="mt-3 text-xs text-status-red">{parseError}</p>
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-3 font-sans text-sm font-semibold text-dash-text">Source status</h2>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {VALID_SOURCES.map(source => {
+            const ts = lastRefreshed[REFRESH_KEY[source]]
+            return (
+              <div key={source} className="rounded-lg border border-dash-border bg-dash-surface p-3">
+                <p className="font-mono text-xs uppercase tracking-wide text-dash-text-muted">{source}</p>
+                <p className="mt-1 text-sm text-dash-text">
+                  {ts ? `Last upload: ${new Date(ts).toLocaleString('en-AU')}` : 'Never uploaded'}
+                </p>
+              </div>
+            )
+          })}
         </div>
+      </section>
+
+      {results.length > 0 && (
+        <section>
+          <h2 className="mb-3 font-sans text-sm font-semibold text-dash-text">Last upload results</h2>
+          <ul className="space-y-1 text-sm">
+            {results.map((r, i) => (
+              <li key={i} className={r.success ? 'text-status-green' : 'text-status-red'}>
+                {r.source}: {r.message}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
-      <SectionHeading number={1} title="Upload data" />
-
-      {/* Confirmation modal */}
-      {(state.status === 'modal' || state.status === 'uploading') && state.pending && (
+      {modalOpen && sheets && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-xl border border-dash-border bg-dash-bg shadow-2xl">
-            <div className="flex items-center justify-between border-b border-dash-border px-6 py-4">
-              <h2 className="text-sm font-semibold text-dash-text">Confirm upload</h2>
-              {state.status !== 'uploading' && (
-                <button onClick={() => setState({ status: 'idle' })} className="text-dash-text-muted hover:text-dash-text">
-                  <X size={16} />
-                </button>
-              )}
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-dash-bg p-6">
+            <h2 className="mb-4 font-sans text-base font-semibold text-dash-text">Confirm upload</h2>
+
+            <div className="space-y-3">
+              {sheets.map((s, idx) => (
+                <div key={idx} className="rounded-md border border-dash-border bg-dash-surface p-3">
+                  <p className="text-xs text-dash-text-muted">{s.file.name} :: {s.sheetName}</p>
+
+                  <div className="mt-2 grid grid-cols-3 items-center gap-3">
+                    <div>
+                      <label className="block text-xs text-dash-text-muted">Source</label>
+                      <select
+                        value={s.chosenSource}
+                        onChange={(e) => handleSourceChange(idx, e.target.value as SourceKey | 'skip')}
+                        className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 text-sm text-dash-text"
+                      >
+                        {VALID_SOURCES.map(src => (
+                          <option key={src} value={src}>{src}</option>
+                        ))}
+                        <option value="skip">Skip this sheet</option>
+                      </select>
+                    </div>
+                    <div className="text-xs text-dash-text-secondary">{s.rowCount} rows</div>
+                    <div className="text-xs">
+                      {s.chosenSource === 'skip'
+                        ? <span className="text-dash-text-muted">Skipped</span>
+                        : s.missingColumns.length === 0
+                          ? <span className="text-status-green">✓ Valid</span>
+                          : <span className="text-status-red" title={`Headers seen: ${s.headers.join(', ')}`}>✗ Missing: {s.missingColumns.join(', ')}</span>}
+                    </div>
+                  </div>
+
+                  {s.chosenSource !== 'skip' && (
+                    s.chosenSource === 'social_followers' ? (
+                      <p className="mt-3 text-xs italic text-dash-text-muted">
+                        Snapshot — uses upload date, no period range needed.
+                      </p>
+                    ) : (
+                      <div className="mt-3 grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-dash-text-muted">Period from</label>
+                          <input
+                            type="date"
+                            value={s.periodFrom}
+                            onChange={(e) => handlePeriodChange(idx, 'periodFrom', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 font-mono text-xs text-dash-text"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-dash-text-muted">Period to</label>
+                          <input
+                            type="date"
+                            value={s.periodTo}
+                            onChange={(e) => handlePeriodChange(idx, 'periodTo', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 font-mono text-xs text-dash-text"
+                          />
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              ))}
             </div>
-            <div className="space-y-4 px-6 py-5">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-md bg-dash-surface px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-wider text-dash-text-muted">File</p>
-                  <p className="mt-0.5 truncate font-mono text-xs text-dash-text">{state.pending.file.name}</p>
-                </div>
-                <div className="rounded-md bg-dash-surface px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-wider text-dash-text-muted">Rows detected</p>
-                  <p className="mt-0.5 font-mono text-xs font-medium text-dash-text">{state.pending.rowCount.toLocaleString()}</p>
-                </div>
-              </div>
 
+            <div className="mt-6 space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium text-dash-text-secondary">
-                  Detected as: {state.pending.source === null && (
-                    <span className="font-normal italic text-status-amber">no match — pick one below</span>
-                  )}
-                </label>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={modalForm.source ?? ''}
-                    onChange={e => {
-                      const next = (e.target.value || null) as SourceKey | null
-                      const range =
-                        next && state.pending
-                          ? detectDateRange(state.pending.parsedRows, next)
-                          : { from: null, to: null }
-                      setModalForm(prev => ({
-                        ...prev,
-                        source: next,
-                        periodFrom: range.from ?? prev.periodFrom,
-                        periodTo: range.to ?? prev.periodTo,
-                        periodLabel: formatDateLabel(
-                          range.from ?? prev.periodFrom,
-                          range.to ?? prev.periodTo,
-                        ),
-                      }))
-                    }}
-                    className="w-full rounded-md border border-dash-border bg-dash-surface px-2.5 py-1.5 text-xs text-dash-text focus:border-dash-red focus:outline-none"
-                  >
-                    <option value="">Pick source…</option>
-                    {SOURCE_OPTIONS.map(opt => (
-                      <option key={opt.key} value={opt.key}>{opt.label}</option>
-                    ))}
-                  </select>
-                  {modalForm.source && (
-                    <DataSourceBadge source={modalForm.source} />
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-dash-text-secondary">Data period</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="mb-1 text-[10px] text-dash-text-muted">From</p>
-                    <input
-                      type="date"
-                      value={modalForm.periodFrom}
-                      onChange={e => {
-                        const from = e.target.value
-                        setModalForm(prev => ({ ...prev, periodFrom: from, periodLabel: formatDateLabel(from, prev.periodTo) }))
-                      }}
-                      className="w-full rounded-md border border-dash-border bg-dash-surface px-2.5 py-1.5 font-mono text-xs text-dash-text focus:border-dash-red focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <p className="mb-1 text-[10px] text-dash-text-muted">To</p>
-                    <input
-                      type="date"
-                      value={modalForm.periodTo}
-                      onChange={e => {
-                        const to = e.target.value
-                        setModalForm(prev => ({ ...prev, periodTo: to, periodLabel: formatDateLabel(prev.periodFrom, to) }))
-                      }}
-                      className="w-full rounded-md border border-dash-border bg-dash-surface px-2.5 py-1.5 font-mono text-xs text-dash-text focus:border-dash-red focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-medium text-dash-text-secondary">
-                  Period label <span className="text-dash-text-muted">(e.g. Q1 2026, Jan–Apr backfill)</span>
-                </label>
+                <label className="block text-xs text-dash-text-muted">Uploaded by</label>
                 <input
-                  type="text"
-                  value={modalForm.periodLabel}
-                  onChange={e => setModalForm(prev => ({ ...prev, periodLabel: e.target.value }))}
-                  placeholder="e.g. Q1 2026"
-                  className="w-full rounded-md border border-dash-border bg-dash-surface px-2.5 py-1.5 text-xs text-dash-text placeholder:text-dash-text-muted focus:border-dash-red focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-medium text-dash-text-secondary">
-                  Uploaded by <span className="text-status-red">*</span>
-                </label>
-                <input
-                  type="text"
+                  type="email"
                   value={modalForm.uploadedBy}
-                  onChange={e => setModalForm(prev => ({ ...prev, uploadedBy: e.target.value }))}
-                  placeholder="your@email.com"
-                  className="w-full rounded-md border border-dash-border bg-dash-surface px-2.5 py-1.5 text-xs text-dash-text placeholder:text-dash-text-muted focus:border-dash-red focus:outline-none"
+                  onChange={(e) => setModalForm(f => ({ ...f, uploadedBy: e.target.value }))}
+                  placeholder="you@tmrw.health"
+                  className="mt-1 w-full rounded-md border border-dash-border bg-dash-bg px-2 py-1 text-sm text-dash-text"
                 />
               </div>
             </div>
-            <div className="flex items-center justify-end gap-3 border-t border-dash-border px-6 py-4">
-              {state.status !== 'uploading' && (
-                <button
-                  onClick={() => setState({ status: 'idle' })}
-                  className="rounded-md border border-dash-border px-3 py-1.5 text-xs font-medium text-dash-text-secondary hover:text-dash-text"
-                >
-                  Cancel
-                </button>
-              )}
+
+            <div className="mt-6 flex justify-end gap-2">
               <button
-                onClick={handleConfirm}
-                disabled={!canConfirm}
-                className="rounded-md bg-dash-red px-4 py-1.5 text-xs font-medium text-dash-text-inverse transition-colors hover:bg-dash-red/90 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => { setModalOpen(false); setSheets(null) }}
+                className="rounded-md border border-dash-border px-4 py-2 text-sm text-dash-text hover:bg-dash-surface"
               >
-                {state.status === 'uploading' ? 'Uploading…' : 'Confirm & upload'}
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!canSubmit || submitting}
+                className="rounded-md bg-dash-red px-4 py-2 text-sm font-medium text-dash-text-inverse hover:bg-dash-red/90 disabled:opacity-50"
+              >
+                {submitting ? 'Uploading…' : `Upload ${sheets.filter(s => s.chosenSource !== 'skip').length} sheet(s)`}
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Single auto-detect file-drop tile */}
-      <div
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-        className={cn(
-          'rounded-lg border p-8 transition-all duration-150',
-          isDraggingOver
-            ? 'scale-[1.01] border-dashed border-dash-red bg-dash-red-light'
-            : isFileBeingDragged
-            ? 'border-dashed border-dash-border-strong bg-dash-surface'
-            : 'border-dash-border bg-dash-surface'
-        )}
-      >
-        <div className="flex flex-col items-center text-center">
-          <Upload size={28} className="text-dash-text-secondary" />
-          <h3 className="mt-3 font-sans text-sm font-semibold uppercase tracking-wider text-dash-text">
-            Drop a file to upload
-          </h3>
-          <p className="mt-1 max-w-md text-xs text-dash-text-secondary">
-            CSV, TSV or XLSX. The source is auto-detected from the file's column headers.
-          </p>
-
-          <div className="mt-5">
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-dash-red px-4 py-2 text-xs font-medium text-dash-text-inverse transition-colors hover:bg-dash-red/90">
-              <Upload size={14} />
-              Choose file
-              <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" className="hidden" onChange={onFileChange} />
-            </label>
-          </div>
-
-          {isDraggingOver && (
-            <p className="mt-4 text-xs font-medium text-dash-red">Drop file to upload</p>
-          )}
-        </div>
-
-        {/* Status feedback */}
-        <div className="mt-6 max-w-md mx-auto">
-          {state.status === 'validating' && (
-            <p className="text-center text-xs text-dash-text-secondary">Detecting source…</p>
-          )}
-          {state.status === 'success' && (
-            <div className="flex items-start gap-2 rounded-md bg-status-green-light px-3 py-2">
-              <CheckCircle size={14} className="mt-0.5 shrink-0 text-status-green" />
-              <div className="text-xs">
-                <p className="font-medium text-status-green">Upload successful</p>
-                <p className="text-dash-text-secondary">
-                  <span className="font-mono font-medium text-dash-text">{state.resultCount?.toLocaleString()}</span> rows saved to Supabase
-                  {detectedName ? ` (${detectedName})` : ''}
-                </p>
-                {state.errors && state.errors.length > 0 && (
-                  <ul className="mt-1.5 list-disc list-inside text-dash-text-muted">
-                    {state.errors.map((err, i) => <li key={i} className="break-words">{err}</li>)}
-                  </ul>
-                )}
-                <button
-                  onClick={() => setState({ status: 'idle' })}
-                  className="mt-1.5 underline text-dash-text-muted hover:text-dash-text"
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          )}
-          {state.status === 'error' && (
-            <div className="flex items-start gap-2 rounded-md bg-status-red-light px-3 py-2">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-status-red" />
-              <div className="min-w-0 text-xs">
-                <p className="font-medium text-status-red">Upload failed</p>
-                {state.errors?.map((err, i) => (
-                  <p key={i} className="break-words text-dash-text-secondary">{err}</p>
-                ))}
-                <button
-                  onClick={() => setState({ status: 'idle' })}
-                  className="mt-1.5 text-dash-text-muted underline hover:text-dash-text"
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   )
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────
+
+// Probe each source's required-column schema; if exactly one source's
+// requirements are fully satisfied by the headers, that's the match.
+// More than one match → ambiguous → return null (user picks).
+function detectSourceByHeaders(headers: string[]): SourceKey | null {
+  const matches: SourceKey[] = []
+  for (const source of VALID_SOURCES) {
+    const schema = getSchema(source)
+    if (!schema) continue
+    const missing = validateRequiredColumns(schema, headers)
+    if (missing.length === 0) matches.push(source)
+  }
+  return matches.length === 1 ? matches[0] : null
+}
+
+function detectDateRange(
+  rows: Record<string, unknown>[],
+  source: SourceKey
+): { from: string; to: string } {
+  const targetCol = DATE_COL[source]
+  if (!rows.length || !targetCol) return { from: '', to: '' }
+
+  const matchingKey = Object.keys(rows[0]).find(k => k.toLowerCase().trim() === targetCol)
+  if (!matchingKey) return { from: '', to: '' }
+
+  const timestamps: number[] = []
+  for (const row of rows) {
+    const val = row[matchingKey]
+    if (val === null || val === undefined || val === '') continue
+    const d = new Date(String(val))
+    if (!isNaN(d.getTime())) timestamps.push(d.getTime())
+  }
+  if (!timestamps.length) return { from: '', to: '' }
+
+  return {
+    from: new Date(Math.min(...timestamps)).toISOString().split('T')[0],
+    to: new Date(Math.max(...timestamps)).toISOString().split('T')[0],
+  }
+}
+
+// Find the most likely header row in a raw sheet. Excel sheets often have
+// a title row (and sometimes a blank row) before the actual column headers.
+// Heuristic: scan the first ~10 rows, pick the row with the most populated
+// cells that look like header strings (non-numeric, no __EMPTY_ artifacts).
+function findHeaderRowIndex(matrix: unknown[][]): number {
+  const scanDepth = Math.min(10, matrix.length)
+  let bestIdx = 0
+  let bestScore = -1
+  for (let i = 0; i < scanDepth; i++) {
+    const row = matrix[i] ?? []
+    let score = 0
+    for (const cell of row) {
+      if (cell === null || cell === undefined || cell === '') continue
+      const s = String(cell).trim()
+      if (!s) continue
+      // Penalise rows where most cells look like numbers (data, not headers).
+      if (!isNaN(Number(s))) { score -= 1; continue }
+      score += 1
+    }
+    if (score > bestScore) {
+      bestScore = score
+      bestIdx = i
+    }
+  }
+  return bestIdx
+}
+
+async function parseDroppedFile(file: File): Promise<DetectedSheet[]> {
+  const ext = file.name.toLowerCase().split('.').pop() ?? ''
+
+  if (ext === 'xlsx' || ext === 'xls') {
+    const buf = await file.arrayBuffer()
+    const wb = XLSX.read(buf, { type: 'array' })
+    return wb.SheetNames.map(sheetName => {
+      const ws = wb.Sheets[sheetName]
+      // Read as array-of-arrays first so we can find the real header row,
+      // then re-parse from that row onward as keyed objects.
+      const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, blankrows: false })
+      const headerIdx = findHeaderRowIndex(matrix)
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+        defval: null,
+        range: headerIdx,
+      })
+      const headers = rows.length > 0 ? Object.keys(rows[0]) : []
+      const byName = SHEET_NAME_TO_SOURCE[sheetName.toLowerCase().trim()] ?? null
+      const detected = byName ?? detectSourceByHeaders(headers)
+      return {
+        file,
+        sheetName,
+        rows,
+        headers,
+        detectedSource: detected,
+        rowCount: rows.length,
+      }
+    })
+  }
+
+  const text = await file.text()
+  const delimiter = text.includes('\t') ? '\t' : ','
+  const result = Papa.parse<Record<string, unknown>>(text, {
+    header: true, skipEmptyLines: true, delimiter,
+  })
+  const rows = result.data
+  const headers = rows.length > 0 ? Object.keys(rows[0]) : []
+  return [{
+    file,
+    sheetName: file.name,
+    rows,
+    headers,
+    detectedSource: detectSourceByHeaders(headers),
+    rowCount: rows.length,
+  }]
+}
+
+function validateSheet(sheet: DetectedSheet, source: SourceKey): string[] {
+  const schema = getSchema(source)
+  if (!schema) return ['Unknown source']
+  return validateRequiredColumns(schema, sheet.headers)
+}
+
+async function submitSheet(sheet: SheetSubmissionState, source: SourceKey, metadata: ModalForm) {
+  const csv = Papa.unparse(sheet.rows)
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const file = new File([blob], `${sheet.sheetName}.csv`, { type: 'text/csv' })
+
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('source', source)
+  fd.append('uploaded_by', metadata.uploadedBy)
+  fd.append('data_period_from', sheet.periodFrom)
+  fd.append('data_period_to', sheet.periodTo)
+  fd.append('file_name', `${sheet.file.name} :: ${sheet.sheetName}`)
+
+  const res = await fetch('/api/data/upload', { method: 'POST', body: fd })
+  return res.json()
 }
