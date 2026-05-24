@@ -83,8 +83,36 @@ function atDayEnd(d: Date): Date {
   return x
 }
 
-/** Previous period of equal length, ending the day before period.start. */
+/** Previous period for comparison.
+ *
+ * When the current period is calendar-month-aligned (starts on day 1 and
+ * stays within a single month), we shift one full calendar month back and
+ * keep the same day-of-month bounds — matches Google Ads behaviour so
+ * "May 1–24 vs previous period" reads as "April 1–24", not "April 7–30".
+ *
+ * For multi-month ranges (Last 30 days, This quarter, custom windows that
+ * span months) we fall back to an equal-length window ending the day before
+ * period.start — the only sensible answer when there's no natural calendar
+ * pivot.
+ */
 export function previousPeriod(period: DateRange): DateRange {
+  const monthAligned =
+    period.start.getDate() === 1
+    && period.start.getFullYear() === period.end.getFullYear()
+    && period.start.getMonth() === period.end.getMonth()
+
+  if (monthAligned) {
+    const y = period.start.getFullYear()
+    const m = period.start.getMonth()
+    // Last day of the previous month — clamps Feb safely (e.g. Mar 31 → Feb 28).
+    const prevMonthLastDay = new Date(y, m, 0).getDate()
+    const prevEndDay = Math.min(period.end.getDate(), prevMonthLastDay)
+    return {
+      start: atDayStart(new Date(y, m - 1, 1)),
+      end: atDayEnd(new Date(y, m - 1, prevEndDay)),
+    }
+  }
+
   const lengthMs = period.end.getTime() - period.start.getTime()
   const end = new Date(period.start.getTime() - 1)
   const start = new Date(end.getTime() - lengthMs)
