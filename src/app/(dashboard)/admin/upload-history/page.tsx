@@ -29,12 +29,16 @@ const ALL_SOURCES = [
   'hubspot_contacts',
   'ghl_opportunities',
   'operational_data',
-  'meta',
+  'meta_ads',
+  'social_followers',
+  'social_views',
   'stripe',
   'pelagonia',
   'zendesk',
   'tableau',
-  // Legacy — historical uploads pre-redesign still show up under the old key
+  // Legacy keys — historical upload_log rows from earlier versions of the
+  // pipeline. Kept here so filtering by them still works.
+  'meta',
   'hubspot',
 ] as const
 const ALL_STATUSES = ['complete', 'pending', 'failed'] as const
