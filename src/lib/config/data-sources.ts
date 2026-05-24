@@ -165,19 +165,21 @@ export const operationalDataSchema: CsvSchema = {
 
 export const stripeSchema: CsvSchema = {
   source: 'stripe',
-  // PII-clean Stripe Charges export (13 columns). The processor strictly
-  // requires id, Created date (UTC), Amount, Currency, Status — the rest of
-  // the 13 columns are optional.
+  // PII-clean Stripe Charges export (13 columns). Multiple distinctive columns
+  // are required so detection cannot collide with other CSVs that also have a
+  // bare "Status" column (Zendesk, GHL, etc).
   requiredColumns: [
-    'id',
-    'Created date (UTC)',
-    'Amount',
-    'Currency',
-    'Status',
+    ['id', 'ID'],
+    ['Created date (UTC)', 'Created (UTC)', 'Created'],
+    ['Amount', 'amount', 'Amount (in cents)'],
+    ['Amount Refunded', 'amount_refunded'],
+    ['Captured', 'captured'],
+    ['Currency', 'currency'],
+    ['Status', 'status'],
   ],
   optionalColumns: [
-    'Amount Refunded',
-    'Captured',
+    'Paid',
+    'paid',
     'Converted Amount',
     'Converted Currency',
     'Decline Reason',
@@ -205,30 +207,33 @@ export const stripeSchema: CsvSchema = {
 
 export const zendeskSchema: CsvSchema = {
   source: 'zendesk',
-  // The Zendesk processor only rejects a row when ID is missing. Everything
-  // else is optional and parsed into the canonical columns when present.
+  // Distinctive Zendesk columns are required so detection doesn't collide
+  // with any other CSV that has a bare "Status" / "ID" pair. The processor
+  // itself still only rejects a row when the ticket id is blank.
   requiredColumns: [
-    'ID',
+    ['Ticket ID', 'ID', 'Zendesk Ticket ID'],
+    ['Status', 'status'],
+    ['Satisfaction Score', 'satisfaction_score'],
+    [
+      'First reply time in minutes',
+      'First reply time (in minutes)',
+      'First reply time (min)',
+      'First reply time',
+    ],
+    [
+      'Full resolution time in minutes within business hours',
+      'Full resolution time in minutes',
+      'Full resolution time (in minutes)',
+      'Full resolution time (min)',
+      'Full resolution time',
+    ],
   ],
   optionalColumns: [
     'Created at',
-    'Status',
     'Priority',
     'Assignee',
     'Group',
     'Subject',
-    'Satisfaction Score',
-    // First-reply time variants observed across Zendesk export configs:
-    'First reply time in minutes',
-    'First reply time (in minutes)',
-    'First reply time (min)',
-    'First reply time',
-    // Full-resolution time variants:
-    'Full resolution time in minutes within business hours',
-    'Full resolution time in minutes',
-    'Full resolution time (in minutes)',
-    'Full resolution time (min)',
-    'Full resolution time',
   ],
   strippedColumns: [
     'Requester',
