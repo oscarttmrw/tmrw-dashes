@@ -29,10 +29,11 @@ export function NorthStarBar() {
     return num(sorted[0].total_casebook)
   }, [operational_data])
 
-  // Lifetime sum of pods dispatched across every operational_data row.
+  // Sum of pods dispatched in calendar year 2026.
   const podsDispatched = useMemo(() => {
-    if (!operational_data.length) return null
-    return operational_data.reduce((s, r) => s + num(r.pod_dispatched), 0)
+    const ytd = operational_data.filter(r => String(r.date ?? '').startsWith('2026'))
+    if (!ytd.length) return null
+    return ytd.reduce((s, r) => s + num(r.pod_dispatched), 0)
   }, [operational_data])
 
   return (
@@ -47,7 +48,7 @@ export function NorthStarBar() {
         <NorthStarMetric
           label="PODS DISPATCHED"
           value={podsDispatched === null ? '—' : fmt(podsDispatched)}
-          subtitle="Lifetime sum"
+          subtitle="2026"
         />
       </div>
     </div>

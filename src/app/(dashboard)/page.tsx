@@ -124,10 +124,16 @@ function NarrativeSection({
 
 /* ─── Formatters / helpers ────────────────────────────────────────── */
 
-const fmtCurrency = (n: number, opts: { compact?: boolean } = {}) =>
-  opts.compact && Math.abs(n) >= 1000
-    ? `$${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`
-    : `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+const fmtCurrency = (n: number, opts: { compact?: boolean; digits?: number } = {}) => {
+  if (opts.compact && Math.abs(n) >= 1000) {
+    return `$${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`
+  }
+  const digits = opts.digits ?? 0
+  return `$${n.toLocaleString('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}`
+}
 
 const num = (v: unknown): number => {
   if (v === null || v === undefined) return 0
@@ -147,10 +153,6 @@ function deltaPct(current: number, previous: number): number | null {
   return ((current - previous) / previous) * 100
 }
 
-function isSameMonth(a: Date, b: Date): boolean {
-  return a.getUTCFullYear() === b.getUTCFullYear() && a.getUTCMonth() === b.getUTCMonth()
-}
-
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 export default function DashboardPage() {
@@ -161,6 +163,7 @@ export default function DashboardPage() {
     ghl_opportunities,
     operational_data,
     plan_targets,
+    social_followers,
     lastRefresh,
     loading,
     error,
@@ -174,12 +177,14 @@ export default function DashboardPage() {
   const prevPeriodStart = pickerValue.comparison.start
   const prevPeriodEnd = pickerValue.comparison.end
 
-  // Plan target for the current month (matched by first-of-month).
+  // Plan target for the current month. Match on a 'YYYY-MM' string to dodge
+  // the timezone bug — Supabase returns month as 'YYYY-MM-01' (UTC midnight)
+  // and periodStart is local midnight, so comparing via Date.getUTCMonth()
+  // shifts an hour-class apart in any non-UTC timezone (e.g. AEST May 1 →
+  // April 30 14:00 UTC).
   const currentPlanTarget = useMemo(() => {
-    return plan_targets.find(p => {
-      const m = p.month ? new Date(String(p.month)) : null
-      return m && !isNaN(m.getTime()) && isSameMonth(m, periodStart)
-    }) ?? null
+    const ym = `${periodStart.getFullYear()}-${String(periodStart.getMonth() + 1).padStart(2, '0')}`
+    return plan_targets.find(p => typeof p.month === 'string' && p.month.startsWith(ym)) ?? null
   }, [plan_targets, periodStart])
 
   // Days in the period's calendar month — used to derive a daily target
@@ -464,6 +469,17 @@ export default function DashboardPage() {
     [ghl_opportunities, periodStart, periodEnd]
   )
 
+  /* ── Facebook Followers — latest snapshot from social_followers ── */
+  const facebookFollowers = useMemo(() => {
+    const fb = social_followers.filter(r => {
+      const p = String(r.platform ?? '')
+      return p === 'Facebook (TMRW)' || p === 'Facebook'
+    })
+    if (!fb.length) return null
+    const sorted = [...fb].sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')))
+    return { value: num(sorted[0].followers), asOf: String(sorted[0].date ?? '') }
+  }, [social_followers])
+
   /* ── Status helpers ── */
   const statusPctVsTarget = (actual: number, target: number, direction: 'higher-better' | 'lower-better' = 'higher-better'): Status => {
     if (!target) return 'grey'
@@ -683,7 +699,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-5">
           <MetricTile
             label="Cost per Lead"
-            value={costPerLead === null ? '—' : fmtCurrency(costPerLead)}
+            value={costPerLead === null ? '—' : fmtCurrency(costPerLead, { digits: 2 })}
             target="target <$50"
             status={
               costPerLead === null ? 'grey'
@@ -693,11 +709,11 @@ export default function DashboardPage() {
             direction="lower-better"
             delta={costPerLeadDelta === null ? null : { value: Math.round(costPerLeadDelta), period: 'vs previous' }}
             href="/marketing"
-            chart={<TileChart data={costPerLeadSeries} variant="line" formatValue={(n) => fmtCurrency(n)} />}
+            chart={<TileChart data={costPerLeadSeries} variant="line" formatValue={(n) => fmtCurrency(n, { digits: 2 })} />}
           />
           <MetricTile
             label="Cost per Call"
-            value={costPerCall === null ? '—' : fmtCurrency(costPerCall)}
+            value={costPerCall === null ? '—' : fmtCurrency(costPerCall, { digits: 2 })}
             target="target <$200"
             status={
               costPerCall === null ? 'grey'
@@ -707,7 +723,7 @@ export default function DashboardPage() {
             direction="lower-better"
             delta={costPerCallDelta === null ? null : { value: Math.round(costPerCallDelta), period: 'vs previous' }}
             href="/marketing"
-            chart={<TileChart data={costPerCallSeries} variant="line" formatValue={(n) => fmtCurrency(n)} />}
+            chart={<TileChart data={costPerCallSeries} variant="line" formatValue={(n) => fmtCurrency(n, { digits: 2 })} />}
           />
           <MetricTile
             label="Call Conversion Rate"
@@ -722,9 +738,15 @@ export default function DashboardPage() {
             label="Cost per Conversion"
             reason="Pending Dan — same as Cost per Lead under Meta's definition. Awaiting redefinition as CAC."
           />
-          <LockedTile
+          <MetricTile
             label="Facebook Followers"
-            reason="Awaiting social_followers in /api/data/latest"
+            value={facebookFollowers
+              ? facebookFollowers.value.toLocaleString('en-US', { maximumFractionDigits: 0 })
+              : '—'}
+            target={facebookFollowers ? `as of ${facebookFollowers.asOf}` : 'no snapshot yet'}
+            status={facebookFollowers ? 'green' : 'grey'}
+            delta={null}
+            href="/marketing"
           />
         </div>
       </NarrativeSection>
