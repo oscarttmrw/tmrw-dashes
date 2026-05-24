@@ -489,7 +489,7 @@ export default function DashboardPage() {
 
       {/* ────────────────── Section 2 — Scale ────────────────── */}
       <NarrativeSection number={2} question="Can we scale it?" subtitle="Clinical & Operational Throughput">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
+        <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3 md:gap-4">
           <Column heading="Discovery">
             <MetricTile
               label="eScript Sent · Lifetime"
