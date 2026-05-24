@@ -37,9 +37,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     >
       <div className="flex h-14 items-center justify-between border-b border-dash-border px-3">
         {!collapsed && (
-          <span className="font-sans text-[15px] font-bold tracking-[-0.03em] text-dash-text">
-            TMRW
-          </span>
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src="https://res.cloudinary.com/dkbhatjde/image/upload/v1774156339/TMRW_Wordmark_Black_smr8np.svg"
+            alt="TMRW Health"
+            width={90}
+            height={20}
+            style={{ height: 20, width: 'auto' }}
+          />
         )}
         <button
           onClick={onToggle}
