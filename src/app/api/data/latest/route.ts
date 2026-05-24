@@ -25,7 +25,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
 
 const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
   meta: 'date',
-  stripe: 'created_at',
+  stripe: 'created',
   hubspot_contacts: 'create_date',
   ghl_opportunities: 'created_on',
   operational_data: 'date',

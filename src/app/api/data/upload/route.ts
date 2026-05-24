@@ -42,7 +42,7 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   hubspot_contacts: null,
   ghl_opportunities: 'created_on',
   operational_data: 'date',
-  stripe: 'created_at',
+  stripe: 'created',
   zendesk: null,
   meta: 'date',
   pelagonia: 'pelagonia_created_at',
@@ -75,7 +75,7 @@ async function applyWriteStrategy(
     case 'operational_data':
       return upsertStrategy(supabase, table, batchId, rows, 'date')
     case 'stripe':
-      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created_at')
+      return upsertStrategy(supabase, table, batchId, rows, 'stripe_invoice_id')
     case 'meta':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'date')
     case 'pelagonia':
