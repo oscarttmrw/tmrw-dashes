@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { Calendar, ChevronDown } from 'lucide-react'
+import { Calendar } from 'lucide-react'
 
 export interface DateRange {
   start: Date
@@ -14,7 +14,7 @@ export interface DateRangePickerValue {
   period: DateRange
   /** Comparison period. Tiles compute delta against this. */
   comparison: DateRange
-  /** 'previous' = derived (length of period A shifted back); 'custom' = user-picked. */
+  /** 'previous' = derived from period; 'custom' = user-picked. */
   comparisonMode: 'previous' | 'custom'
 }
 
@@ -24,51 +24,92 @@ interface Props {
   className?: string
 }
 
-/* ─── Range presets ────────────────────────────────────────────────── */
+/* ─── Presets ──────────────────────────────────────────────────────── */
 
 type PresetKey =
+  | 'today'
+  | 'yesterday'
+  | 'last-7'
+  | 'last-14'
+  | 'last-28'
+  | 'last-30'
   | 'this-month'
   | 'last-month'
-  | 'last-30'
-  | 'last-90'
   | 'this-quarter'
+  | 'last-quarter'
+  | 'last-90'
+  | 'all-time'
   | 'custom'
 
 const PRESETS: { key: PresetKey; label: string }[] = [
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: 'last-7', label: 'Last 7 days' },
+  { key: 'last-14', label: 'Last 14 days' },
+  { key: 'last-28', label: 'Last 28 days' },
+  { key: 'last-30', label: 'Last 30 days' },
   { key: 'this-month', label: 'This month' },
   { key: 'last-month', label: 'Last month' },
-  { key: 'last-30', label: 'Last 30 days' },
-  { key: 'last-90', label: 'Last 90 days' },
   { key: 'this-quarter', label: 'This quarter' },
+  { key: 'last-quarter', label: 'Last quarter' },
+  { key: 'last-90', label: 'Last 90 days' },
+  { key: 'all-time', label: 'All time' },
   { key: 'custom', label: 'Custom' },
 ]
 
 function presetToRange(preset: PresetKey, today = new Date()): DateRange {
-  const start = new Date(today)
-  const end = new Date(today)
   switch (preset) {
-    case 'this-month':
-      start.setDate(1)
-      return { start: atDayStart(start), end: atDayEnd(today) }
-    case 'last-month': {
-      const lmStart = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-      const lmEnd = new Date(today.getFullYear(), today.getMonth(), 0)
-      return { start: atDayStart(lmStart), end: atDayEnd(lmEnd) }
+    case 'today':
+      return { start: atDayStart(today), end: atDayEnd(today) }
+    case 'yesterday': {
+      const d = new Date(today)
+      d.setDate(today.getDate() - 1)
+      return { start: atDayStart(d), end: atDayEnd(d) }
     }
-    case 'last-30':
-      start.setDate(today.getDate() - 29)
-      return { start: atDayStart(start), end: atDayEnd(today) }
-    case 'last-90':
-      start.setDate(today.getDate() - 89)
-      return { start: atDayStart(start), end: atDayEnd(today) }
+    case 'last-7':  return shiftedDays(today, 6)
+    case 'last-14': return shiftedDays(today, 13)
+    case 'last-28': return shiftedDays(today, 27)
+    case 'last-30': return shiftedDays(today, 29)
+    case 'last-90': return shiftedDays(today, 89)
+    case 'this-month':
+      return {
+        start: atDayStart(new Date(today.getFullYear(), today.getMonth(), 1)),
+        end: atDayEnd(today),
+      }
+    case 'last-month':
+      return {
+        start: atDayStart(new Date(today.getFullYear(), today.getMonth() - 1, 1)),
+        end: atDayEnd(new Date(today.getFullYear(), today.getMonth(), 0)),
+      }
     case 'this-quarter': {
       const q = Math.floor(today.getMonth() / 3)
-      const qStart = new Date(today.getFullYear(), q * 3, 1)
-      return { start: atDayStart(qStart), end: atDayEnd(today) }
+      return {
+        start: atDayStart(new Date(today.getFullYear(), q * 3, 1)),
+        end: atDayEnd(today),
+      }
     }
+    case 'last-quarter': {
+      const q = Math.floor(today.getMonth() / 3)
+      const lastQStartMonth = (q - 1) * 3
+      const y = lastQStartMonth < 0 ? today.getFullYear() - 1 : today.getFullYear()
+      const m = ((lastQStartMonth % 12) + 12) % 12
+      return {
+        start: atDayStart(new Date(y, m, 1)),
+        end: atDayEnd(new Date(y, m + 3, 0)),
+      }
+    }
+    case 'all-time':
+      // Reasonable lower bound — predates all TMRW data.
+      return { start: atDayStart(new Date(2024, 0, 1)), end: atDayEnd(today) }
     case 'custom':
-      return { start: atDayStart(start), end: atDayEnd(end) }
+      return { start: atDayStart(today), end: atDayEnd(today) }
   }
+}
+
+function shiftedDays(today: Date, daysBack: number): DateRange {
+  const start = new Date(today)
+  start.setDate(today.getDate() - daysBack)
+  return { start: atDayStart(start), end: atDayEnd(today) }
 }
 
 function atDayStart(d: Date): Date {
@@ -83,18 +124,8 @@ function atDayEnd(d: Date): Date {
   return x
 }
 
-/** Previous period for comparison.
- *
- * When the current period is calendar-month-aligned (starts on day 1 and
- * stays within a single month), we shift one full calendar month back and
- * keep the same day-of-month bounds — matches Google Ads behaviour so
- * "May 1–24 vs previous period" reads as "April 1–24", not "April 7–30".
- *
- * For multi-month ranges (Last 30 days, This quarter, custom windows that
- * span months) we fall back to an equal-length window ending the day before
- * period.start — the only sensible answer when there's no natural calendar
- * pivot.
- */
+/** Previous period for comparison. See PR C.5 — month-aligned ranges get a
+ * calendar-month shift; everything else gets equal-length shifted back. */
 export function previousPeriod(period: DateRange): DateRange {
   const monthAligned =
     period.start.getDate() === 1
@@ -104,7 +135,6 @@ export function previousPeriod(period: DateRange): DateRange {
   if (monthAligned) {
     const y = period.start.getFullYear()
     const m = period.start.getMonth()
-    // Last day of the previous month — clamps Feb safely (e.g. Mar 31 → Feb 28).
     const prevMonthLastDay = new Date(y, m, 0).getDate()
     const prevEndDay = Math.min(period.end.getDate(), prevMonthLastDay)
     return {
@@ -119,7 +149,6 @@ export function previousPeriod(period: DateRange): DateRange {
   return { start: atDayStart(start), end: atDayEnd(end) }
 }
 
-/** Helper: default value if no caller-state exists yet. */
 export function defaultDateRangePicker(): DateRangePickerValue {
   const period = presetToRange('this-month')
   return {
@@ -131,18 +160,30 @@ export function defaultDateRangePicker(): DateRangePickerValue {
 
 /* ─── Formatting ───────────────────────────────────────────────────── */
 
-function fmtRange(r: DateRange): string {
-  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' }
+function fmtRangeShort(r: DateRange): string {
+  const optsMD: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' }
+  const optsYear: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }
   const sameYear = r.start.getFullYear() === r.end.getFullYear()
-  const startStr = r.start.toLocaleDateString('en-AU', opts)
-  const endStr = sameYear
-    ? r.end.toLocaleDateString('en-AU', opts)
-    : r.end.toLocaleDateString('en-AU', { ...opts, year: 'numeric' })
-  return `${startStr} – ${endStr}, ${r.end.getFullYear()}`
+  return `${r.start.toLocaleDateString('en-AU', optsMD)} – ${r.end.toLocaleDateString('en-AU', sameYear ? optsMD : optsYear)}, ${r.end.getFullYear()}`
+}
+
+function fmtRangeArrow(r: DateRange): string {
+  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }
+  return `${r.start.toLocaleDateString('en-AU', opts)} → ${r.end.toLocaleDateString('en-AU', opts)}`
+}
+
+function dayCount(r: DateRange): number {
+  const ms = atDayStart(r.end).getTime() - atDayStart(r.start).getTime()
+  return Math.round(ms / 86_400_000) + 1
+}
+
+function dayCountLabel(r: DateRange): string {
+  const n = dayCount(r)
+  if (n === 1) return '1D'
+  return `${n}D`
 }
 
 function toInputValue(d: Date): string {
-  // 'YYYY-MM-DD' in local time — what <input type="date"> expects.
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
@@ -150,19 +191,37 @@ function toInputValue(d: Date): string {
 }
 
 function fromInputValue(s: string, endOfDay = false): Date {
-  // 'YYYY-MM-DD' → local Date. endOfDay flag sets to 23:59:59.999.
   const [y, m, d] = s.split('-').map(Number)
   if (!y || !m || !d) return new Date(NaN)
   return endOfDay ? atDayEnd(new Date(y, m - 1, d)) : atDayStart(new Date(y, m - 1, d))
 }
 
+function sameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate()
+}
+
 /* ─── Component ────────────────────────────────────────────────────── */
+
+type Tab = 'period' | 'compare'
 
 export function DateRangePicker({ value, onChange, className }: Props) {
   const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState<Tab>('period')
+  // Draft state — Apply commits to parent, Cancel discards.
+  const [draft, setDraft] = useState<DateRangePickerValue>(value)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  // Close on outside click
+  // Reset draft to current value whenever the picker opens.
+  useEffect(() => {
+    if (open) {
+      setDraft(value)
+      setTab('period')
+    }
+  }, [open, value])
+
+  // Close on outside click.
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
@@ -174,14 +233,24 @@ export function DateRangePicker({ value, onChange, className }: Props) {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
+  // Which preset (if any) matches the draft's period — for highlighting.
+  const activePreset: PresetKey = useMemo(() => {
+    for (const p of PRESETS) {
+      if (p.key === 'custom') continue
+      const r = presetToRange(p.key)
+      if (sameDay(r.start, draft.period.start) && sameDay(r.end, draft.period.end)) return p.key
+    }
+    return 'custom'
+  }, [draft.period])
+
   const selectPreset = (preset: PresetKey) => {
-    if (preset === 'custom') return  // user fills the date inputs below
+    if (preset === 'custom') return
     const period = presetToRange(preset)
-    onChange({
-      ...value,
+    setDraft(d => ({
+      ...d,
       period,
-      comparison: value.comparisonMode === 'previous' ? previousPeriod(period) : value.comparison,
-    })
+      comparison: d.comparisonMode === 'previous' ? previousPeriod(period) : d.comparison,
+    }))
   }
 
   const setPeriodFromInputs = (startStr: string, endStr: string) => {
@@ -189,78 +258,82 @@ export function DateRangePicker({ value, onChange, className }: Props) {
     const end = fromInputValue(endStr, true)
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return
     const period: DateRange = { start, end }
-    onChange({
-      ...value,
+    setDraft(d => ({
+      ...d,
       period,
-      comparison: value.comparisonMode === 'previous' ? previousPeriod(period) : value.comparison,
-    })
+      comparison: d.comparisonMode === 'previous' ? previousPeriod(period) : d.comparison,
+    }))
+  }
+
+  const setComparisonMode = (mode: 'previous' | 'custom') => {
+    setDraft(d => ({
+      ...d,
+      comparisonMode: mode,
+      comparison: mode === 'previous' ? previousPeriod(d.period) : d.comparison,
+    }))
   }
 
   const setComparisonFromInputs = (startStr: string, endStr: string) => {
     const start = fromInputValue(startStr)
     const end = fromInputValue(endStr, true)
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return
-    onChange({ ...value, comparison: { start, end } })
+    setDraft(d => ({ ...d, comparison: { start, end } }))
   }
 
-  const setComparisonMode = (mode: 'previous' | 'custom') => {
-    onChange({
-      ...value,
-      comparisonMode: mode,
-      comparison: mode === 'previous' ? previousPeriod(value.period) : value.comparison,
-    })
+  const handleApply = () => {
+    onChange(draft)
+    setOpen(false)
   }
-
-  // Determine which preset (if any) matches the current period — for highlight.
-  const activePreset: PresetKey | null = (() => {
-    for (const p of PRESETS) {
-      if (p.key === 'custom') continue
-      const r = presetToRange(p.key)
-      if (sameDay(r.start, value.period.start) && sameDay(r.end, value.period.end)) return p.key
-    }
-    return 'custom'
-  })()
+  const handleCancel = () => setOpen(false)
 
   return (
     <div ref={rootRef} className={cn('relative inline-block', className)}>
+      {/* Trigger */}
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
         className={cn(
-          'flex items-center gap-2 rounded-md border border-dash-border bg-dash-surface px-3 py-2 font-ui text-xs uppercase tracking-[0.05em] text-dash-text transition-colors',
-          'hover:border-dash-border-strong',
-          open && 'border-dash-text-secondary'
+          'flex items-center gap-2.5 rounded-full bg-dash-text px-4 py-2 text-white transition-colors',
+          'hover:bg-dash-text/90'
         )}
       >
-        <Calendar size={14} className="text-dash-text-secondary" />
-        <span className="font-mono normal-case tracking-normal">
-          {fmtRange(value.period)}
+        <Calendar size={14} className="text-white/80" />
+        <span className="font-mono text-xs">{fmtRangeShort(value.period)}</span>
+        <span className="rounded-full bg-white/15 px-2 py-0.5 font-ui text-[10px] uppercase tracking-[0.05em] text-white/90">
+          {dayCountLabel(value.period)}
         </span>
-        <span className="text-dash-text-muted">vs</span>
-        <span className="font-mono normal-case tracking-normal text-dash-text-secondary">
-          {fmtRange(value.comparison)}
-        </span>
-        <ChevronDown size={12} className={cn('text-dash-text-muted transition-transform', open && 'rotate-180')} />
       </button>
 
+      {/* Panel */}
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-[28rem] max-w-[calc(100vw-2rem)] rounded-lg border border-dash-border bg-dash-bg p-4 shadow-xl">
-          {/* Preset chips */}
-          <div className="mb-3">
-            <p className="mb-1.5 font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary">Period</p>
-            <div className="flex flex-wrap gap-1.5">
+        <div className="absolute right-0 z-40 mt-2 w-[40rem] max-w-[calc(100vw-2rem)] rounded-lg border border-dash-border bg-dash-bg shadow-xl">
+          {/* Tabs */}
+          <div className="flex border-b border-dash-border">
+            <TabButton active={tab === 'period'} onClick={() => setTab('period')}>
+              Date range
+            </TabButton>
+            <TabButton active={tab === 'compare'} onClick={() => setTab('compare')}>
+              Compare
+            </TabButton>
+          </div>
+
+          {/* Body — two columns */}
+          <div className="grid grid-cols-[14rem_1fr] gap-0">
+            {/* Left — preset list */}
+            <div className="border-r border-dash-border py-2">
               {PRESETS.map(p => {
-                const active = activePreset === p.key
+                const active = (tab === 'period' && activePreset === p.key)
                 return (
                   <button
                     key={p.key}
                     type="button"
                     onClick={() => selectPreset(p.key)}
+                    disabled={tab === 'compare' && draft.comparisonMode === 'previous'}
                     className={cn(
-                      'rounded-full px-3 py-1 font-ui text-[10px] uppercase tracking-[0.05em] transition-colors',
-                      active
-                        ? 'bg-dash-text text-dash-text-inverse'
-                        : 'border border-dash-border bg-dash-surface text-dash-text-secondary hover:border-dash-text-muted hover:text-dash-text'
+                      'flex w-full items-center justify-between px-4 py-2 text-left font-sans text-sm transition-colors',
+                      active ? 'border-l-2 border-dash-red bg-dash-red/5 pl-[14px] font-medium text-dash-red'
+                             : 'text-dash-text hover:bg-dash-surface-hover',
+                      tab === 'compare' && draft.comparisonMode === 'previous' && 'opacity-40'
                     )}
                   >
                     {p.label}
@@ -268,79 +341,65 @@ export function DateRangePicker({ value, onChange, className }: Props) {
                 )
               })}
             </div>
-          </div>
 
-          {/* Period A date inputs */}
-          <div className="mb-4 grid grid-cols-2 gap-2">
-            <DateInput
-              label="From"
-              value={toInputValue(value.period.start)}
-              onChange={(v) => setPeriodFromInputs(v, toInputValue(value.period.end))}
-            />
-            <DateInput
-              label="To"
-              value={toInputValue(value.period.end)}
-              onChange={(v) => setPeriodFromInputs(toInputValue(value.period.start), v)}
-            />
-          </div>
+            {/* Right — date inputs + summary */}
+            <div className="p-5">
+              {tab === 'period' && (
+                <PeriodEditor
+                  range={draft.period}
+                  onChange={setPeriodFromInputs}
+                />
+              )}
 
-          {/* Comparison */}
-          <div>
-            <p className="mb-1.5 font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary">Compare to</p>
-            <div className="mb-2 flex gap-1.5">
-              <button
-                type="button"
-                onClick={() => setComparisonMode('previous')}
-                className={cn(
-                  'rounded-full px-3 py-1 font-ui text-[10px] uppercase tracking-[0.05em] transition-colors',
-                  value.comparisonMode === 'previous'
-                    ? 'bg-dash-text text-dash-text-inverse'
-                    : 'border border-dash-border bg-dash-surface text-dash-text-secondary hover:border-dash-text-muted hover:text-dash-text'
-                )}
-              >
-                Previous period
-              </button>
-              <button
-                type="button"
-                onClick={() => setComparisonMode('custom')}
-                className={cn(
-                  'rounded-full px-3 py-1 font-ui text-[10px] uppercase tracking-[0.05em] transition-colors',
-                  value.comparisonMode === 'custom'
-                    ? 'bg-dash-text text-dash-text-inverse'
-                    : 'border border-dash-border bg-dash-surface text-dash-text-secondary hover:border-dash-text-muted hover:text-dash-text'
-                )}
-              >
-                Custom range
-              </button>
+              {tab === 'compare' && (
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    <ModeButton
+                      active={draft.comparisonMode === 'previous'}
+                      onClick={() => setComparisonMode('previous')}
+                    >
+                      Previous period
+                    </ModeButton>
+                    <ModeButton
+                      active={draft.comparisonMode === 'custom'}
+                      onClick={() => setComparisonMode('custom')}
+                    >
+                      Custom range
+                    </ModeButton>
+                  </div>
+
+                  {draft.comparisonMode === 'custom' ? (
+                    <PeriodEditor
+                      range={draft.comparison}
+                      onChange={setComparisonFromInputs}
+                    />
+                  ) : (
+                    <div>
+                      <p className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted">Auto — previous period</p>
+                      <p className="mt-2 font-mono text-sm text-dash-text">{fmtRangeArrow(draft.comparison)}</p>
+                      <p className="mt-1 font-mono text-[11px] text-dash-text-muted">{dayCount(draft.comparison)} days</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            {value.comparisonMode === 'custom' && (
-              <div className="grid grid-cols-2 gap-2">
-                <DateInput
-                  label="From"
-                  value={toInputValue(value.comparison.start)}
-                  onChange={(v) => setComparisonFromInputs(v, toInputValue(value.comparison.end))}
-                />
-                <DateInput
-                  label="To"
-                  value={toInputValue(value.comparison.end)}
-                  onChange={(v) => setComparisonFromInputs(toInputValue(value.comparison.start), v)}
-                />
-              </div>
-            )}
-            {value.comparisonMode === 'previous' && (
-              <p className="font-mono text-[11px] text-dash-text-muted">
-                {fmtRange(value.comparison)}
-              </p>
-            )}
           </div>
 
-          <div className="mt-4 flex justify-end">
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-2 border-t border-dash-border px-5 py-3">
             <button
               type="button"
-              onClick={() => setOpen(false)}
-              className="rounded-md bg-dash-text px-3 py-1.5 font-ui text-[10px] uppercase tracking-[0.05em] text-dash-text-inverse hover:opacity-90"
+              onClick={handleCancel}
+              className="rounded-full border border-dash-border px-5 py-1.5 font-ui text-[11px] uppercase tracking-[0.05em] text-dash-text-secondary transition-colors hover:bg-dash-surface-hover"
             >
-              Done
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleApply}
+              className="rounded-full bg-dash-text px-5 py-1.5 font-ui text-[11px] uppercase tracking-[0.05em] text-white transition-colors hover:bg-dash-text/90"
+            >
+              Apply
             </button>
           </div>
         </div>
@@ -349,22 +408,66 @@ export function DateRangePicker({ value, onChange, className }: Props) {
   )
 }
 
-function DateInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <label className="block">
-      <span className="block font-ui text-[10px] uppercase tracking-[0.05em] text-dash-text-muted">{label}</span>
-      <input
-        type="date"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-md border border-dash-border bg-dash-surface px-2 py-1 font-mono text-xs text-dash-text focus:border-dash-text-secondary focus:outline-none"
-      />
-    </label>
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex-1 border-b-2 px-6 py-3 font-ui text-[11px] uppercase tracking-[0.06em] transition-colors',
+        active
+          ? 'border-dash-text text-dash-text'
+          : 'border-transparent text-dash-text-muted hover:text-dash-text'
+      )}
+    >
+      {children}
+    </button>
   )
 }
 
-function sameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear()
-    && a.getMonth() === b.getMonth()
-    && a.getDate() === b.getDate()
+function ModeButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-full px-3 py-1 font-ui text-[10px] uppercase tracking-[0.05em] transition-colors',
+        active
+          ? 'bg-dash-text text-white'
+          : 'border border-dash-border bg-dash-surface text-dash-text-secondary hover:border-dash-text-muted hover:text-dash-text'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function PeriodEditor({ range, onChange }: { range: DateRange; onChange: (start: string, end: string) => void }) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted">Start date</label>
+        <input
+          type="date"
+          value={toInputValue(range.start)}
+          onChange={(e) => onChange(e.target.value, toInputValue(range.end))}
+          className="mt-1.5 w-full rounded-md border border-dash-border bg-dash-surface px-3 py-2 font-mono text-sm text-dash-text focus:border-dash-text-secondary focus:outline-none"
+        />
+      </div>
+      <div>
+        <label className="block font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted">End date</label>
+        <input
+          type="date"
+          value={toInputValue(range.end)}
+          onChange={(e) => onChange(toInputValue(range.start), e.target.value)}
+          className="mt-1.5 w-full rounded-md border border-dash-border bg-dash-surface px-3 py-2 font-mono text-sm text-dash-text focus:border-dash-text-secondary focus:outline-none"
+        />
+      </div>
+      <div className="border-t border-dash-border pt-3">
+        <p className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted">Selected</p>
+        <p className="mt-1.5 font-mono text-sm text-dash-text">{fmtRangeArrow(range)}</p>
+        <p className="mt-0.5 font-mono text-[11px] text-dash-text-muted">{dayCount(range)} days</p>
+      </div>
+    </div>
+  )
 }

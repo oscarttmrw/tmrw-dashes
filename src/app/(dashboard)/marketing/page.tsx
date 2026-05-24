@@ -68,8 +68,8 @@ function KpiTile({ label, value, sublabel, delta, direction = 'higher-better', c
           <TrendIndicator value={Math.round(delta)} direction={direction} />
         )}
       </div>
-      {chart && <div className="mt-2">{chart}</div>}
-      <div className="mt-auto pt-1.5 flex items-center justify-between text-[11px] text-dash-text-muted">
+      {chart && <div className="mt-3 mb-2">{chart}</div>}
+      <div className="mt-auto pt-3 flex items-center justify-between text-[11px] text-dash-text-muted">
         {sublabel ? <span>{sublabel}</span> : <span />}
         {delta !== null && delta !== undefined && <span className="font-sans">vs previous</span>}
       </div>

@@ -52,8 +52,8 @@ function MetricTile({ label, value, target, delta, status, direction = 'higher-b
           <TrendIndicator value={delta.value} direction={direction} />
         )}
       </div>
-      {chart && <div className="mt-2">{chart}</div>}
-      <div className="mt-auto pt-1.5 flex items-center justify-between text-[10px] text-dash-text-muted md:text-[11px]">
+      {chart && <div className="mt-3 mb-2">{chart}</div>}
+      <div className="mt-auto pt-3 flex items-center justify-between text-[10px] text-dash-text-muted md:text-[11px]">
         {target ? <span>{target}</span> : <span />}
         {delta?.period && <span className="font-sans">{delta.period}</span>}
       </div>

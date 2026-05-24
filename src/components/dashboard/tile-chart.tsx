@@ -44,7 +44,7 @@ export function TileChart({
     return (
       <div style={{ width: '100%', height }}>
         <ResponsiveContainer>
-          <LineChart data={cleaned} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+          <LineChart data={cleaned} margin={{ top: 4, right: 0, left: 0, bottom: 2 }}>
             <Tooltip
               cursor={{ stroke: '#A3A3A3', strokeDasharray: '2 2' }}
               content={<SparkTooltip formatValue={formatValue} />}
@@ -53,7 +53,7 @@ export function TileChart({
             <Line
               type="monotone"
               dataKey="value"
-              stroke="#1A1A1A"
+              stroke="#8B0000"
               strokeWidth={1.5}
               dot={false}
               isAnimationActive={false}
@@ -67,11 +67,11 @@ export function TileChart({
   return (
     <div style={{ width: '100%', height }}>
       <ResponsiveContainer>
-        <AreaChart data={cleaned} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+        <AreaChart data={cleaned} margin={{ top: 4, right: 0, left: 0, bottom: 2 }}>
           <defs>
             <linearGradient id="tileSparkFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#1A1A1A" stopOpacity={0.16} />
-              <stop offset="100%" stopColor="#1A1A1A" stopOpacity={0} />
+              <stop offset="0%" stopColor="#8B0000" stopOpacity={0.18} />
+              <stop offset="100%" stopColor="#8B0000" stopOpacity={0} />
             </linearGradient>
           </defs>
           <Tooltip
@@ -82,7 +82,7 @@ export function TileChart({
           <Area
             type="monotone"
             dataKey="value"
-            stroke="#1A1A1A"
+            stroke="#8B0000"
             strokeWidth={1.5}
             fill="url(#tileSparkFill)"
             isAnimationActive={false}
