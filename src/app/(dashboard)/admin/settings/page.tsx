@@ -1,7 +1,292 @@
 'use client'
 
+import { useEffect, useMemo, useState } from 'react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { useDashboardData } from '@/lib/context/data-context'
+import { ChevronDown, ChevronRight, CheckCircle } from 'lucide-react'
+
+// ---------------------------------------------------------------------------
+// Plan Targets — monthly registrations + revenue + MRR targets.
+// Stored in `plan_targets`. Powers the vs-plan progress on home-dashboard
+// Section 1 tiles.
+// ---------------------------------------------------------------------------
+
+interface PlanTargetRow {
+  month: string  // 'YYYY-MM-DD' (first of month)
+  registrations_target: number | null
+  gross_revenue_target: number | null
+  net_revenue_target: number | null
+  mrr_target: number | null
+  updated_at?: string | null
+}
+
+interface FormState {
+  month: string  // 'YYYY-MM'
+  registrations: string
+  gross: string
+  net: string
+  mrr: string
+}
+
+function currentMonthYM(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function rowToForm(row: PlanTargetRow | null, month: string): FormState {
+  return {
+    month,
+    registrations: row?.registrations_target?.toString() ?? '',
+    gross: row?.gross_revenue_target?.toString() ?? '',
+    net: row?.net_revenue_target?.toString() ?? '',
+    mrr: row?.mrr_target?.toString() ?? '',
+  }
+}
+
+function formatMonthLabel(monthIso: string): string {
+  // 'YYYY-MM-DD' → 'May 2026'
+  const d = new Date(monthIso + (monthIso.length === 7 ? '-01' : ''))
+  if (isNaN(d.getTime())) return monthIso
+  return d.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
+}
+
+function formatNum(n: number | null): string {
+  if (n === null || n === undefined) return '—'
+  return n.toLocaleString('en-US', { maximumFractionDigits: 0 })
+}
+
+function PlanTargetsSection() {
+  const { refresh } = useDashboardData()
+  const [rows, setRows] = useState<PlanTargetRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [savedAt, setSavedAt] = useState<number | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [form, setForm] = useState<FormState>(() => rowToForm(null, currentMonthYM()))
+
+  // Load existing targets on mount
+  useEffect(() => {
+    fetch('/api/plan-targets', { credentials: 'include', cache: 'no-store' })
+      .then(r => r.json())
+      .then(body => {
+        const list: PlanTargetRow[] = Array.isArray(body.plan_targets) ? body.plan_targets : []
+        setRows(list)
+        // Pre-fill form with current month's row if it exists.
+        const current = currentMonthYM()
+        const match = list.find(r => r.month?.startsWith(current))
+        setForm(rowToForm(match ?? null, current))
+        setLoading(false)
+      })
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : 'Failed to load plan targets')
+        setLoading(false)
+      })
+  }, [])
+
+  // When user changes the month picker, re-prefill from existing row.
+  const setMonth = (ym: string) => {
+    const match = rows.find(r => r.month?.startsWith(ym))
+    setForm(rowToForm(match ?? null, ym))
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const body = {
+        month: form.month,
+        registrations_target: form.registrations === '' ? null : Number(form.registrations),
+        gross_revenue_target: form.gross === '' ? null : Number(form.gross),
+        net_revenue_target: form.net === '' ? null : Number(form.net),
+        mrr_target: form.mrr === '' ? null : Number(form.mrr),
+      }
+      const res = await fetch('/api/plan-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}))
+        throw new Error(errBody.error ?? `Save failed (HTTP ${res.status})`)
+      }
+      const updated: PlanTargetRow = (await res.json()).plan_target
+      // Update local list (replace existing for that month or insert).
+      setRows(prev => {
+        const without = prev.filter(r => !r.month?.startsWith(form.month))
+        return [updated, ...without].sort((a, b) => (b.month ?? '').localeCompare(a.month ?? ''))
+      })
+      setSavedAt(Date.now())
+      // Refresh the dashboard context so Section 1 vs-plan progress updates.
+      refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const previousMonths = useMemo(
+    () => rows.filter(r => !r.month?.startsWith(form.month)),
+    [rows, form.month]
+  )
+
+  return (
+    <section>
+      <h2 className="mb-4 font-ui text-sm font-semibold uppercase tracking-[0.05em] text-dash-text-secondary">
+        Plan Targets
+      </h2>
+      <div className="rounded-lg border border-dash-border bg-dash-surface p-5">
+        <p className="mb-5 text-sm text-dash-text-secondary">
+          Monthly targets for Registrations, Gross Revenue, Net Revenue and MRR. Powers the vs-plan progress on the home dashboard.
+        </p>
+
+        {/* Form */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-dash-text-secondary">Month</label>
+            <input
+              type="month"
+              value={form.month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="w-full rounded-md border border-dash-border bg-dash-bg px-3 py-2 font-mono text-sm text-dash-text focus:border-dash-red focus:outline-none focus:ring-1 focus:ring-dash-red"
+            />
+          </div>
+          <div /> {/* spacer */}
+
+          <NumberField
+            label="Registrations target"
+            value={form.registrations}
+            onChange={(v) => setForm(f => ({ ...f, registrations: v }))}
+            placeholder="e.g. 310"
+          />
+          <NumberField
+            label="Gross Revenue target ($)"
+            value={form.gross}
+            onChange={(v) => setForm(f => ({ ...f, gross: v }))}
+            placeholder="e.g. 80000"
+          />
+          <NumberField
+            label="Net Revenue target ($)"
+            value={form.net}
+            onChange={(v) => setForm(f => ({ ...f, net: v }))}
+            placeholder="e.g. 75000"
+            hint="Locked tile — enter ahead of time"
+          />
+          <NumberField
+            label="MRR target ($)"
+            value={form.mrr}
+            onChange={(v) => setForm(f => ({ ...f, mrr: v }))}
+            placeholder="e.g. 50000"
+            hint="Locked tile — enter ahead of time"
+          />
+        </div>
+
+        <div className="mt-5 flex items-center gap-3">
+          <button
+            onClick={handleSave}
+            disabled={saving || loading}
+            className="rounded-md bg-dash-red px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-dash-red/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save targets'}
+          </button>
+          {savedAt && Date.now() - savedAt < 3500 && (
+            <span className="flex items-center gap-1.5 text-xs text-status-green">
+              <CheckCircle size={14} />
+              Saved
+            </span>
+          )}
+          {error && (
+            <span className="text-xs text-status-red">{error}</span>
+          )}
+        </div>
+
+        {/* Previous months */}
+        {previousMonths.length > 0 && (
+          <div className="mt-6 border-t border-dash-border pt-4">
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(o => !o)}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <span className="font-ui text-xs font-medium uppercase tracking-[0.05em] text-dash-text-secondary">
+                Previous months ({previousMonths.length})
+              </span>
+              {historyOpen ? <ChevronDown size={14} className="text-dash-text-secondary" /> : <ChevronRight size={14} className="text-dash-text-secondary" />}
+            </button>
+            {historyOpen && (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-dash-border">
+                      <th className="px-3 py-2 font-medium text-dash-text-secondary">Month</th>
+                      <th className="px-3 py-2 text-right font-medium text-dash-text-secondary">Registrations</th>
+                      <th className="px-3 py-2 text-right font-medium text-dash-text-secondary">Gross</th>
+                      <th className="px-3 py-2 text-right font-medium text-dash-text-secondary">Net</th>
+                      <th className="px-3 py-2 text-right font-medium text-dash-text-secondary">MRR</th>
+                      <th className="px-3 py-2 font-medium text-dash-text-secondary"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-dash-border">
+                    {previousMonths.map(r => (
+                      <tr key={r.month} className="bg-dash-surface/40">
+                        <td className="px-3 py-2 font-mono text-dash-text">{formatMonthLabel(r.month)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-dash-text">{formatNum(r.registrations_target)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-dash-text">${formatNum(r.gross_revenue_target)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-dash-text">${formatNum(r.net_revenue_target)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-dash-text">${formatNum(r.mrr_target)}</td>
+                        <td className="px-3 py-2">
+                          <button
+                            type="button"
+                            onClick={() => setMonth(r.month.slice(0, 7))}
+                            className="text-xs text-dash-red hover:underline"
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  hint,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  hint?: string
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-dash-text-secondary">{label}</label>
+      <input
+        type="number"
+        min="0"
+        step="1"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-dash-border bg-dash-bg px-3 py-2 font-mono text-sm text-dash-text placeholder:text-dash-text-muted focus:border-dash-red focus:outline-none focus:ring-1 focus:ring-dash-red"
+      />
+      {hint && <p className="mt-1 text-[11px] italic text-dash-text-muted">{hint}</p>}
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Demo Mode Section (needs client state)
@@ -93,6 +378,9 @@ export default function SettingsPage() {
           { label: 'Settings' },
         ]}
       />
+
+      {/* Plan Targets */}
+      <PlanTargetsSection />
 
       {/* Demo Mode */}
       <DemoModeSection />
