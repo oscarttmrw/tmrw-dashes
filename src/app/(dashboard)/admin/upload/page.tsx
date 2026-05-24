@@ -7,24 +7,34 @@ import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { DataSourceBadge } from '@/components/dashboard/data-source-badge'
 import { SectionHeading } from '@/components/dashboard/section-heading'
 import { useDashboardData } from '@/lib/context/data-context'
-import type { DashboardData } from '@/lib/context/data-context'
-import { getSchema, validateRequiredColumns, dataSourceConfigs } from '@/lib/config/data-sources'
-import { getMetricsPoweredBy } from '@/lib/utils/metric-source'
+import { dataSourceSchemas, validateRequiredColumns, dataSourceConfigs } from '@/lib/config/data-sources'
 import { createClient } from '@/lib/supabase/client'
-import { Upload, CheckCircle, AlertTriangle, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { Upload, CheckCircle, AlertTriangle, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
-// (Removed) Client-side processors moved server-side in PR 1.
-// Upload page now just previews the file and posts FormData; the API does
-// all parsing/processing and the data context re-reads from Supabase.
+// Source auto-detection
 // ---------------------------------------------------------------------------
+//
+// The upload page is a single FileDrop tile. When a file is dropped, its
+// headers are inspected and matched against every registered schema's
+// required-columns list. The first schema whose required columns are ALL
+// present (case-insensitive) is the detected source. The user is then shown
+// a confirmation modal and the file is POSTed to /api/data/upload with the
+// detected source key.
 
-// ---------------------------------------------------------------------------
-// Date detection helpers
-// ---------------------------------------------------------------------------
+type SourceKey =
+  | 'tableau'
+  | 'hubspot_contacts'
+  | 'ghl_opportunities'
+  | 'operational_data'
+  | 'stripe'
+  | 'zendesk'
+  | 'meta'
+  | 'pelagonia'
 
-const DATE_COL: Partial<Record<string, string>> = {
+// Date-detection column for the preview/modal (case-insensitive header).
+const DATE_COL: Partial<Record<SourceKey, string>> = {
   meta: 'reporting starts',
   stripe: 'created',
   zendesk: 'created at',
@@ -34,11 +44,25 @@ const DATE_COL: Partial<Record<string, string>> = {
   pelagonia: 'created at',
 }
 
+function detectSourceByHeaders(headers: string[]): SourceKey | null {
+  // Walk schemas in a stable order — most-specific (most required columns)
+  // first, so a CSV that satisfies both a narrow and a broad schema picks
+  // the narrow one.
+  const ranked = (Object.entries(dataSourceSchemas) as [SourceKey, typeof dataSourceSchemas[string]][])
+    .slice()
+    .sort(([, a], [, b]) => b.requiredColumns.length - a.requiredColumns.length)
+  for (const [key, schema] of ranked) {
+    const missing = validateRequiredColumns(schema, headers)
+    if (missing.length === 0) return key
+  }
+  return null
+}
+
 function detectDateRange(
   rows: Record<string, string>[],
-  sourceKey: string
+  source: SourceKey
 ): { from: string | null; to: string | null } {
-  const targetCol = DATE_COL[sourceKey]
+  const targetCol = DATE_COL[source]
   if (!rows.length || !targetCol) return { from: null, to: null }
 
   const matchingKey = Object.keys(rows[0]).find(k => k.toLowerCase().trim() === targetCol)
@@ -54,9 +78,8 @@ function detectDateRange(
   }
   if (!timestamps.length) return { from: null, to: null }
 
-  // For Meta, also check 'Reporting Ends' for the upper bound
   let maxTs = Math.max(...timestamps)
-  if (sourceKey === 'meta') {
+  if (source === 'meta') {
     const endKey = Object.keys(rows[0]).find(k => k.toLowerCase().trim() === 'reporting ends')
     if (endKey) {
       for (const row of rows) {
@@ -86,21 +109,11 @@ function formatDateLabel(from: string | null, to: string | null): string {
 // Types
 // ---------------------------------------------------------------------------
 
-type SourceKey =
-  | 'tableau'
-  | 'hubspot_contacts'
-  | 'ghl_opportunities'
-  | 'operational_data'
-  | 'stripe'
-  | 'zendesk'
-  | 'meta'
-  | 'pelagonia'
-
 interface PendingUpload {
   file: File
+  source: SourceKey
   rowCount: number
   columnCount: number
-  stateUpdate: Partial<DashboardData>
   detectedFrom: string | null
   detectedTo: string | null
 }
@@ -110,6 +123,7 @@ interface UploadState {
   pending?: PendingUpload
   resultCount?: number
   errors?: string[]
+  detectedSource?: SourceKey
 }
 
 interface ModalForm {
@@ -119,67 +133,43 @@ interface ModalForm {
   periodLabel: string
 }
 
-interface DataSourceConfig {
-  key: SourceKey
-  name: string
-  recordLabel: string
-  columnLabel: string
-  note?: string
-}
-
-// Sorted descending by metrics powered
-const dataSources: DataSourceConfig[] = (
-  [
-    { key: 'hubspot_contacts',  name: 'HUBSPOT CONTACTS',       recordLabel: 'contacts',       columnLabel: 'columns' },
-    { key: 'ghl_opportunities', name: 'GHL OPPORTUNITIES',      recordLabel: 'opportunities', columnLabel: 'columns' },
-    { key: 'operational_data',  name: 'OPERATIONAL DATA',        recordLabel: 'days',           columnLabel: 'columns', note: 'xlsx — reads Sheet2, dates are Excel serial numbers' },
-    { key: 'meta',              name: 'META FOR BUSINESS',       recordLabel: 'ad sets',        columnLabel: 'columns' },
-    { key: 'stripe',            name: 'STRIPE',                  recordLabel: 'transactions',   columnLabel: 'columns' },
-    { key: 'pelagonia',         name: 'PELAGONIA (GOHIGHLEVEL)', recordLabel: 'opportunities', columnLabel: 'columns', note: 'Currently unused — kept for future' },
-    { key: 'zendesk',           name: 'ZENDESK',                 recordLabel: 'records',        columnLabel: 'columns', note: 'Currently unused — kept for future' },
-    { key: 'tableau',           name: 'TABLEAU',                 recordLabel: 'members',        columnLabel: 'measures', note: 'TSV file with UTF-16 encoding handled automatically' },
-  ] as DataSourceConfig[]
-).sort((a, b) => getMetricsPoweredBy(b.key).length - getMetricsPoweredBy(a.key).length)
-
 // ---------------------------------------------------------------------------
-// Upload Card
+// Page
 // ---------------------------------------------------------------------------
 
-function UploadCard({
-  source,
-  isFileBeingDragged,
-  currentUserEmail,
-}: {
-  source: DataSourceConfig
-  isFileBeingDragged: boolean
-  currentUserEmail: string
-}) {
-  const { lastRefreshed, refresh } = useDashboardData()
+export default function UploadPage() {
+  const { dataMode, lastRefreshed, refresh } = useDashboardData()
+  const [isFileBeingDragged, setIsFileBeingDragged] = useState(false)
+  const [isDraggingOver, setIsDraggingOver] = useState(false)
+  const [currentUserEmail, setCurrentUserEmail] = useState('')
   const [state, setState] = useState<UploadState>({ status: 'idle' })
   const [modalForm, setModalForm] = useState<ModalForm>({ uploadedBy: '', periodFrom: '', periodTo: '', periodLabel: '' })
-  const [stepsOpen, setStepsOpen] = useState(false)
-  const [metricsOpen, setMetricsOpen] = useState(false)
-  const [schemaOpen, setSchemaOpen] = useState(false)
-  const [isDraggingOver, setIsDraggingOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const dragCounter = useRef(0)
 
-  const config = dataSourceConfigs[source.key]
-  const lastRefresh = lastRefreshed[source.key]
+  useEffect(() => {
+    createClient().auth.getUser().then(({ data }) => {
+      if (data.user?.email) setCurrentUserEmail(data.user.email)
+    })
+  }, [])
 
-  const readFileContent = useCallback(async (file: File): Promise<string> => {
-    if (source.key === 'tableau') {
-      const buffer = await file.arrayBuffer()
-      const bytes = new Uint8Array(buffer)
-      if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder('utf-16le').decode(buffer)
-      if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder('utf-16be').decode(buffer)
+  useEffect(() => {
+    const onDragEnter = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) { dragCounter.current += 1; setIsFileBeingDragged(true) }
     }
-    return file.text()
-  }, [source.key])
-
-  const validateColumns = useCallback((headers: string[], sourceKey: SourceKey): string[] => {
-    const schema = getSchema(sourceKey)
-    if (!schema) return []
-    return validateRequiredColumns(schema, headers)
+    const onDragLeaveWin = () => {
+      dragCounter.current -= 1
+      if (dragCounter.current <= 0) { dragCounter.current = 0; setIsFileBeingDragged(false) }
+    }
+    const onDropWin = () => { dragCounter.current = 0; setIsFileBeingDragged(false) }
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragleave', onDragLeaveWin)
+    window.addEventListener('drop', onDropWin)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragleave', onDragLeaveWin)
+      window.removeEventListener('drop', onDropWin)
+    }
   }, [])
 
   const openModal = useCallback((pending: PendingUpload) => {
@@ -190,82 +180,97 @@ function UploadCard({
       periodTo: pending.detectedTo ?? '',
       periodLabel: label,
     })
-    setState({ status: 'modal', pending })
+    setState({ status: 'modal', pending, detectedSource: pending.source })
   }, [currentUserEmail])
 
   const handleFile = useCallback(async (file: File) => {
     setState({ status: 'validating' })
 
     try {
-      let content: string
-      if (file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls')) {
-        const buffer = await file.arrayBuffer()
-        const workbook = XLSX.read(buffer, { type: 'array' })
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
-        content = XLSX.utils.sheet_to_csv(firstSheet)
-      } else {
-        content = await readFileContent(file)
-      }
+      const name = file.name.toLowerCase()
+      const isXlsx = name.endsWith('.xlsx') || name.endsWith('.xls')
 
-      if (source.key === 'tableau') {
-        let text = content
-        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1)
-        const lines = text.split(/\r?\n/).filter(l => l.trim())
-        if (lines.length < 2) {
-          setState({ status: 'error', errors: ['File is empty or has no data rows'] }); return
-        }
-        const headers = lines[0].split('\t').map(h => h.trim())
-        const missing = validateColumns(headers, 'tableau')
-        if (missing.length > 0) {
-          setState({ status: 'error', errors: [`Missing columns: ${missing.join(', ')}`] }); return
-        }
-        const createdIdx = headers.findIndex(h => h.toLowerCase().trim() === 'created at')
-        const dates: number[] = []
-        if (createdIdx >= 0) {
-          for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].split('\t')
-            const raw = cols[createdIdx]?.trim()
-            if (!raw) continue
-            const d = new Date(raw)
-            if (!isNaN(d.getTime())) dates.push(d.getTime())
+      let rows: Record<string, string>[]
+      if (isXlsx) {
+        const buffer = await file.arrayBuffer()
+        const wb = XLSX.read(buffer, { type: 'array' })
+        // Detection sweeps every sheet — pick the first sheet whose headers
+        // satisfy a known schema. The server-side upload route picks the
+        // correct sheet again at processing time (see route.ts).
+        let chosenRows: Record<string, string>[] | null = null
+        for (const sheetName of wb.SheetNames) {
+          const ws = wb.Sheets[sheetName]
+          const sheetRows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, string>[]
+          if (sheetRows.length === 0) continue
+          const headers = Object.keys(sheetRows[0])
+          if (detectSourceByHeaders(headers)) {
+            chosenRows = sheetRows
+            break
           }
         }
-        const detectedFrom = dates.length ? new Date(Math.min(...dates)).toISOString().split('T')[0] : null
-        const detectedTo   = dates.length ? new Date(Math.max(...dates)).toISOString().split('T')[0] : null
-        openModal({ file, rowCount: lines.length - 1, columnCount: headers.length, stateUpdate: {}, detectedFrom, detectedTo })
+        if (!chosenRows) {
+          const firstWs = wb.Sheets[wb.SheetNames[0]]
+          chosenRows = XLSX.utils.sheet_to_json(firstWs, { defval: '' }) as Record<string, string>[]
+        }
+        rows = chosenRows
       } else {
-        Papa.parse(content, {
+        // CSV / TSV — read as text, detect delimiter, parse.
+        const buffer = await file.arrayBuffer()
+        let text: string
+        try {
+          text = new TextDecoder('utf-16le').decode(buffer)
+          if (!text.includes('\t') && !text.includes(',')) throw new Error('not utf-16')
+        } catch {
+          text = new TextDecoder('utf-8').decode(buffer)
+        }
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1)
+        const delimiter = text.includes('\t') ? '\t' : ','
+        const result = Papa.parse<Record<string, string>>(text, {
           header: true,
           skipEmptyLines: true,
-          complete: (results) => {
-            const data = results.data as Record<string, string>[]
-            if (!data.length) {
-              setState({ status: 'error', errors: ['File contains no data rows'] }); return
-            }
-            const headers = Object.keys(data[0])
-            const missing = validateColumns(headers, source.key)
-            if (missing.length > 0) {
-              setState({ status: 'error', errors: [`Missing columns: ${missing.join(', ')}`] }); return
-            }
-            const { from, to } = detectDateRange(data, source.key)
-            openModal({ file, rowCount: data.length, columnCount: headers.length, stateUpdate: {}, detectedFrom: from, detectedTo: to })
-          },
-          error: (err: Error) => {
-            setState({ status: 'error', errors: [`Parse error: ${err.message}`] })
-          },
+          delimiter,
         })
+        rows = result.data
       }
+
+      if (!rows.length) {
+        setState({ status: 'error', errors: ['File contains no data rows'] })
+        return
+      }
+
+      const headers = Object.keys(rows[0])
+      const source = detectSourceByHeaders(headers)
+      if (!source) {
+        setState({
+          status: 'error',
+          errors: [
+            'Could not auto-detect the data source from this file\'s columns.',
+            `Headers seen: ${headers.slice(0, 8).join(', ')}${headers.length > 8 ? '…' : ''}`,
+          ],
+        })
+        return
+      }
+
+      const { from, to } = detectDateRange(rows, source)
+      openModal({
+        file,
+        source,
+        rowCount: rows.length,
+        columnCount: headers.length,
+        detectedFrom: from,
+        detectedTo: to,
+      })
     } catch (err) {
       setState({ status: 'error', errors: [`Read error: ${err instanceof Error ? err.message : String(err)}`] })
     }
-  }, [source.key, readFileContent, validateColumns, openModal])
+  }, [openModal])
 
   const handleConfirm = useCallback(async () => {
     if (!state.pending) return
     setState(prev => ({ ...prev, status: 'uploading' }))
 
     const form = new FormData()
-    form.append('source', source.key)
+    form.append('source', state.pending.source)
     form.append('file', state.pending.file)
     form.append('file_name', state.pending.file.name)
     form.append('uploaded_by', modalForm.uploadedBy)
@@ -287,14 +292,14 @@ function UploadCard({
         : []
       await refresh()
       if (apiErrors.length > 0) {
-        setState({ status: 'success', resultCount: rowCount, errors: apiErrors.slice(0, 10) })
+        setState({ status: 'success', resultCount: rowCount, detectedSource: state.pending.source, errors: apiErrors.slice(0, 10) })
       } else {
-        setState({ status: 'success', resultCount: rowCount })
+        setState({ status: 'success', resultCount: rowCount, detectedSource: state.pending.source })
       }
     } catch (err) {
       setState({ status: 'error', errors: [`Network error: ${err instanceof Error ? err.message : String(err)}`] })
     }
-  }, [state.pending, modalForm, source.key, refresh])
+  }, [state.pending, modalForm, refresh])
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -311,15 +316,41 @@ function UploadCard({
   }, [handleFile])
 
   const canConfirm = modalForm.uploadedBy.trim().length > 0 && state.status !== 'uploading'
+  const detectedName = state.detectedSource ? (dataSourceConfigs[state.detectedSource]?.name ?? state.detectedSource) : ''
 
   return (
-    <>
+    <div className="space-y-10">
+      <Breadcrumb items={[{ label: 'Home', href: '/' }, { label: 'Admin', href: '/admin' }, { label: 'Data Upload' }]} />
+
+      {dataMode === 'demo' && (
+        <div className="rounded-lg border border-status-amber/30 bg-status-amber-light px-4 py-3">
+          <p className="font-sans text-sm text-status-amber">
+            Currently displaying demo data. Upload real CSV files and switch to Actual mode.
+          </p>
+        </div>
+      )}
+      {dataMode === 'actual' && (
+        <div className="rounded-lg border border-dash-border bg-dash-surface px-4 py-3">
+          <p className="text-sm text-dash-text-secondary">
+            Showing real data — last updated:{' '}
+            {Object.entries(lastRefreshed)
+              .filter(([, ts]) => ts)
+              .map(([src, ts]) => `${src}: ${new Date(ts!).toLocaleDateString('en-AU')}`)
+              .join(' · ') || 'no uploads yet'}
+          </p>
+        </div>
+      )}
+
+      <SectionHeading number={1} title="Upload data" />
+
       {/* Confirmation modal */}
       {(state.status === 'modal' || state.status === 'uploading') && state.pending && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-lg rounded-xl border border-dash-border bg-dash-bg shadow-2xl">
             <div className="flex items-center justify-between border-b border-dash-border px-6 py-4">
-              <h2 className="text-sm font-semibold text-dash-text">Confirm upload — {source.name}</h2>
+              <h2 className="text-sm font-semibold text-dash-text">
+                Confirm upload — {dataSourceConfigs[state.pending.source]?.name ?? state.pending.source}
+              </h2>
               {state.status !== 'uploading' && (
                 <button onClick={() => setState({ status: 'idle' })} className="text-dash-text-muted hover:text-dash-text">
                   <X size={16} />
@@ -327,7 +358,6 @@ function UploadCard({
               )}
             </div>
             <div className="space-y-4 px-6 py-5">
-              {/* Read-only summary */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-md bg-dash-surface px-3 py-2">
                   <p className="text-[10px] uppercase tracking-wider text-dash-text-muted">File</p>
@@ -339,7 +369,14 @@ function UploadCard({
                 </div>
               </div>
 
-              {/* Data period */}
+              <div className="rounded-md bg-dash-surface px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-dash-text-muted">Detected source</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <DataSourceBadge source={state.pending.source} />
+                  <span className="text-xs text-dash-text-secondary">{dataSourceConfigs[state.pending.source]?.name ?? state.pending.source}</span>
+                </div>
+              </div>
+
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-dash-text-secondary">Data period</label>
                 <div className="grid grid-cols-2 gap-3">
@@ -370,7 +407,6 @@ function UploadCard({
                 </div>
               </div>
 
-              {/* Period label */}
               <div>
                 <label className="mb-1 block text-xs font-medium text-dash-text-secondary">
                   Period label <span className="text-dash-text-muted">(e.g. Q1 2026, Jan–Apr backfill)</span>
@@ -384,7 +420,6 @@ function UploadCard({
                 />
               </div>
 
-              {/* Uploaded by */}
               <div>
                 <label className="mb-1 block text-xs font-medium text-dash-text-secondary">
                   Uploaded by <span className="text-status-red">*</span>
@@ -419,13 +454,13 @@ function UploadCard({
         </div>
       )}
 
-      {/* Card */}
+      {/* Single auto-detect file-drop tile */}
       <div
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         className={cn(
-          'rounded-lg border p-5 transition-all duration-150',
+          'rounded-lg border p-8 transition-all duration-150',
           isDraggingOver
             ? 'scale-[1.01] border-dashed border-dash-red bg-dash-red-light'
             : isFileBeingDragged
@@ -433,46 +468,32 @@ function UploadCard({
             : 'border-dash-border bg-dash-surface'
         )}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <h3 className="font-sans text-sm font-semibold uppercase tracking-wider text-dash-text">{source.name}</h3>
-          <DataSourceBadge source={source.key} />
+        <div className="flex flex-col items-center text-center">
+          <Upload size={28} className="text-dash-text-secondary" />
+          <h3 className="mt-3 font-sans text-sm font-semibold uppercase tracking-wider text-dash-text">
+            Drop a file to upload
+          </h3>
+          <p className="mt-1 max-w-md text-xs text-dash-text-secondary">
+            CSV, TSV or XLSX. The source is auto-detected from the file's column headers.
+          </p>
+
+          <div className="mt-5">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-dash-red px-4 py-2 text-xs font-medium text-dash-text-inverse transition-colors hover:bg-dash-red/90">
+              <Upload size={14} />
+              Choose file
+              <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" className="hidden" onChange={onFileChange} />
+            </label>
+          </div>
+
+          {isDraggingOver && (
+            <p className="mt-4 text-xs font-medium text-dash-red">Drop file to upload</p>
+          )}
         </div>
 
-        {/* Last refreshed */}
-        <p className="mt-2 text-xs text-dash-text-muted">
-          Last refreshed:{' '}
-          <span className="text-dash-text-secondary">
-            {lastRefresh ? new Date(lastRefresh).toLocaleDateString('en-AU', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Never'}
-          </span>
-        </p>
-
-        {/* Upload button */}
-        <div className="mt-4">
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-dash-red px-3 py-2 text-xs font-medium text-dash-text-inverse transition-colors hover:bg-dash-red/90">
-            <Upload size={14} />
-            Upload CSV/TSV
-            <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" className="hidden" onChange={onFileChange} />
-          </label>
-        </div>
-
-        {/* Drop hint */}
-        {isDraggingOver && (
-          <p className="mt-3 text-center text-xs font-medium text-dash-red">Drop file to upload</p>
-        )}
-
-        {/* Status */}
-        <div className="mt-4">
-          {state.status === 'idle' && !lastRefresh && (
-            <p className="text-xs italic text-dash-text-muted">Awaiting first upload</p>
-          )}
-          {state.status === 'idle' && lastRefresh && state.resultCount && (
-            <p className="text-xs text-dash-text-secondary">
-              <span className="font-mono font-medium text-dash-text">{state.resultCount.toLocaleString()}</span> {source.recordLabel} processed
-            </p>
-          )}
+        {/* Status feedback */}
+        <div className="mt-6 max-w-md mx-auto">
           {state.status === 'validating' && (
-            <p className="text-xs text-dash-text-secondary">Validating file…</p>
+            <p className="text-center text-xs text-dash-text-secondary">Detecting source…</p>
           )}
           {state.status === 'success' && (
             <div className="flex items-start gap-2 rounded-md bg-status-green-light px-3 py-2">
@@ -480,8 +501,20 @@ function UploadCard({
               <div className="text-xs">
                 <p className="font-medium text-status-green">Upload successful</p>
                 <p className="text-dash-text-secondary">
-                  <span className="font-mono font-medium text-dash-text">{state.resultCount?.toLocaleString()}</span> {source.recordLabel} saved to Supabase
+                  <span className="font-mono font-medium text-dash-text">{state.resultCount?.toLocaleString()}</span> rows saved to Supabase
+                  {detectedName ? ` (${detectedName})` : ''}
                 </p>
+                {state.errors && state.errors.length > 0 && (
+                  <ul className="mt-1.5 list-disc list-inside text-dash-text-muted">
+                    {state.errors.map((err, i) => <li key={i} className="break-words">{err}</li>)}
+                  </ul>
+                )}
+                <button
+                  onClick={() => setState({ status: 'idle' })}
+                  className="mt-1.5 underline text-dash-text-muted hover:text-dash-text"
+                >
+                  Dismiss
+                </button>
               </div>
             </div>
           )}
@@ -503,129 +536,6 @@ function UploadCard({
             </div>
           )}
         </div>
-
-        {/* Note */}
-        {source.note && <p className="mt-2 text-xs italic text-dash-text-muted">{source.note}</p>}
-
-        {/* Panel — Required columns */}
-        {(() => {
-          const schema = getSchema(source.key)
-          return schema ? (
-            <div className="mt-4 rounded-lg border border-dash-border bg-dash-bg p-4 md:p-5">
-              <button type="button" onClick={() => setSchemaOpen(o => !o)} className="flex w-full items-center justify-between">
-                <span className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">Required columns</span>
-                {schemaOpen ? <ChevronUp size={14} className="text-dash-text-secondary" /> : <ChevronDown size={14} className="text-dash-text-secondary" />}
-              </button>
-              {schemaOpen && (
-                <ul className="mt-3 space-y-1">
-                  {schema.requiredColumns.map((col, i) => (
-                    <li key={i} className="font-mono text-xs text-dash-text">
-                      {Array.isArray(col) ? col.join(' / ') : col}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ) : null
-        })()}
-
-        {/* Panel A — How to pull this data */}
-        {config && (
-          <div className="mt-3 rounded-lg border border-dash-border bg-dash-bg p-4 md:p-5">
-            <button type="button" onClick={() => setStepsOpen(o => !o)} className="flex w-full items-center justify-between">
-              <span className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">How to pull this data</span>
-              {stepsOpen ? <ChevronUp size={14} className="text-dash-text-secondary" /> : <ChevronDown size={14} className="text-dash-text-secondary" />}
-            </button>
-            {stepsOpen && (
-              <ol className="mt-3 list-decimal list-inside space-y-1">
-                {config.exportSteps.map((step, i) => <li key={i} className="text-sm text-dash-text">{step}</li>)}
-              </ol>
-            )}
-          </div>
-        )}
-
-        {/* Panel B — What this data powers */}
-        {config && (
-          <div className="mt-3 rounded-lg border border-dash-border bg-dash-bg p-4 md:p-5">
-            <button type="button" onClick={() => setMetricsOpen(o => !o)} className="flex w-full items-center justify-between">
-              <span className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">What this data powers</span>
-              {metricsOpen ? <ChevronUp size={14} className="text-dash-text-secondary" /> : <ChevronDown size={14} className="text-dash-text-secondary" />}
-            </button>
-            {metricsOpen && (
-              config.poweredMetrics.length > 0
-                ? <ul className="mt-3 list-disc list-inside space-y-1">{config.poweredMetrics.map((m, i) => <li key={i} className="text-sm text-dash-text">{m}</li>)}</ul>
-                : <p className="mt-3 text-sm text-dash-text">No metrics mapped yet.</p>
-            )}
-          </div>
-        )}
-      </div>
-    </>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
-export default function UploadPage() {
-  const { dataMode, lastRefreshed } = useDashboardData()
-  const [isFileBeingDragged, setIsFileBeingDragged] = useState(false)
-  const [currentUserEmail, setCurrentUserEmail] = useState('')
-  const dragCounter = useRef(0)
-
-  useEffect(() => {
-    createClient().auth.getUser().then(({ data }) => {
-      if (data.user?.email) setCurrentUserEmail(data.user.email)
-    })
-  }, [])
-
-  useEffect(() => {
-    const onDragEnter = (e: DragEvent) => {
-      if (e.dataTransfer?.types.includes('Files')) { dragCounter.current += 1; setIsFileBeingDragged(true) }
-    }
-    const onDragLeave = () => {
-      dragCounter.current -= 1
-      if (dragCounter.current <= 0) { dragCounter.current = 0; setIsFileBeingDragged(false) }
-    }
-    const onDrop = () => { dragCounter.current = 0; setIsFileBeingDragged(false) }
-    window.addEventListener('dragenter', onDragEnter)
-    window.addEventListener('dragleave', onDragLeave)
-    window.addEventListener('drop', onDrop)
-    return () => {
-      window.removeEventListener('dragenter', onDragEnter)
-      window.removeEventListener('dragleave', onDragLeave)
-      window.removeEventListener('drop', onDrop)
-    }
-  }, [])
-
-  return (
-    <div className="space-y-10">
-      <Breadcrumb items={[{ label: 'Home', href: '/' }, { label: 'Admin', href: '/admin' }, { label: 'Data Upload' }]} />
-
-      {dataMode === 'demo' && (
-        <div className="rounded-lg border border-status-amber/30 bg-status-amber-light px-4 py-3">
-          <p className="font-sans text-sm text-status-amber">
-            Currently displaying demo data. Upload real CSV files and switch to Actual mode.
-          </p>
-        </div>
-      )}
-      {dataMode === 'actual' && (
-        <div className="rounded-lg border border-dash-border bg-dash-surface px-4 py-3">
-          <p className="text-sm text-dash-text-secondary">
-            Showing real data — last updated:{' '}
-            {Object.entries(lastRefreshed)
-              .filter(([, ts]) => ts)
-              .map(([src, ts]) => `${src}: ${new Date(ts!).toLocaleDateString('en-AU')}`)
-              .join(' · ') || 'no uploads yet'}
-          </p>
-        </div>
-      )}
-
-      <SectionHeading number={1} title="Data Sources" />
-      <div className="grid gap-6 lg:grid-cols-2">
-        {dataSources.map(src => (
-          <UploadCard key={src.key} source={src} isFileBeingDragged={isFileBeingDragged} currentUserEmail={currentUserEmail} />
-        ))}
       </div>
     </div>
   )
