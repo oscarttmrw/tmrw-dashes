@@ -32,12 +32,12 @@ export interface NavItem {
 export const navigation: NavItem[] = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, section: 'home' },
 
-  { label: 'Financial', href: '/financial', icon: DollarSign, section: 'operations', tag: 'DEMO' },
+  { label: 'Financial', href: '/financial', icon: DollarSign, section: 'operations' },
+  { label: 'Marketing', href: '/marketing', icon: Megaphone, section: 'operations' },
   { label: 'Members', href: '/members', icon: Users, section: 'operations', tag: 'DEMO' },
   { label: 'Delivery', href: '/clinical', icon: Stethoscope, section: 'operations', tag: 'DEMO' },
   { label: 'Retention', href: '/retention', icon: RefreshCw, section: 'operations', tag: 'DEMO' },
   { label: 'Support', href: '/support', icon: HeadphonesIcon, section: 'operations', tag: 'DEMO' },
-  { label: 'Marketing', href: '/marketing', icon: Megaphone, section: 'operations' },
 
   { label: 'Strategy', href: '/strategy', icon: Target, section: 'management', disabled: true, disabledReason: 'Coming in Phase 2.' },
   { label: 'EOS / L10', href: '/eos', icon: ListChecks, section: 'management', disabled: true, disabledReason: 'Coming in Phase 2.' },
