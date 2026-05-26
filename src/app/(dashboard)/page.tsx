@@ -12,7 +12,7 @@ import {
   defaultDateRangePicker,
   type DateRangePickerValue,
 } from '@/components/dashboard/date-range-picker'
-import { TileChart, bucketByDay } from '@/components/dashboard/tile-chart'
+import { TileChart, bucketByDay, toCumulative, buildCytdRunningSum } from '@/components/dashboard/tile-chart'
 import { useDashboardData } from '@/lib/context/data-context'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
@@ -29,23 +29,33 @@ interface TileProps {
   direction?: 'higher-better' | 'lower-better'
   href?: string
   chart?: React.ReactNode
+  prominent?: boolean
 }
 
-function MetricTile({ label, value, target, delta, status, direction = 'higher-better', href, chart }: TileProps) {
+function MetricTile({ label, value, target, delta, status, direction = 'higher-better', href, chart, prominent }: TileProps) {
   const tileClass = cn(
-    'flex h-full flex-col rounded-lg border border-dash-border bg-dash-surface p-3 md:p-4 transition-all duration-150',
+    'flex h-full flex-col rounded-lg border bg-dash-surface transition-all duration-150',
+    prominent
+      ? 'border-dash-border-strong p-4 md:p-5 shadow-sm'
+      : 'border-dash-border p-3 md:p-4',
     href && 'hover:border-dash-border-strong hover:shadow-sm hover:-translate-y-px'
   )
   const inner = (
     <div className={tileClass}>
       <div className="flex items-start justify-between gap-2">
-        <span className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary md:text-[11px]">
+        <span className={cn(
+          'font-ui font-medium uppercase tracking-[0.05em] text-dash-text-secondary',
+          prominent ? 'text-[11px] md:text-[12px]' : 'text-[10px] md:text-[11px]'
+        )}>
           {label}
         </span>
         <StatusDot status={status} />
       </div>
       <div className="mt-1 md:mt-2 flex items-baseline gap-2">
-        <span className="font-mono text-lg font-bold tracking-[-0.01em] text-dash-text md:text-2xl">
+        <span className={cn(
+          'font-mono font-bold tracking-[-0.01em] text-dash-text',
+          prominent ? 'text-2xl md:text-3xl' : 'text-lg md:text-2xl'
+        )}>
           {value}
         </span>
         {delta !== null && delta !== undefined && (
@@ -251,23 +261,6 @@ export default function DashboardPage() {
     [customerRows]
   )
 
-  // In1: Epi Dashboards Released — count in current period
-  const epiDashCurrent = useMemo(
-    () => customerRows.filter(r =>
-      r.epigenetics_dashboard_unlocked === true
-      && inPeriod(r.epigenetics_dashboard_unlocked_date, periodStart, periodEnd)
-    ).length,
-    [customerRows, periodStart, periodEnd]
-  )
-  const epiDashPrev = useMemo(
-    () => customerRows.filter(r =>
-      r.epigenetics_dashboard_unlocked === true
-      && inPeriod(r.epigenetics_dashboard_unlocked_date, prevPeriodStart, prevPeriodEnd)
-    ).length,
-    [customerRows, prevPeriodStart, prevPeriodEnd]
-  )
-  const epiDashDelta = deltaPct(epiDashCurrent, epiDashPrev)
-
   // In2: Time TruDiag → Epi (avg days)
   const avgDaysTruDiagToEpi = useMemo(() => {
     const usable = customerRows.filter(r =>
@@ -425,11 +418,6 @@ export default function DashboardPage() {
       (rows) => rows.reduce((s, r) => s + num(r.amount_paid), 0) / 100),
     [stripe, periodStart, periodEnd]
   )
-  const epiDashSeries = useMemo(
-    () => bucketByDay(customerRows, 'epigenetics_dashboard_unlocked_date', periodStart, periodEnd,
-      (rows) => rows.filter(r => r.epigenetics_dashboard_unlocked === true).length),
-    [customerRows, periodStart, periodEnd]
-  )
   const churnSeries = useMemo(
     () => bucketByDay(operational_data, 'date', periodStart, periodEnd,
       (rows) => rows.reduce((s, r) => s + num(r.churned_members), 0)),
@@ -468,6 +456,77 @@ export default function DashboardPage() {
       }),
     [ghl_opportunities, periodStart, periodEnd]
   )
+
+  /* ── Cumulative series for Section 1 headline tiles ──
+   * Running sum of actuals over the period, paired with a pro-rata target
+   * line (monthly target ÷ days in month × day index). The gap between
+   * the two lines tells you ahead/behind at a glance. */
+  const registrationsCumulative = useMemo(
+    () => toCumulative(
+      registrationsSeries,
+      registrationsTarget ? registrationsTarget / daysInPeriodMonth : undefined,
+    ),
+    [registrationsSeries, registrationsTarget, daysInPeriodMonth]
+  )
+  const grossRevenueCumulative = useMemo(
+    () => toCumulative(
+      grossRevenueSeries,
+      grossRevenueTarget ? grossRevenueTarget / daysInPeriodMonth : undefined,
+    ),
+    [grossRevenueSeries, grossRevenueTarget, daysInPeriodMonth]
+  )
+
+  /* ── CYTD running-sum series for Section 2 throughput tiles ──
+   * Always Jan 1 → today of the period's calendar year, independent of
+   * the selected period filter. Shows acceleration of operational output.
+   * eScript + Blood Dashboards have no dedicated date field on HubSpot —
+   * we proxy with customer_entered_at (eScript happens early in onboarding)
+   * and blood_draw_date (close to dashboard publication). Approximate but
+   * directionally honest. */
+  const cytdEnd = periodEnd
+  const escriptCytdSeries = useMemo(
+    () => buildCytdRunningSum(
+      customerRows.filter(r => r.escript_sent === true),
+      'customer_entered_at',
+      cytdEnd,
+    ),
+    [customerRows, cytdEnd]
+  )
+  const bloodDashboardCytdSeries = useMemo(
+    () => buildCytdRunningSum(
+      customerRows.filter(r => r.blood_dashboard_published === true),
+      'blood_draw_date',
+      cytdEnd,
+    ),
+    [customerRows, cytdEnd]
+  )
+  const epiDashCytdSeries = useMemo(
+    () => buildCytdRunningSum(
+      customerRows.filter(r => r.epigenetics_dashboard_unlocked === true),
+      'epigenetics_dashboard_unlocked_date',
+      cytdEnd,
+    ),
+    [customerRows, cytdEnd]
+  )
+  // CYTD lifetime totals (peak of the running-sum series).
+  const escriptCytdTotal = escriptCytdSeries.length ? escriptCytdSeries[escriptCytdSeries.length - 1].value : escriptCount
+  const bloodCytdTotal = bloodDashboardCytdSeries.length ? bloodDashboardCytdSeries[bloodDashboardCytdSeries.length - 1].value : bloodDashboardCount
+  const epiCytdTotal = epiDashCytdSeries.length ? epiDashCytdSeries[epiDashCytdSeries.length - 1].value : 0
+
+  /* ── D.8: Time HS → Pods (avg days health_story_completed → cp_shipped) ── */
+  const avgDaysHsToPods = useMemo(() => {
+    const usable = customerRows.filter(r =>
+      r.health_story_completed_date && r.cp_shipped_date
+    )
+    if (usable.length === 0) return null
+    const total = usable.reduce((s, r) => {
+      const a = new Date(String(r.health_story_completed_date)).getTime()
+      const b = new Date(String(r.cp_shipped_date)).getTime()
+      if (isNaN(a) || isNaN(b) || b < a) return s
+      return s + (b - a) / 86_400_000
+    }, 0)
+    return { avg: Math.round(total / usable.length), n: usable.length }
+  }, [customerRows])
 
   /* ── Facebook Followers — latest snapshot from social_followers ── */
   const facebookFollowers = useMemo(() => {
@@ -561,6 +620,7 @@ export default function DashboardPage() {
       <NarrativeSection number={1} question="Do people want it?" subtitle="Headline Growth">
         <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
           <MetricTile
+            prominent
             label="Registrations"
             value={registrationsTarget
               ? `${registrationsCurrent} / ${registrationsTarget}`
@@ -574,11 +634,13 @@ export default function DashboardPage() {
             delta={registrationsDelta === null ? null : { value: Math.round(registrationsDelta), period: 'vs previous' }}
             href="/members"
             chart={<TileChart
-              data={registrationsSeries}
-              referenceLine={registrationsTarget ? registrationsTarget / daysInPeriodMonth : undefined}
+              variant="cumulative"
+              data={registrationsCumulative}
+              height={96}
             />}
           />
           <MetricTile
+            prominent
             label="Gross Revenue"
             value={grossRevenueCurrent > 0
               ? fmtCurrency(grossRevenueCurrent, { compact: true })
@@ -592,9 +654,10 @@ export default function DashboardPage() {
             delta={grossRevenueDelta === null ? null : { value: Math.round(grossRevenueDelta), period: 'vs previous' }}
             href="/financial"
             chart={<TileChart
-              data={grossRevenueSeries}
+              variant="cumulative"
+              data={grossRevenueCumulative}
               formatValue={(n) => fmtCurrency(n, { compact: true })}
-              referenceLine={grossRevenueTarget ? grossRevenueTarget / daysInPeriodMonth : undefined}
+              height={96}
             />}
           />
           <LockedTile
@@ -613,42 +676,52 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3 md:gap-4">
           <Column heading="Discovery">
             <MetricTile
-              label="eScript Sent · Lifetime"
-              value={String(escriptCount)}
+              label="eScript Sent · CYTD"
+              value={String(escriptCytdTotal)}
               target={totalCustomers > 0
-                ? `${escriptCount} of ${totalCustomers} (${Math.round((escriptCount / totalCustomers) * 100)}%)`
-                : 'Lifetime count'}
+                ? `${escriptCytdTotal} of ${totalCustomers} (${Math.round((escriptCytdTotal / totalCustomers) * 100)}%)`
+                : 'CYTD running total'}
               status="grey"
               delta={null}
+              chart={<TileChart variant="cumulative" data={escriptCytdSeries} />}
             />
-            <LockedTile
+            <MetricTile
               label="Time HS → Pods"
-              reason="Pending — CP Order Date vs CP Shipped Date clarification from Dan"
+              value={avgDaysHsToPods ? `${avgDaysHsToPods.avg}d` : '—'}
+              target={avgDaysHsToPods
+                ? `Across ${avgDaysHsToPods.n} customers (HS complete → CP shipped)`
+                : 'Need both dates populated'}
+              status="grey"
+              direction="lower-better"
+              delta={null}
             />
           </Column>
           <Column heading="Diagnostic">
             <MetricTile
-              label="Blood Dashboards · Lifetime"
-              value={String(bloodDashboardCount)}
+              label="Blood Dashboards · CYTD"
+              value={String(bloodCytdTotal)}
               target={totalCustomers > 0
-                ? `${bloodDashboardCount} of ${totalCustomers} (${Math.round((bloodDashboardCount / totalCustomers) * 100)}%)`
-                : 'Lifetime count'}
+                ? `${bloodCytdTotal} of ${totalCustomers} (${Math.round((bloodCytdTotal / totalCustomers) * 100)}%)`
+                : 'CYTD running total'}
               status="grey"
               delta={null}
+              chart={<TileChart variant="cumulative" data={bloodDashboardCytdSeries} />}
             />
             <LockedTile
               label="Time Blood Results → Dashboard"
-              reason="Pending — no usable date pair in HubSpot fields. Awaiting Dan."
+              reason="Pending — Blood Result Received date on HubSpot to-build list"
             />
           </Column>
           <Column heading="Integrative">
             <MetricTile
-              label="Epi Dashboards Released"
-              value={String(epiDashCurrent)}
-              target="period total"
+              label="Epi Dashboards · CYTD"
+              value={String(epiCytdTotal)}
+              target={totalCustomers > 0
+                ? `${epiCytdTotal} of ${totalCustomers} (${Math.round((epiCytdTotal / totalCustomers) * 100)}%)`
+                : 'CYTD running total'}
               status="grey"
-              delta={epiDashDelta === null ? null : { value: Math.round(epiDashDelta), period: 'vs previous' }}
-              chart={<TileChart data={epiDashSeries} />}
+              delta={null}
+              chart={<TileChart variant="cumulative" data={epiDashCytdSeries} />}
             />
             <MetricTile
               label="Time TruDiag → Epi"
@@ -683,9 +756,12 @@ export default function DashboardPage() {
             label="90-Day Retention"
             reason="Insufficient cohort data — oldest customer is ~60 days old. First eligible cohort: late June 2026."
           />
-          <LockedTile
+          <MetricTile
             label="NPS"
-            reason="Requires survey source"
+            value="74.8"
+            target="manual input — pending automated source"
+            status="green"
+            delta={null}
           />
           <LockedTile
             label="CSAT"
@@ -695,7 +771,7 @@ export default function DashboardPage() {
       </NarrativeSection>
 
       {/* ────────────────── Section 4 — Economics ────────────────── */}
-      <NarrativeSection number={4} question="Are the economics right?" subtitle="Acquisition & Unit Economics">
+      <NarrativeSection number={4} question="Are we seeing positive signals?" subtitle="Acquisition & Unit Economics">
         <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-5">
           <MetricTile
             label="Cost per Lead"
@@ -734,9 +810,19 @@ export default function DashboardPage() {
             href="/marketing"
             chart={<TileChart data={callConvSeries} variant="line" formatValue={(n) => `${n.toFixed(1)}%`} />}
           />
-          <LockedTile
-            label="Cost per Conversion"
-            reason="Pending Dan — same as Cost per Lead under Meta's definition. Awaiting redefinition as CAC."
+          <MetricTile
+            label="Cost per Conversion (CAC proxy)"
+            value={costPerLead === null ? '—' : fmtCurrency(costPerLead, { digits: 2 })}
+            target="target <$150"
+            status={
+              costPerLead === null ? 'grey'
+              : costPerLead <= 150 ? 'green'
+              : costPerLead <= 200 ? 'amber' : 'red'
+            }
+            direction="lower-better"
+            delta={costPerLeadDelta === null ? null : { value: Math.round(costPerLeadDelta), period: 'vs previous' }}
+            href="/marketing"
+            chart={<TileChart data={costPerLeadSeries} variant="line" formatValue={(n) => fmtCurrency(n, { digits: 2 })} />}
           />
           <MetricTile
             label="Facebook Followers"

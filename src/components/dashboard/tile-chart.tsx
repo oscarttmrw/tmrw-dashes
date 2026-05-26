@@ -5,12 +5,15 @@ import {
   Area, AreaChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip,
 } from 'recharts'
 
-type Variant = 'line' | 'area'
+type Variant = 'line' | 'area' | 'cumulative'
 
 interface TileChartProps {
-  /** Pre-bucketed daily points. Each item is one day in the period. */
-  data: { date: string; value: number }[]
-  /** Render shape — line for ratios, area for absolute counts/$. */
+  /** Pre-bucketed daily points. Each item is one day in the period.
+   *  For 'cumulative' variant, points may carry an optional `target`
+   *  field representing the cumulative pro-rata target for that day. */
+  data: { date: string; value: number; target?: number }[]
+  /** Render shape — line for ratios, area for absolute counts/$,
+   *  cumulative for running-sum vs target. */
   variant?: Variant
   /** Tooltip value formatter — defaults to compact integer. */
   formatValue?: (n: number) => string
@@ -39,6 +42,41 @@ export function TileChart({
   const refLine = typeof referenceLine === 'number' && isFinite(referenceLine)
     ? <ReferenceLine y={referenceLine} stroke="#D9D9D9" strokeDasharray="3 3" strokeWidth={1} />
     : null
+
+  if (variant === 'cumulative') {
+    const hasTarget = cleaned.some(d => typeof d.target === 'number' && isFinite(d.target))
+    return (
+      <div style={{ width: '100%', height }}>
+        <ResponsiveContainer>
+          <LineChart data={cleaned} margin={{ top: 4, right: 0, left: 0, bottom: 2 }}>
+            <Tooltip
+              cursor={{ stroke: '#A3A3A3', strokeDasharray: '2 2' }}
+              content={<CumulativeTooltip formatValue={formatValue} />}
+            />
+            {hasTarget && (
+              <Line
+                type="monotone"
+                dataKey="target"
+                stroke="#A3A3A3"
+                strokeWidth={1.25}
+                strokeDasharray="4 3"
+                dot={false}
+                isAnimationActive={false}
+              />
+            )}
+            <Line
+              type="monotone"
+              dataKey="value"
+              stroke="#E61317"
+              strokeWidth={2}
+              dot={false}
+              isAnimationActive={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
 
   if (variant === 'line') {
     return (
@@ -97,6 +135,24 @@ interface SparkTooltipProps {
   active?: boolean
   payload?: Array<{ value?: number | string; payload?: { date?: string } }>
   formatValue: (n: number) => string
+}
+
+function CumulativeTooltip({ active, payload, formatValue }: SparkTooltipProps) {
+  if (!active || !payload || !payload.length) return null
+  const valuePoint = payload.find(p => (p as { dataKey?: string }).dataKey === 'value') ?? payload[0]
+  const targetPoint = payload.find(p => (p as { dataKey?: string }).dataKey === 'target')
+  const value = typeof valuePoint.value === 'number' ? valuePoint.value : Number(valuePoint.value ?? 0)
+  const target = targetPoint && typeof targetPoint.value === 'number' ? targetPoint.value : null
+  const date = valuePoint.payload?.date ?? ''
+  return (
+    <div className="rounded-md border border-dash-border bg-dash-bg px-2 py-1 font-mono text-[11px] text-dash-text shadow-sm">
+      <div className="text-dash-text-muted">{date}</div>
+      <div><span className="text-status-red">●</span> {formatValue(value)}</div>
+      {target !== null && (
+        <div className="text-dash-text-muted"><span>┄</span> target {formatValue(target)}</div>
+      )}
+    </div>
+  )
 }
 
 function SparkTooltip({ active, payload, formatValue }: SparkTooltipProps) {
@@ -175,6 +231,45 @@ export function bucketByDay<T extends Record<string, unknown>>(
     cursor.setDate(cursor.getDate() + 1)
   }
   return out
+}
+
+/**
+ * Convert a per-day series into cumulative form. Each point's `value`
+ * becomes the running sum from day 0 to that day. If `dailyTarget` is
+ * provided, each point also gets a cumulative `target` (dailyTarget × N).
+ */
+export function toCumulative(
+  daily: { date: string; value: number }[],
+  dailyTarget?: number,
+): { date: string; value: number; target?: number }[] {
+  let running = 0
+  return daily.map((d, i) => {
+    running += d.value
+    const out: { date: string; value: number; target?: number } = {
+      date: d.date,
+      value: running,
+    }
+    if (typeof dailyTarget === 'number' && isFinite(dailyTarget)) {
+      out.target = dailyTarget * (i + 1)
+    }
+    return out
+  })
+}
+
+/**
+ * Build a calendar-year-to-date running-sum series for a rowset, counting
+ * (or summing) rows by their date field. Result starts at Jan 1 of the
+ * year containing `endDate` and runs through `endDate` inclusive.
+ */
+export function buildCytdRunningSum<T extends Record<string, unknown>>(
+  rows: T[],
+  dateField: keyof T,
+  endDate: Date,
+  reducer: (rowsOnDay: T[]) => number = (group) => group.length,
+): { date: string; value: number }[] {
+  const start = new Date(endDate.getFullYear(), 0, 1)
+  const daily = bucketByDay(rows, dateField, start, endDate, reducer)
+  return toCumulative(daily)
 }
 
 function numeric(v: unknown): number {
