@@ -121,18 +121,18 @@ function NarrativeSection({
 }) {
   return (
     <section>
-      <div className="mb-5 md:mb-7 flex items-baseline gap-4 md:gap-6">
-        <span className="font-display text-4xl leading-none text-dash-text md:text-6xl">
-          {String(number).padStart(2, '0')}
-        </span>
-        <div className="flex flex-col gap-1">
-          <h2 className="font-display uppercase tracking-tight text-dash-text text-2xl leading-[1.05] md:text-4xl">
+      <div className="mb-5 md:mb-7">
+        <div className="flex items-baseline gap-4 md:gap-6">
+          <span className="font-display text-4xl leading-none text-dash-text md:text-6xl">
+            {String(number).padStart(2, '0')}
+          </span>
+          <h2 className="font-display uppercase tracking-tight text-dash-text text-2xl leading-none md:text-4xl">
             {question}
           </h2>
-          <p className="font-ui text-[11px] uppercase tracking-[0.12em] text-dash-text-muted md:text-xs">
-            {subtitle}
-          </p>
         </div>
+        <p className="mt-2 ml-[3.5rem] md:ml-[5.5rem] font-ui text-[11px] uppercase tracking-[0.12em] text-dash-text-muted md:text-xs">
+          {subtitle}
+        </p>
       </div>
       {children}
     </section>
