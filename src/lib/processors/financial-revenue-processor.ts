@@ -19,19 +19,27 @@ const MONTHS: Record<string, number> = {
 }
 
 /**
+ * Convert an Excel date serial (days since 1899-12-30) to "YYYY-MM-DD".
+ * Guarded to a sane range so stray numbers aren't read as dates.
+ */
+function fromExcelSerial(serial: number): string | null {
+  if (!isFinite(serial) || serial < 20_000 || serial > 80_000) return null
+  const d = new Date(Math.floor(serial - 25_569) * 86_400_000)
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+}
+
+/**
  * Parse the workbook's date cell into "YYYY-MM-DD". Handles the displayed
- * "30-Dec-2025" form, a 2-digit-year variant, an Excel serial number, and a
+ * "30-Dec-2025" form, a 2-digit-year variant, an Excel serial number (which
+ * is how the client-side xlsx parser emits date cells — e.g. 45992), and a
  * native-parseable ISO date as fallbacks. Returns null for anything that
  * isn't a real date (subtotal labels, blanks) so non-daily rows are skipped.
  */
 function parseRevenueDate(v: unknown): string | null {
   if (v === null || v === undefined) return null
 
-  // Excel serial number (1899-12-30 epoch)
-  if (typeof v === 'number' && isFinite(v)) {
-    const d = new Date(Math.round((v - 25569) * 86_400_000))
-    return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
-  }
+  // Excel serial number (numeric cell)
+  if (typeof v === 'number') return fromExcelSerial(v)
 
   const s = String(v).trim()
   if (s === '') return null
@@ -47,6 +55,13 @@ function parseRevenueDate(v: unknown): string | null {
       return `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     }
     return null
+  }
+
+  // Plain-number string → Excel serial. The client emits date cells as serials
+  // (e.g. "45992"), so this must run BEFORE the native Date fallback —
+  // otherwise new Date("45992") reads 45992 as a year.
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    return fromExcelSerial(Number(s))
   }
 
   // ISO / native-parseable fallback. Non-date labels ("December Total",
