@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -21,7 +21,15 @@ import { TileChart } from '@/components/dashboard/tile-chart'
 import { useDashboardData } from '@/lib/context/data-context'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
-import { Lock, Star } from 'lucide-react'
+import { Lock, Star, ChevronDown } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 
 /* ─── Tile primitives (mirrors home-dashboard styling) ─────────────── */
 
@@ -300,9 +308,33 @@ export default function FinancialPage() {
       }, 0)
   }, [plan_targets, today])
 
+  /* ── §05 month selector: which months to overlay ── */
+  const availableMonths = useMemo(() => Array.from(byMonth.keys()).sort(), [byMonth])
+  // null = not yet initialised → defaults to all months once data arrives.
+  const [selectedMonths, setSelectedMonths] = useState<Set<string> | null>(null)
+  useEffect(() => {
+    if (selectedMonths === null && availableMonths.length > 0) {
+      setSelectedMonths(new Set(availableMonths))
+    }
+  }, [availableMonths, selectedMonths])
+  const visibleMonths = selectedMonths ?? new Set(availableMonths)
+  const allSelected = availableMonths.length > 0 && availableMonths.every(k => visibleMonths.has(k))
+  const toggleMonth = (key: string) =>
+    setSelectedMonths(prev => {
+      const next = new Set(prev ?? availableMonths)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  const monthKeyLabel = (key: string) => {
+    const [y, m] = key.split('-')
+    return `${MONTH_LABELS[parseInt(m, 10) - 1]} ${y}`
+  }
+
   /* ── §05 Cumulative MTD overlay: prior months + current month ── */
   const cumulativeOverlay = useMemo(() => {
-    const keys = Array.from(byMonth.keys()).sort().slice(-6)
+    const sel = selectedMonths ?? new Set(availableMonths)
+    const keys = availableMonths.filter(k => sel.has(k))
     const series: Array<{ key: string; m: string; isCurrent: boolean; data: { day: number; value: number }[] }> = []
     for (const k of keys) {
       const [y, mIdx] = k.split('-').map(Number)
@@ -326,7 +358,7 @@ export default function FinancialPage() {
       series.push({ key: k, m: MONTH_LABELS[mIdx - 1], isCurrent, data })
     }
     return series
-  }, [byMonth, stripe, today, dataDayOfMonth])
+  }, [byMonth, stripe, today, dataDayOfMonth, selectedMonths, availableMonths])
 
   const cumOverlayCombined = useMemo(() => {
     const maxDay = cumulativeOverlay.reduce((m, s) => Math.max(m, s.data.length), 0)
@@ -541,6 +573,35 @@ export default function FinancialPage() {
         number={5}
         question="Cumulative Month-to-Date"
         subtitle="Each month overlaid · current in bold"
+        right={
+          <DropdownMenu>
+            <DropdownMenuTrigger className="flex items-center gap-2 rounded-md border border-dash-border bg-dash-surface px-3 py-1.5 font-ui text-[11px] uppercase tracking-wider text-dash-text-secondary hover:bg-dash-surface-hover">
+              {availableMonths.length === 0
+                ? 'No months'
+                : `${visibleMonths.size} of ${availableMonths.length} months`}
+              <ChevronDown size={13} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-[300px] overflow-y-auto">
+              <DropdownMenuItem
+                onSelect={e => { e.preventDefault(); setSelectedMonths(allSelected ? new Set() : new Set(availableMonths)) }}
+                className="font-ui text-[11px] uppercase tracking-wider text-dash-text-secondary"
+              >
+                {allSelected ? 'Deselect all' : 'Select all'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {availableMonths.map(k => (
+                <DropdownMenuCheckboxItem
+                  key={k}
+                  checked={visibleMonths.has(k)}
+                  onSelect={e => e.preventDefault()}
+                  onCheckedChange={() => toggleMonth(k)}
+                >
+                  {monthKeyLabel(k)}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        }
       >
         <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
