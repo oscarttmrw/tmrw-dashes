@@ -4,6 +4,7 @@
 -- row from the workbook are derived in the dashboard, never persisted.
 create table if not exists financial_revenue (
   id              bigserial    primary key,
+  batch_id        uuid         references upload_log(id) on delete cascade,
   date            date         not null,
   revenue_type    text         not null check (revenue_type in ('net', 'gross')),
   membership      numeric(14,2) not null default 0,

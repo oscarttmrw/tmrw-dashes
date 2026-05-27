@@ -1,0 +1,100 @@
+import { num, type ProcessorResult } from './_canonical-helpers'
+
+/**
+ * Financial revenue processor. Reads one sheet of the Stripe revenue workbook
+ * ("Net Revenue" or "Gross Revenue (RRP)") into canonical financial_revenue
+ * rows. `revenueType` is fixed per sheet — each sheet ships as its own source.
+ *
+ * Only true daily rows are kept. The workbook interleaves monthly-subtotal
+ * rows ("December Total"), blank spacer rows, and a final grand-total row —
+ * none of those parse as a real date, so the date filter drops them and we
+ * never persist a derived total.
+ *
+ * Values are in dollars. The TOTAL column is stored as-is from the sheet.
+ */
+
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+}
+
+/**
+ * Parse the workbook's date cell into "YYYY-MM-DD". Handles the displayed
+ * "30-Dec-2025" form, a 2-digit-year variant, an Excel serial number, and a
+ * native-parseable ISO date as fallbacks. Returns null for anything that
+ * isn't a real date (subtotal labels, blanks) so non-daily rows are skipped.
+ */
+function parseRevenueDate(v: unknown): string | null {
+  if (v === null || v === undefined) return null
+
+  // Excel serial number (1899-12-30 epoch)
+  if (typeof v === 'number' && isFinite(v)) {
+    const d = new Date(Math.round((v - 25569) * 86_400_000))
+    return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+  }
+
+  const s = String(v).trim()
+  if (s === '') return null
+
+  // DD-Mon-YYYY (e.g. 30-Dec-2025) or DD-Mon-YY
+  const m = s.match(/^(\d{1,2})-([A-Za-z]{3})[A-Za-z]*-(\d{2,4})$/)
+  if (m) {
+    const day = parseInt(m[1], 10)
+    const mon = MONTHS[m[2].toLowerCase()]
+    let year = parseInt(m[3], 10)
+    if (year < 100) year += 2000
+    if (mon && day >= 1 && day <= 31) {
+      return `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    }
+    return null
+  }
+
+  // ISO / native-parseable fallback. Non-date labels ("December Total",
+  // "Grand Total") produce Invalid Date → null.
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+}
+
+function processFinancialRevenueSheet(
+  data: Record<string, unknown>[],
+  revenueType: 'net' | 'gross'
+): ProcessorResult {
+  const validRows: Record<string, unknown>[] = []
+  const errors: { rowIndex: number; reason: string }[] = []
+
+  data.forEach((row, i) => {
+    const lc = Object.fromEntries(
+      Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
+    )
+
+    const date = parseRevenueDate(lc['date'])
+    // Skip subtotal / blank / grand-total rows — they have no real date.
+    if (!date) return
+
+    validRows.push({
+      date,
+      revenue_type: revenueType,
+      membership: num(lc['membership']) ?? 0,
+      joining_fees: num(lc['joining fees']) ?? 0,
+      tmrw_stacks: num(lc['tmrw stacks']) ?? 0,
+      supplements: num(lc['supplements']) ?? 0,
+      peptides: num(lc['peptides']) ?? 0,
+      advanced_tests: num(lc['advanced tests']) ?? 0,
+      total: num(lc['total']) ?? 0,
+    })
+  })
+
+  return { validRows, errors }
+}
+
+export function processFinancialRevenueNetToCanonical(
+  data: Record<string, unknown>[]
+): ProcessorResult {
+  return processFinancialRevenueSheet(data, 'net')
+}
+
+export function processFinancialRevenueGrossToCanonical(
+  data: Record<string, unknown>[]
+): ProcessorResult {
+  return processFinancialRevenueSheet(data, 'gross')
+}
