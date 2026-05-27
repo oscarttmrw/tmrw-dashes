@@ -86,16 +86,30 @@ function processFinancialRevenueSheet(
     // Skip subtotal / blank / grand-total rows — they have no real date.
     if (!date) return
 
+    const membership = num(lc['membership']) ?? 0
+    const joiningFees = num(lc['joining fees']) ?? 0
+    const tmrwStacks = num(lc['tmrw stacks']) ?? 0
+    const supplements = num(lc['supplements']) ?? 0
+    const peptides = num(lc['peptides']) ?? 0
+    const advancedTests = num(lc['advanced tests']) ?? 0
+
+    // The sheet's TOTAL column is a formula; the workbook ships without cached
+    // formula results, so it parses as empty. Compute it from the components
+    // — they're the full product breakdown, so the sum equals the row total.
+    const sourceTotal = num(lc['total'])
+    const computedTotal = membership + joiningFees + tmrwStacks + supplements + peptides + advancedTests
+    const total = sourceTotal && sourceTotal > 0 ? sourceTotal : computedTotal
+
     validRows.push({
       date,
       revenue_type: revenueType,
-      membership: num(lc['membership']) ?? 0,
-      joining_fees: num(lc['joining fees']) ?? 0,
-      tmrw_stacks: num(lc['tmrw stacks']) ?? 0,
-      supplements: num(lc['supplements']) ?? 0,
-      peptides: num(lc['peptides']) ?? 0,
-      advanced_tests: num(lc['advanced tests']) ?? 0,
-      total: num(lc['total']) ?? 0,
+      membership,
+      joining_fees: joiningFees,
+      tmrw_stacks: tmrwStacks,
+      supplements,
+      peptides,
+      advanced_tests: advancedTests,
+      total,
     })
   })
 
