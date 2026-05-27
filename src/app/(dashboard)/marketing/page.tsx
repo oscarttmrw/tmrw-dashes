@@ -80,7 +80,7 @@ function KpiTile({ label, value, sublabel, delta, direction = 'higher-better', c
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 export default function MarketingPage() {
-  const { meta_ads, social_followers, social_views } = useDashboardData()
+  const { meta_ads, social_followers, social_views, operational_data } = useDashboardData()
 
   // User-controlled date range picker. Independent state per page.
   const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
@@ -113,12 +113,26 @@ export default function MarketingPage() {
     }
     const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0
     const costPerLpv = lpv > 0 ? spend / lpv : 0
-    const costPerConversion = conversions > 0 ? spend / conversions : 0
-    return { spend, impressions, clicks, ctr, lpv, costPerLpv, conversions, costPerConversion, videoViews, postEngagements }
+    return { spend, impressions, clicks, ctr, lpv, costPerLpv, conversions, videoViews, postEngagements }
   }
 
   const metaAgg = useMemo(() => aggregateMeta(metaInPeriod), [metaInPeriod])
   const metaPrev = useMemo(() => aggregateMeta(metaInPrev), [metaInPrev])
+
+  /* ── Cost per Conversion = Meta spend ÷ members acquired
+        (operational_data.customers_registered) over the same period. ── */
+  const membersAcquired = useMemo(
+    () => operational_data.filter(r => inPeriod(r.date, periodStart, periodEnd))
+      .reduce((s, r) => s + num(r.customers_registered), 0),
+    [operational_data, periodStart, periodEnd]
+  )
+  const membersAcquiredPrev = useMemo(
+    () => operational_data.filter(r => inPeriod(r.date, prevStart, prevEnd))
+      .reduce((s, r) => s + num(r.customers_registered), 0),
+    [operational_data, prevStart, prevEnd]
+  )
+  const costPerConversion = membersAcquired > 0 ? metaAgg.spend / membersAcquired : 0
+  const costPerConversionPrev = membersAcquiredPrev > 0 ? metaPrev.spend / membersAcquiredPrev : 0
 
   /* ── Daily series per Meta tile ── */
   const sparkMeta = (field: keyof typeof metaAgg) => bucketByDay(
@@ -133,11 +147,6 @@ export default function MarketingPage() {
       if (field === 'costPerLpv') {
         const sp = rows.reduce((s, r) => s + num(r.spend), 0)
         const v = rows.reduce((s, r) => s + num(r.landing_page_views), 0)
-        return v > 0 ? sp / v : 0
-      }
-      if (field === 'costPerConversion') {
-        const sp = rows.reduce((s, r) => s + num(r.spend), 0)
-        const v = rows.reduce((s, r) => s + num(r.conversions_leads), 0)
         return v > 0 ? sp / v : 0
       }
       // Sum tiles map cleanly to column names
@@ -162,7 +171,17 @@ export default function MarketingPage() {
   const sparkLpv             = useMemo(() => sparkMeta('lpv'),               [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
   const sparkCostPerLpv      = useMemo(() => sparkMeta('costPerLpv'),        [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
   const sparkConversions     = useMemo(() => sparkMeta('conversions'),       [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
-  const sparkCostPerConv     = useMemo(() => sparkMeta('costPerConversion'), [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Cost per Conversion sparkline: daily Meta spend ÷ daily members acquired.
+  const sparkCostPerConv     = useMemo(() => {
+    const spend = bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.spend), 0))
+    const regs = bucketByDay(operational_data, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.customers_registered), 0))
+    return spend.map((d, i) => ({
+      date: d.date,
+      value: regs[i] && regs[i].value > 0 ? d.value / regs[i].value : 0,
+    }))
+  }, [meta_ads, operational_data, periodStart, periodEnd])
   const sparkVideoViewsMeta  = useMemo(() => sparkMeta('videoViews'),        [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
   const sparkPostEngMeta     = useMemo(() => sparkMeta('postEngagements'),   [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -296,8 +315,9 @@ export default function MarketingPage() {
           />
           <KpiTile
             label="Cost per Conversion"
-            value={metaAgg.conversions === 0 ? '—' : fmtCurrency(metaAgg.costPerConversion)}
-            delta={deltaPct(metaAgg.costPerConversion, metaPrev.costPerConversion)}
+            value={membersAcquired === 0 ? '—' : fmtCurrency(costPerConversion)}
+            sublabel="spend ÷ members acquired"
+            delta={deltaPct(costPerConversion, costPerConversionPrev)}
             direction="lower-better"
             chart={<TileChart data={sparkCostPerConv} variant="line" formatValue={(n) => fmtCurrency(n)} />}
           />

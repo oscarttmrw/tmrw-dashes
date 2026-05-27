@@ -372,6 +372,12 @@ export default function DashboardPage() {
   const costPerLeadDelta = costPerLead !== null && costPerLeadPrev !== null
     ? deltaPct(costPerLead, costPerLeadPrev) : null
 
+  // Cost per Conversion (CAC proxy): Meta spend ÷ members acquired (registrations).
+  const costPerConversion = registrationsCurrent > 0 ? metaSpendCurrent / registrationsCurrent : null
+  const costPerConversionPrev = registrationsPrev > 0 ? metaSpendPrev / registrationsPrev : null
+  const costPerConversionDelta = costPerConversion !== null && costPerConversionPrev !== null
+    ? deltaPct(costPerConversion, costPerConversionPrev) : null
+
   // Calls booked per period — GHL opportunities at the call stages, by created_on
   const callsBookedCurrent = useMemo(
     () => ghl_opportunities.filter(r =>
@@ -439,6 +445,18 @@ export default function DashboardPage() {
       }),
     [meta_ads, periodStart, periodEnd]
   )
+  // Daily Meta-spend ÷ members-acquired. Both datasets bucket over the same
+  // range, so the day-indexed arrays line up for a per-day ratio.
+  const costPerConversionSeries = useMemo(() => {
+    const spend = bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.spend), 0))
+    const regs = bucketByDay(operational_data, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.customers_registered), 0))
+    return spend.map((d, i) => ({
+      date: d.date,
+      value: regs[i] && regs[i].value > 0 ? d.value / regs[i].value : 0,
+    }))
+  }, [meta_ads, operational_data, periodStart, periodEnd])
   const costPerCallSeries = useMemo(
     () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
       (rows) => {
@@ -819,17 +837,17 @@ export default function DashboardPage() {
           />
           <MetricTile
             label="Cost per Conversion (CAC proxy)"
-            value={costPerLead === null ? '—' : fmtCurrency(costPerLead, { digits: 2 })}
-            target="target <$150"
+            value={costPerConversion === null ? '—' : fmtCurrency(costPerConversion, { digits: 2 })}
+            target="spend ÷ members acquired · target <$150"
             status={
-              costPerLead === null ? 'grey'
-              : costPerLead <= 150 ? 'green'
-              : costPerLead <= 200 ? 'amber' : 'red'
+              costPerConversion === null ? 'grey'
+              : costPerConversion <= 150 ? 'green'
+              : costPerConversion <= 200 ? 'amber' : 'red'
             }
             direction="lower-better"
-            delta={costPerLeadDelta === null ? null : { value: Math.round(costPerLeadDelta), period: 'vs previous' }}
+            delta={costPerConversionDelta === null ? null : { value: Math.round(costPerConversionDelta), period: 'vs previous' }}
             href="/marketing"
-            chart={<TileChart data={costPerLeadSeries} variant="line" formatValue={(n) => fmtCurrency(n, { digits: 2 })} />}
+            chart={<TileChart data={costPerConversionSeries} variant="line" formatValue={(n) => fmtCurrency(n, { digits: 2 })} />}
           />
           <MetricTile
             label="Facebook Followers"

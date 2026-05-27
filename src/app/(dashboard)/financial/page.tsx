@@ -180,20 +180,30 @@ export default function FinancialPage() {
   const { stripe, plan_targets, loading, error, refresh } = useDashboardData()
   const [showTable, setShowTable] = useState(false)
 
-  // "Today" anchors the MTD / projection logic. Use the most recent invoice
-  // date in the data when available, else the system clock.
-  const today = useMemo(() => {
+  // Calendar "today" — anchors the month, day-of-month and days-remaining so
+  // they track the real date, not how fresh the data happens to be.
+  const today = useMemo(() => new Date(), [])
+
+  // Data freshness: most recent invoice date. Used as the run-rate denominator
+  // so we project from the days we actually have data for, not calendar days.
+  const dataAsOf = useMemo(() => {
     const maxTs = stripe.reduce((m, r) => {
       const t = new Date(String(r.created ?? '')).getTime()
       return isNaN(t) ? m : Math.max(m, t)
     }, 0)
-    return maxTs > 0 ? new Date(maxTs) : new Date()
-  }, [stripe])
+    return maxTs > 0 ? new Date(maxTs) : today
+  }, [stripe, today])
 
   const monthStart = startOfMonth(today)
   const monthEnd = endOfMonth(today)
   const dim = daysInMonth(today)
   const dayOfMonth = today.getDate()
+  // Days of data we have this month (run-rate denominator). Falls back to the
+  // calendar day if the latest invoice is from a prior month.
+  const dataDayOfMonth =
+    dataAsOf.getFullYear() === today.getFullYear() && dataAsOf.getMonth() === today.getMonth()
+      ? dataAsOf.getDate()
+      : dayOfMonth
 
   /* ── Plan target for the current month ── */
   const currentPlanTarget = useMemo(() => {
@@ -229,6 +239,7 @@ export default function FinancialPage() {
       const data = byMonth.get(k)!
       const planRow = plan_targets.find(p => typeof p.month === 'string' && p.month.startsWith(k))
       const plan = planRow ? num(planRow.gross_revenue_target) : null
+      const netPlan = planRow ? num(planRow.net_revenue_target) : null
       return {
         key: k,
         m: MONTH_LABELS[parseInt(m, 10) - 1],
@@ -238,6 +249,7 @@ export default function FinancialPage() {
         recurring: data.recurring,
         joining: data.joining,
         plan,
+        netPlan,
         aov: data.txns > 0 ? data.actual / data.txns : 0,
         recurringPct: data.actual > 0 ? data.recurring / data.actual : 0,
       }
@@ -260,8 +272,8 @@ export default function FinancialPage() {
     return { actual, txns, recurring, joining }
   }, [stripe, monthStart, monthEnd])
 
-  // Run-rate projection: MTD × (days in month / day-of-month)
-  const projectedMonthEnd = dayOfMonth > 0 ? (mtd.actual / dayOfMonth) * dim : 0
+  // Run-rate projection: MTD × (days in month / days of data so far)
+  const projectedMonthEnd = dataDayOfMonth > 0 ? (mtd.actual / dataDayOfMonth) * dim : 0
   const gapToPlan = planThisMonth ? planThisMonth - projectedMonthEnd : null
   const daysRemaining = dim - dayOfMonth
   const requiredRunRate = gapToPlan !== null && daysRemaining > 0 ? Math.max(0, gapToPlan / daysRemaining) : null
@@ -304,7 +316,7 @@ export default function FinancialPage() {
         const day = new Date(t).getDate()
         dailyTotals[day - 1] += num(r.amount_paid) / 100
       }
-      const cap = isCurrent ? dayOfMonth : dimK
+      const cap = isCurrent ? dataDayOfMonth : dimK
       let running = 0
       const data: { day: number; value: number }[] = []
       for (let d = 1; d <= cap; d++) {
@@ -314,7 +326,7 @@ export default function FinancialPage() {
       series.push({ key: k, m: MONTH_LABELS[mIdx - 1], isCurrent, data })
     }
     return series
-  }, [byMonth, stripe, today, dayOfMonth])
+  }, [byMonth, stripe, today, dataDayOfMonth])
 
   const cumOverlayCombined = useMemo(() => {
     const maxDay = cumulativeOverlay.reduce((m, s) => Math.max(m, s.data.length), 0)
@@ -330,10 +342,16 @@ export default function FinancialPage() {
     return out
   }, [cumulativeOverlay])
 
-  /* ── §08 Actual vs Forecast ── */
+  /* ── §08 Actual vs Plan (from uploaded targets) ── */
   const actualVsForecast = useMemo(() => {
-    return monthlyRows.map(r => ({ m: r.m, actual: r.actual, forecast: null as number | null }))
+    return monthlyRows.map(r => ({
+      m: r.m,
+      actual: r.actual,
+      grossPlan: r.plan && r.plan > 0 ? r.plan : null,
+      netPlan: r.netPlan && r.netPlan > 0 ? r.netPlan : null,
+    }))
   }, [monthlyRows])
+  const hasPlanLine = actualVsForecast.some(r => r.grossPlan !== null || r.netPlan !== null)
 
   const sparkAov = monthlyRows.map(r => ({ date: r.m, value: r.aov }))
 
@@ -373,7 +391,7 @@ export default function FinancialPage() {
           </div>
           <div className="flex-1">
             <div className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Projected Month-End ({MONTH_LABELS[today.getMonth()]})
+              Projected Month-End · Actual ({MONTH_LABELS[today.getMonth()]})
             </div>
             <div className="mt-1 flex items-baseline gap-2">
               <span className="font-mono text-2xl font-bold text-dash-text md:text-3xl">
@@ -462,13 +480,13 @@ export default function FinancialPage() {
       <NarrativeSection number={2} question="Revenue Headlines" subtitle="What's flowing right now">
         <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
           <MetricTile
-            label="Actual Revenue (MTD)"
+            label="Actual Revenue — Net of Discounts (MTD)"
             value={fmtCurrency(mtd.actual, { compact: true })}
-            target={`${MONTH_LABELS[today.getMonth()]}, day ${dayOfMonth} of ${dim}`}
+            target={`${MONTH_LABELS[today.getMonth()]} · data through day ${dataDayOfMonth} of ${dim}`}
             status={mtd.actual > 0 ? 'green' : 'grey'}
             delta={null}
           />
-          <LockedTile label="Gross at List (MTD)" reason="Pending list-price book — unlocks capture rate." />
+          <LockedTile label="Gross at List — Before Discounts (MTD)" reason="Pending list-price book — unlocks capture rate." />
           <MetricTile
             label="Avg Order Value"
             value={mtdAov > 0 ? fmtCurrency(mtdAov) : '—'}
@@ -482,11 +500,11 @@ export default function FinancialPage() {
       </NarrativeSection>
 
       {/* ────────────── 03 REVENUE BY MONTH ────────────── */}
-      <NarrativeSection number={3} question="Revenue by Month" subtitle="Gross · Actual · Net">
+      <NarrativeSection number={3} question="Revenue by Month" subtitle="Gross (list) · Actual (charged, net of discounts) · Net (after refunds)">
         <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
             <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Actual Revenue (Charged)
+              Actual Revenue (Charged · Net of Discounts)
             </div>
             <div className="h-[240px]">
               <ResponsiveContainer>
@@ -667,17 +685,20 @@ export default function FinancialPage() {
       {/* ────────────── 08 ACTUAL VS FORECAST ────────────── */}
       <NarrativeSection
         number={8}
-        question="Actual vs Forecast"
+        question="Actual vs Plan"
         subtitle="Where are we heading?"
         right={
-          <span className="rounded-full bg-status-amber/10 px-3 py-1 font-ui text-[10px] uppercase tracking-wider text-status-amber">
-            Forecast CSV Pending
+          <span className={cn(
+            'rounded-full px-3 py-1 font-ui text-[10px] uppercase tracking-wider',
+            hasPlanLine ? 'bg-dash-surface-alt text-dash-text-secondary' : 'bg-status-amber/10 text-status-amber'
+          )}>
+            {hasPlanLine ? 'Plan from uploaded targets' : 'No targets uploaded'}
           </span>
         }
       >
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
           <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-            Actual ({monthlyRows.length > 0 ? `${monthlyRows[0].m}–${monthlyRows[monthlyRows.length - 1].m}` : '—'}) · Forecast pending
+            Actual ({monthlyRows.length > 0 ? `${monthlyRows[0].m}–${monthlyRows[monthlyRows.length - 1].m}` : '—'}) · Plan (gross &amp; net targets)
           </div>
           <div className="h-[300px]">
             <ResponsiveContainer>
@@ -686,13 +707,16 @@ export default function FinancialPage() {
                 <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
                 <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
                 <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                <Line type="monotone" dataKey="actual" stroke="#1A1A1A" strokeWidth={2.5} dot={{ r: 3, fill: '#1A1A1A' }} connectNulls={false} name="Actual" />
-                <Line type="monotone" dataKey="forecast" stroke="#E61317" strokeWidth={2} strokeDasharray="5 4" dot={{ r: 4, fill: '#E61317' }} connectNulls={false} name="Forecast" />
+                <Line type="monotone" dataKey="actual" stroke="#1A1A1A" strokeWidth={2.5} dot={{ r: 3, fill: '#1A1A1A' }} connectNulls={false} name="Actual (charged)" />
+                <Line type="monotone" dataKey="grossPlan" stroke="#E61317" strokeWidth={2} strokeDasharray="5 4" dot={{ r: 4, fill: '#E61317' }} connectNulls name="Plan — Gross" />
+                <Line type="monotone" dataKey="netPlan" stroke="#9A9690" strokeWidth={2} strokeDasharray="5 4" dot={{ r: 4, fill: '#9A9690' }} connectNulls name="Plan — Net" />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
           <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
-            Forecast line activates when <code>forecast.csv</code> is uploaded (columns: month, forecast_revenue).
+            {hasPlanLine
+              ? 'Plan lines pull from the gross and net revenue targets you upload (plan targets). Actual is Stripe charged revenue (net of discounts), which sits between the two.'
+              : 'Plan lines activate once gross/net revenue targets are uploaded.'}
           </p>
         </div>
       </NarrativeSection>
