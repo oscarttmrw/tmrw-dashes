@@ -132,32 +132,48 @@ function FunnelChart({ rows }: { rows: { label: string; value: number; tone: Fun
     red:   { bg: '#E61317', text: '#FFFFFF' },
   }
   return (
-    <div className="space-y-2">
-      {rows.map((r, i) => {
-        const pct = top > 0 ? (r.value / top) * 100 : 0
-        const swatch = palette[r.tone]
-        const pctLabel = top === 0 ? '—' : pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`
-        return (
-          <div key={i} className="flex items-center gap-3">
-            <div className="relative h-9 flex-1">
-              <div
-                className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center justify-center rounded-sm px-3"
-                style={{ width: `${Math.max(pct, 0.5)}%`, minWidth: '4.5rem', background: swatch.bg }}
-              >
-                <span
-                  className="whitespace-nowrap font-mono text-[12px] font-semibold uppercase tracking-[0.04em]"
-                  style={{ color: swatch.text }}
-                >
-                  {fmtNum(r.value)} · {r.label}
-                </span>
-              </div>
-            </div>
-            <span className="w-14 text-right font-mono text-[11px] text-dash-text-secondary">
-              {pctLabel}
+    <div>
+      {/* Legend strip — stage labels across the full width */}
+      <div className="mb-4 grid grid-cols-4 gap-3 border-b border-dash-border pb-3">
+        {rows.map((r, i) => {
+          const swatch = palette[r.tone]
+          return (
+            <span key={i} className="flex items-center gap-2 font-ui text-[11px] font-medium uppercase tracking-[0.06em] text-dash-text-secondary">
+              <span className="inline-block h-3 w-3 shrink-0 rounded-sm" style={{ background: swatch.bg }} />
+              {r.label}
             </span>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
+
+      {/* Bars — count only, centred on a vertical axis */}
+      <div className="space-y-2">
+        {rows.map((r, i) => {
+          const pct = top > 0 ? (r.value / top) * 100 : 0
+          const swatch = palette[r.tone]
+          const pctLabel = top === 0 ? '—' : pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`
+          return (
+            <div key={i} className="flex items-center gap-3">
+              <div className="relative h-9 flex-1">
+                <div
+                  className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center justify-center rounded-sm px-3"
+                  style={{ width: `${Math.max(pct, 0.5)}%`, minWidth: '3rem', background: swatch.bg }}
+                >
+                  <span
+                    className="whitespace-nowrap font-mono text-[13px] font-bold"
+                    style={{ color: swatch.text }}
+                  >
+                    {fmtNum(r.value)}
+                  </span>
+                </div>
+              </div>
+              <span className="w-14 text-right font-mono text-[11px] text-dash-text-secondary">
+                {pctLabel}
+              </span>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
