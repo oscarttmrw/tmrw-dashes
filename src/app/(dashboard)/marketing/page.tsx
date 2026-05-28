@@ -142,7 +142,7 @@ function FunnelChart({ rows }: { rows: { label: string; value: number; tone: Fun
             <div className="relative h-9 flex-1">
               <div
                 className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center justify-center rounded-sm px-3"
-                style={{ width: `${Math.max(pct, 2)}%`, minWidth: '7rem', background: swatch.bg }}
+                style={{ width: `${Math.max(pct, 0.5)}%`, minWidth: '4.5rem', background: swatch.bg }}
               >
                 <span
                   className="whitespace-nowrap font-mono text-[12px] font-semibold uppercase tracking-[0.04em]"
@@ -578,10 +578,10 @@ export default function MarketingPage() {
           </div>
           <FunnelChart
             rows={[
-              { label: 'Total Leads',                  value: metaAgg.conversions, tone: 'dark'  },
-              { label: 'Booked · in progress or done', value: callsBooked,         tone: 'mid'   },
-              { label: 'Calls Actually Held',          value: callsHeld,           tone: 'light' },
-              { label: 'Closed',                       value: callsClosed,         tone: 'red'   },
+              { label: 'Total Leads', value: metaAgg.conversions, tone: 'dark'  },
+              { label: 'Booked',      value: callsBooked,         tone: 'mid'   },
+              { label: 'Held',        value: callsHeld,           tone: 'light' },
+              { label: 'Closed',      value: callsClosed,         tone: 'red'   },
             ]}
           />
           <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
