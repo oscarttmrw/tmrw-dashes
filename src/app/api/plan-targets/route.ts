@@ -8,6 +8,7 @@ interface PlanTargetInput {
   gross_revenue_target: number | null
   net_revenue_target: number | null
   mrr_target: number | null
+  ltv_assumed: number | null
 }
 
 function normalizeMonth(input: unknown): string | null {
@@ -70,6 +71,7 @@ export async function POST(request: NextRequest) {
     gross_revenue_target: numOrNull(raw.gross_revenue_target),
     net_revenue_target: numOrNull(raw.net_revenue_target),
     mrr_target: numOrNull(raw.mrr_target),
+    ltv_assumed: numOrNull(raw.ltv_assumed),
     updated_at: new Date().toISOString(),
   }
 

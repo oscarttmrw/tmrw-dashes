@@ -48,8 +48,8 @@ function deltaPct(current: number, previous: number): number | null {
   return ((current - previous) / previous) * 100
 }
 
-// Provisional lifetime-value constant. Manager said ~$3.5K, real number to follow.
-const LTV_ASSUMED = 3500
+// Fallback LTV if no value has been entered in Settings → Plan Targets yet.
+const LTV_FALLBACK = 3500
 
 // Booked = any record with one of the call lifecycle stages set.
 // Held   = the stages that imply the call actually happened.
@@ -166,7 +166,7 @@ function FunnelChart({ rows }: { rows: { label: string; value: number; tone: Fun
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 export default function MarketingPage() {
-  const { meta_ads, social_followers, social_views, operational_data, ghl_opportunities } = useDashboardData()
+  const { meta_ads, social_followers, social_views, operational_data, ghl_opportunities, plan_targets } = useDashboardData()
 
   const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
   const periodStart = pickerValue.period.start
@@ -253,6 +253,26 @@ export default function MarketingPage() {
     [ghl_opportunities, prevStart, prevEnd]
   )
 
+  /* ── LTV in effect for this period — most recent plan_targets row at or
+        before periodEnd that actually carries an ltv_assumed value. ── */
+  const ltvAssumed = useMemo(() => {
+    const endIso = periodEnd.toISOString().slice(0, 10)
+    let best: { month: string; ltv: number } | null = null
+    for (const r of plan_targets) {
+      const m = typeof r.month === 'string' ? r.month.slice(0, 10) : ''
+      const v = r.ltv_assumed
+      if (!m || m > endIso) continue
+      if (v === null || v === undefined) continue
+      const ltv = typeof v === 'number' ? v : Number(v)
+      if (isNaN(ltv)) continue
+      if (!best || m > best.month) best = { month: m, ltv }
+    }
+    return best?.ltv ?? LTV_FALLBACK
+  }, [plan_targets, periodEnd])
+  const ltvFromSettings = useMemo(() => plan_targets.some(r =>
+    r.ltv_assumed !== null && r.ltv_assumed !== undefined && r.ltv_assumed !== ''
+  ), [plan_targets])
+
   /* ── Derived Spend-section metrics ── */
   const costPerLead = metaAgg.costPerLead
   const costPerLeadPrev = metaPrev.costPerLead
@@ -262,8 +282,8 @@ export default function MarketingPage() {
   const cacPrev = membersAcquiredPrev > 0 ? metaPrev.spend / membersAcquiredPrev : 0
   // LTV per registration (paid) = assumed LTV × closed members (paid-attributable
   // registrations). Closed comes from GHL won — currently provisional.
-  const ltvFromPaid = LTV_ASSUMED * callsClosed
-  const ltvFromPaidPrev = LTV_ASSUMED * callsClosedPrev
+  const ltvFromPaid = ltvAssumed * callsClosed
+  const ltvFromPaidPrev = ltvAssumed * callsClosedPrev
   const roiPaid = metaAgg.spend > 0 ? ((ltvFromPaid - metaAgg.spend) / metaAgg.spend) * 100 : 0
   const roiPaidPrev = metaPrev.spend > 0 ? ((ltvFromPaidPrev - metaPrev.spend) / metaPrev.spend) * 100 : 0
 
@@ -503,7 +523,7 @@ export default function MarketingPage() {
           <KpiTile
             label="LTV per Registration (Paid)"
             value={callsClosed === 0 ? '—' : fmtCurrency(ltvFromPaid, { compact: true, digits: 0 })}
-            sublabel={`closed × $${LTV_ASSUMED.toLocaleString()} LTV · provisional`}
+            sublabel={`closed × $${ltvAssumed.toLocaleString()} LTV${ltvFromSettings ? '' : ' · fallback'}`}
             delta={deltaPct(ltvFromPaid, ltvFromPaidPrev)}
           />
           <KpiTile
@@ -514,7 +534,7 @@ export default function MarketingPage() {
           />
         </div>
         <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
-          LTV-per-Registration uses a provisional ${LTV_ASSUMED.toLocaleString()} per closed member; "closed" comes from GHL <code>status=won</code>, which is currently flaky. Both LTV per Registration and ROI update automatically once the real LTV and the cleaned GHL feed land.
+          LTV-per-Registration uses ${ltvAssumed.toLocaleString()} per closed member ({ltvFromSettings ? <>from <a href="/admin/settings" className="underline">Settings → Plan Targets</a></> : 'fallback — no value set in Settings yet'}); &ldquo;closed&rdquo; comes from GHL <code>status=won</code>, which is currently flaky. Both LTV per Registration and ROI update automatically once the LTV is set and the cleaned GHL feed lands.
         </p>
       </section>
 
