@@ -15,6 +15,7 @@ import {
   type DateRangePickerValue,
 } from '@/components/dashboard/date-range-picker'
 import { TileChart, bucketByDay } from '@/components/dashboard/tile-chart'
+import { Lock } from 'lucide-react'
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
 
@@ -47,7 +48,34 @@ function deltaPct(current: number, previous: number): number | null {
   return ((current - previous) / previous) * 100
 }
 
-/* ─── Tile ────────────────────────────────────────────────────────── */
+// Provisional lifetime-value constant. Manager said ~$3.5K, real number to follow.
+const LTV_ASSUMED = 3500
+
+// Booked = any record with one of the call lifecycle stages set.
+// Held   = the stages that imply the call actually happened.
+// Closed = status='won'.
+const CALL_STAGES_BOOKED = new Set(['Call Booked', 'No Show', 'Call Attended', 'Won', 'Cancelled', 'Rescheduled'])
+const CALL_STAGES_HELD = new Set(['Call Attended', 'Won'])
+
+// Follower tiles to render. Aliases support legacy data labelled without
+// the "(TMRW)" suffix.
+const FOLLOWER_PLATFORMS: { canonical: string; label: string; aliases: string[] }[] = [
+  { canonical: 'Facebook (TMRW)',  label: 'Facebook',  aliases: ['Facebook (TMRW)', 'Facebook'] },
+  { canonical: 'Instagram (TMRW)', label: 'Instagram', aliases: ['Instagram (TMRW)', 'Instagram'] },
+  { canonical: 'LinkedIn (TMRW)',  label: 'LinkedIn',  aliases: ['LinkedIn (TMRW)', 'LinkedIn'] },
+]
+
+const PLATFORM_COLORS: Record<string, string> = {
+  'Facebook (TMRW)':  '#1877F2',
+  Facebook:           '#1877F2',
+  'Instagram (TMRW)': '#E4405F',
+  Instagram:          '#E4405F',
+  'LinkedIn (TMRW)':  '#0A66C2',
+  LinkedIn:           '#0A66C2',
+}
+const platformColor = (p: string) => PLATFORM_COLORS[p] ?? '#737373'
+
+/* ─── Tiles ───────────────────────────────────────────────────────── */
 
 interface KpiTileProps {
   label: string
@@ -77,19 +105,76 @@ function KpiTile({ label, value, sublabel, delta, direction = 'higher-better', c
   )
 }
 
+function LockedKpiTile({ label, reason }: { label: string; reason: string }) {
+  return (
+    <div className="flex h-full flex-col rounded-lg border border-dashed border-dash-border bg-dash-surface/40 p-4 opacity-80">
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted">{label}</p>
+        <Lock size={11} className="text-dash-text-muted" />
+      </div>
+      <div className="mt-2">
+        <p className="font-mono text-2xl font-bold text-dash-text-muted">—</p>
+      </div>
+      <p className="mt-auto pt-3 font-sans text-[11px] italic text-dash-text-muted">{reason}</p>
+    </div>
+  )
+}
+
+/* ─── Funnel ──────────────────────────────────────────────────────── */
+
+type FunnelTone = 'dark' | 'mid' | 'light' | 'red'
+
+function FunnelChart({ rows }: { rows: { label: string; value: number; tone: FunnelTone }[] }) {
+  const top = rows[0]?.value ?? 0
+  const palette: Record<FunnelTone, { bg: string; text: string }> = {
+    dark:  { bg: '#1A1A1A', text: '#FFFFFF' },
+    mid:   { bg: '#737373', text: '#FFFFFF' },
+    light: { bg: '#B8B5AE', text: '#1A1A1A' },
+    red:   { bg: '#E61317', text: '#FFFFFF' },
+  }
+  return (
+    <div className="space-y-2">
+      {rows.map((r, i) => {
+        const pct = top > 0 ? (r.value / top) * 100 : 0
+        const swatch = palette[r.tone]
+        const pctLabel = top === 0 ? '—' : pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`
+        return (
+          <div key={i} className="flex items-center gap-3">
+            <div className="relative h-9 flex-1">
+              <div
+                className="absolute inset-y-0 left-0 flex items-center rounded-sm px-3"
+                style={{ width: `${Math.max(pct, 2)}%`, minWidth: '7rem', background: swatch.bg }}
+              >
+                <span
+                  className="whitespace-nowrap font-mono text-[12px] font-semibold uppercase tracking-[0.04em]"
+                  style={{ color: swatch.text }}
+                >
+                  {fmtNum(r.value)} · {r.label}
+                </span>
+              </div>
+            </div>
+            <span className="w-14 text-right font-mono text-[11px] text-dash-text-secondary">
+              {pctLabel}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 export default function MarketingPage() {
-  const { meta_ads, social_followers, social_views, operational_data } = useDashboardData()
+  const { meta_ads, social_followers, social_views, operational_data, ghl_opportunities } = useDashboardData()
 
-  // User-controlled date range picker. Independent state per page.
   const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
   const periodStart = pickerValue.period.start
   const periodEnd = pickerValue.period.end
   const prevStart = pickerValue.comparison.start
   const prevEnd = pickerValue.comparison.end
 
-  /* ── Paid — Meta Ads ── */
+  /* ── Meta ads — period aggregates ── */
   const metaInPeriod = useMemo(
     () => meta_ads.filter(r => inPeriod(r.date, periodStart, periodEnd)),
     [meta_ads, periodStart, periodEnd]
@@ -113,14 +198,13 @@ export default function MarketingPage() {
     }
     const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0
     const costPerLpv = lpv > 0 ? spend / lpv : 0
-    return { spend, impressions, clicks, ctr, lpv, costPerLpv, conversions, videoViews, postEngagements }
+    const costPerLead = conversions > 0 ? spend / conversions : 0
+    return { spend, impressions, clicks, ctr, lpv, costPerLpv, conversions, costPerLead, videoViews, postEngagements }
   }
-
   const metaAgg = useMemo(() => aggregateMeta(metaInPeriod), [metaInPeriod])
   const metaPrev = useMemo(() => aggregateMeta(metaInPrev), [metaInPrev])
 
-  /* ── Cost per Conversion = Meta spend ÷ members acquired
-        (operational_data.customers_registered) over the same period. ── */
+  /* ── Members acquired (operational_data.customers_registered) ── */
   const membersAcquired = useMemo(
     () => operational_data.filter(r => inPeriod(r.date, periodStart, periodEnd))
       .reduce((s, r) => s + num(r.customers_registered), 0),
@@ -131,48 +215,95 @@ export default function MarketingPage() {
       .reduce((s, r) => s + num(r.customers_registered), 0),
     [operational_data, prevStart, prevEnd]
   )
-  const costPerConversion = membersAcquired > 0 ? metaAgg.spend / membersAcquired : 0
-  const costPerConversionPrev = membersAcquiredPrev > 0 ? metaPrev.spend / membersAcquiredPrev : 0
 
-  /* ── Daily series per Meta tile ── */
-  const sparkMeta = (field: keyof typeof metaAgg) => bucketByDay(
-    meta_ads, 'date', periodStart, periodEnd,
-    (rows) => {
-      // For ratio tiles, recompute the ratio on the day's rows.
-      if (field === 'ctr') {
-        const imp = rows.reduce((s, r) => s + num(r.impressions), 0)
-        const clk = rows.reduce((s, r) => s + num(r.clicks), 0)
-        return imp > 0 ? (clk / imp) * 100 : 0
-      }
-      if (field === 'costPerLpv') {
-        const sp = rows.reduce((s, r) => s + num(r.spend), 0)
-        const v = rows.reduce((s, r) => s + num(r.landing_page_views), 0)
-        return v > 0 ? sp / v : 0
-      }
-      // Sum tiles map cleanly to column names
-      const colByField: Record<string, string> = {
-        spend: 'spend',
-        impressions: 'impressions',
-        clicks: 'clicks',
-        lpv: 'landing_page_views',
-        conversions: 'conversions_leads',
-        videoViews: 'video_views',
-        postEngagements: 'post_engagements',
-      }
-      const col = colByField[field as string]
-      return col ? rows.reduce((s, r) => s + num((r as Record<string, unknown>)[col]), 0) : 0
-    }
+  /* ── GHL: booked / held / closed counts (data currently flaky) ── */
+  const callsBooked = useMemo(
+    () => ghl_opportunities.filter(r =>
+      CALL_STAGES_BOOKED.has(String(r.stage ?? ''))
+      && inPeriod(r.created_on, periodStart, periodEnd)
+    ).length,
+    [ghl_opportunities, periodStart, periodEnd]
+  )
+  const callsBookedPrev = useMemo(
+    () => ghl_opportunities.filter(r =>
+      CALL_STAGES_BOOKED.has(String(r.stage ?? ''))
+      && inPeriod(r.created_on, prevStart, prevEnd)
+    ).length,
+    [ghl_opportunities, prevStart, prevEnd]
+  )
+  const callsHeld = useMemo(
+    () => ghl_opportunities.filter(r =>
+      CALL_STAGES_HELD.has(String(r.stage ?? ''))
+      && inPeriod(r.created_on, periodStart, periodEnd)
+    ).length,
+    [ghl_opportunities, periodStart, periodEnd]
+  )
+  const callsClosed = useMemo(
+    () => ghl_opportunities.filter(r =>
+      String(r.status ?? '').toLowerCase() === 'won'
+      && inPeriod(r.created_on, periodStart, periodEnd)
+    ).length,
+    [ghl_opportunities, periodStart, periodEnd]
+  )
+  const callsClosedPrev = useMemo(
+    () => ghl_opportunities.filter(r =>
+      String(r.status ?? '').toLowerCase() === 'won'
+      && inPeriod(r.created_on, prevStart, prevEnd)
+    ).length,
+    [ghl_opportunities, prevStart, prevEnd]
   )
 
-  const sparkSpend           = useMemo(() => sparkMeta('spend'),             [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
-  const sparkImpressions     = useMemo(() => sparkMeta('impressions'),       [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
-  const sparkClicks          = useMemo(() => sparkMeta('clicks'),            [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
-  const sparkCtr             = useMemo(() => sparkMeta('ctr'),               [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
-  const sparkLpv             = useMemo(() => sparkMeta('lpv'),               [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
-  const sparkCostPerLpv      = useMemo(() => sparkMeta('costPerLpv'),        [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
-  const sparkConversions     = useMemo(() => sparkMeta('conversions'),       [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
-  // Cost per Conversion sparkline: daily Meta spend ÷ daily members acquired.
-  const sparkCostPerConv     = useMemo(() => {
+  /* ── Derived Spend-section metrics ── */
+  const costPerLead = metaAgg.costPerLead
+  const costPerLeadPrev = metaPrev.costPerLead
+  const costPerCall = callsBooked > 0 ? metaAgg.spend / callsBooked : 0
+  const costPerCallPrev = callsBookedPrev > 0 ? metaPrev.spend / callsBookedPrev : 0
+  const cac = membersAcquired > 0 ? metaAgg.spend / membersAcquired : 0
+  const cacPrev = membersAcquiredPrev > 0 ? metaPrev.spend / membersAcquiredPrev : 0
+  // LTV per registration (paid) = assumed LTV × closed members (paid-attributable
+  // registrations). Closed comes from GHL won — currently provisional.
+  const ltvFromPaid = LTV_ASSUMED * callsClosed
+  const ltvFromPaidPrev = LTV_ASSUMED * callsClosedPrev
+  const roiPaid = metaAgg.spend > 0 ? ((ltvFromPaid - metaAgg.spend) / metaAgg.spend) * 100 : 0
+  const roiPaidPrev = metaPrev.spend > 0 ? ((ltvFromPaidPrev - metaPrev.spend) / metaPrev.spend) * 100 : 0
+
+  /* ── Spend-section sparklines ── */
+  const sparkSpend = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.spend), 0)),
+    [meta_ads, periodStart, periodEnd]
+  )
+  const sparkCostPerLpv = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => {
+        const spend = rows.reduce((s, r) => s + num(r.spend), 0)
+        const v = rows.reduce((s, r) => s + num(r.landing_page_views), 0)
+        return v > 0 ? spend / v : 0
+      }),
+    [meta_ads, periodStart, periodEnd]
+  )
+  const sparkCostPerLead = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => {
+        const spend = rows.reduce((s, r) => s + num(r.spend), 0)
+        const leads = rows.reduce((s, r) => s + num(r.conversions_leads), 0)
+        return leads > 0 ? spend / leads : 0
+      }),
+    [meta_ads, periodStart, periodEnd]
+  )
+  const sparkCostPerCall = useMemo(() => {
+    const spend = bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.spend), 0))
+    return spend.map(d => {
+      const day = d.date
+      const calls = ghl_opportunities.filter(o =>
+        CALL_STAGES_BOOKED.has(String(o.stage ?? ''))
+        && String(o.created_on ?? '').slice(0, 10) === day
+      ).length
+      return { date: day, value: calls > 0 ? d.value / calls : 0 }
+    })
+  }, [meta_ads, ghl_opportunities, periodStart, periodEnd])
+  const sparkCac = useMemo(() => {
     const spend = bucketByDay(meta_ads, 'date', periodStart, periodEnd,
       (rows) => rows.reduce((s, r) => s + num(r.spend), 0))
     const regs = bucketByDay(operational_data, 'date', periodStart, periodEnd,
@@ -182,10 +313,44 @@ export default function MarketingPage() {
       value: regs[i] && regs[i].value > 0 ? d.value / regs[i].value : 0,
     }))
   }, [meta_ads, operational_data, periodStart, periodEnd])
-  const sparkVideoViewsMeta  = useMemo(() => sparkMeta('videoViews'),        [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
-  const sparkPostEngMeta     = useMemo(() => sparkMeta('postEngagements'),   [meta_ads, periodStart, periodEnd])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Organic — Social Followers (latest snapshot per platform) ── */
+  /* ── Paid Ads tile sparklines ── */
+  const sparkImpressions = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.impressions), 0)),
+    [meta_ads, periodStart, periodEnd]
+  )
+  const sparkClicks = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.clicks), 0)),
+    [meta_ads, periodStart, periodEnd]
+  )
+  const sparkCtr = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => {
+        const imp = rows.reduce((s, r) => s + num(r.impressions), 0)
+        const clk = rows.reduce((s, r) => s + num(r.clicks), 0)
+        return imp > 0 ? (clk / imp) * 100 : 0
+      }),
+    [meta_ads, periodStart, periodEnd]
+  )
+  const sparkLpv = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.landing_page_views), 0)),
+    [meta_ads, periodStart, periodEnd]
+  )
+  const sparkVideoViewsMeta = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.video_views), 0)),
+    [meta_ads, periodStart, periodEnd]
+  )
+  const sparkPostEngMeta = useMemo(
+    () => bucketByDay(meta_ads, 'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + num(r.post_engagements), 0)),
+    [meta_ads, periodStart, periodEnd]
+  )
+
+  /* ── Followers — latest snapshot per platform ── */
   const followersByPlatform = useMemo(() => {
     const latest = new Map<string, { date: string; value: number; notes: string | null }>()
     for (const row of social_followers) {
@@ -200,12 +365,15 @@ export default function MarketingPage() {
     }
     return latest
   }, [social_followers])
+  const lookupFollowers = (aliases: string[]) => {
+    for (const a of aliases) {
+      const hit = followersByPlatform.get(a)
+      if (hit) return hit
+    }
+    return null
+  }
 
-  const facebook = followersByPlatform.get('Facebook (TMRW)')
-    ?? followersByPlatform.get('Facebook')
-    ?? null
-
-  /* ── Organic — Social Views (aggregated over period) ── */
+  /* ── Social Views — totals + per-platform daily series ── */
   const viewsInPeriod = useMemo(
     () => social_views.filter(r => inPeriod(r.date, periodStart, periodEnd)),
     [social_views, periodStart, periodEnd]
@@ -214,7 +382,6 @@ export default function MarketingPage() {
     () => social_views.filter(r => inPeriod(r.date, prevStart, prevEnd)),
     [social_views, prevStart, prevEnd]
   )
-
   const aggregateViews = (rows: typeof social_views) => {
     let pageViews = 0, videoViews = 0, postEngagements = 0
     for (const r of rows) {
@@ -227,31 +394,57 @@ export default function MarketingPage() {
   const viewsAgg = useMemo(() => aggregateViews(viewsInPeriod), [viewsInPeriod])
   const viewsPrev = useMemo(() => aggregateViews(viewsInPrev), [viewsInPrev])
 
-  const sparkPageViews = useMemo(
-    () => bucketByDay(social_views, 'date', periodStart, periodEnd,
-      (rows) => rows.reduce((s, r) => s + num(r.page_views), 0)),
-    [social_views, periodStart, periodEnd]
+  // Distinct platforms present in the social_views data for this period.
+  const viewsPlatforms = useMemo(() => {
+    const set = new Set<string>()
+    for (const r of viewsInPeriod) {
+      const p = String(r.platform ?? '').trim()
+      if (p) set.add(p)
+    }
+    return Array.from(set).sort()
+  }, [viewsInPeriod])
+
+  // Build a chart row per day with one column per platform for a given metric.
+  const buildPerPlatformDaily = (rows: typeof social_views, metric: 'page_views' | 'video_views' | 'post_engagements') => {
+    const days = new Map<string, Record<string, number | string>>()
+    for (const r of rows) {
+      const day = String(r.date ?? '').slice(0, 10)
+      const platform = String(r.platform ?? '').trim()
+      if (!day || !platform) continue
+      const row = days.get(day) ?? { date: day }
+      row[platform] = num((r as Record<string, unknown>)[metric])
+      days.set(day, row)
+    }
+    return Array.from(days.values())
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+  }
+  const dailyPageViewsByPlatform = useMemo(
+    () => buildPerPlatformDaily(viewsInPeriod, 'page_views'),
+    [viewsInPeriod]
   )
-  const sparkVideoViewsSocial = useMemo(
-    () => bucketByDay(social_views, 'date', periodStart, periodEnd,
-      (rows) => rows.reduce((s, r) => s + num(r.video_views), 0)),
-    [social_views, periodStart, periodEnd]
+  const dailyVideoViewsByPlatform = useMemo(
+    () => buildPerPlatformDaily(viewsInPeriod, 'video_views'),
+    [viewsInPeriod]
   )
-  const sparkPostEngSocial = useMemo(
-    () => bucketByDay(social_views, 'date', periodStart, periodEnd,
-      (rows) => rows.reduce((s, r) => s + num(r.post_engagements), 0)),
-    [social_views, periodStart, periodEnd]
+  const dailyPostEngByPlatform = useMemo(
+    () => buildPerPlatformDaily(viewsInPeriod, 'post_engagements'),
+    [viewsInPeriod]
   )
 
-  /* ── Engagement trend chart — daily series ── */
+  /* ── Aggregated engagement trend (all platforms combined) ── */
   const trendData = useMemo(() => {
-    return [...viewsInPeriod]
-      .map(r => ({
-        date: String(r.date),
-        page_views: num(r.page_views),
-        post_engagements: num(r.post_engagements),
-        video_views: num(r.video_views),
-      }))
+    const byDay = new Map<string, { page_views: number; video_views: number; post_engagements: number }>()
+    for (const r of viewsInPeriod) {
+      const day = String(r.date ?? '').slice(0, 10)
+      if (!day) continue
+      const entry = byDay.get(day) ?? { page_views: 0, video_views: 0, post_engagements: 0 }
+      entry.page_views += num(r.page_views)
+      entry.video_views += num(r.video_views)
+      entry.post_engagements += num(r.post_engagements)
+      byDay.set(day, entry)
+    }
+    return Array.from(byDay.entries())
+      .map(([date, v]) => ({ date, ...v }))
       .sort((a, b) => a.date.localeCompare(b.date))
   }, [viewsInPeriod])
 
@@ -264,17 +457,88 @@ export default function MarketingPage() {
         <DateRangePicker value={pickerValue} onChange={setPickerValue} />
       </div>
 
-      {/* ── Section 1 — Paid — Meta Ads ── */}
+      {/* ── Section 1 — Spend ── */}
       <section>
-        <SectionHeading number={1} title="Paid — Meta Ads" />
-        <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-5">
+        <SectionHeading number={1} title="Spend" />
+        <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
           <KpiTile
-            label="Spend"
+            label="Total Meta Ad Spend"
             value={fmtCurrency(metaAgg.spend, { compact: true, digits: 0 })}
             delta={deltaPct(metaAgg.spend, metaPrev.spend)}
             direction="lower-better"
             chart={<TileChart data={sparkSpend} formatValue={(n) => fmtCurrency(n, { compact: true })} />}
           />
+          <KpiTile
+            label="Cost per Landing Page View"
+            value={metaAgg.lpv === 0 ? '—' : fmtCurrency(metaAgg.costPerLpv)}
+            sublabel="spend ÷ LPV"
+            delta={deltaPct(metaAgg.costPerLpv, metaPrev.costPerLpv)}
+            direction="lower-better"
+            chart={<TileChart data={sparkCostPerLpv} variant="line" formatValue={(n) => fmtCurrency(n)} />}
+          />
+          <KpiTile
+            label="Cost per Lead"
+            value={metaAgg.conversions === 0 ? '—' : fmtCurrency(costPerLead)}
+            sublabel="spend ÷ Meta leads"
+            delta={deltaPct(costPerLead, costPerLeadPrev)}
+            direction="lower-better"
+            chart={<TileChart data={sparkCostPerLead} variant="line" formatValue={(n) => fmtCurrency(n)} />}
+          />
+          <KpiTile
+            label="Cost per Call"
+            value={callsBooked === 0 ? '—' : fmtCurrency(costPerCall)}
+            sublabel="spend ÷ calls booked (GHL)"
+            delta={deltaPct(costPerCall, costPerCallPrev)}
+            direction="lower-better"
+            chart={<TileChart data={sparkCostPerCall} variant="line" formatValue={(n) => fmtCurrency(n)} />}
+          />
+          <KpiTile
+            label="Customer Acquisition Cost"
+            value={membersAcquired === 0 ? '—' : fmtCurrency(cac)}
+            sublabel="spend ÷ members acquired"
+            delta={deltaPct(cac, cacPrev)}
+            direction="lower-better"
+            chart={<TileChart data={sparkCac} variant="line" formatValue={(n) => fmtCurrency(n)} />}
+          />
+          <KpiTile
+            label="LTV per Registration (Paid)"
+            value={callsClosed === 0 ? '—' : fmtCurrency(ltvFromPaid, { compact: true, digits: 0 })}
+            sublabel={`closed × $${LTV_ASSUMED.toLocaleString()} LTV · provisional`}
+            delta={deltaPct(ltvFromPaid, ltvFromPaidPrev)}
+          />
+          <KpiTile
+            label="ROI on Paid Marketing"
+            value={metaAgg.spend === 0 || callsClosed === 0 ? '—' : `${roiPaid.toFixed(0)}%`}
+            sublabel="(LTV-from-paid − spend) ÷ spend"
+            delta={deltaPct(roiPaid, roiPaidPrev)}
+          />
+        </div>
+        <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
+          LTV-per-Registration uses a provisional ${LTV_ASSUMED.toLocaleString()} per closed member; "closed" comes from GHL <code>status=won</code>, which is currently flaky. Both LTV per Registration and ROI update automatically once the real LTV and the cleaned GHL feed land.
+        </p>
+      </section>
+
+      {/* ── Section 2 — Paid — Meta Ads (funnel + tiles) ── */}
+      <section>
+        <SectionHeading number={2} title="Paid — Meta Ads" />
+        <div className="mb-3 rounded-lg border border-dash-border bg-dash-surface p-4 md:mb-4">
+          <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+            The Funnel · period selected
+          </div>
+          <FunnelChart
+            rows={[
+              { label: 'Total Leads',                  value: metaAgg.conversions, tone: 'dark'  },
+              { label: 'Booked · in progress or done', value: callsBooked,         tone: 'mid'   },
+              { label: 'Calls Actually Held',          value: callsHeld,           tone: 'light' },
+              { label: 'Closed',                       value: callsClosed,         tone: 'red'   },
+            ]}
+          />
+          <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
+            Leads from Meta Ads · Booked / Held / Closed from GHL (feed currently unreliable — Marko is fixing).
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-3">
           <KpiTile
             label="Impressions"
             value={fmtNum(metaAgg.impressions)}
@@ -301,27 +565,6 @@ export default function MarketingPage() {
             chart={<TileChart data={sparkLpv} />}
           />
           <KpiTile
-            label="Cost per LPV"
-            value={metaAgg.lpv === 0 ? '—' : fmtCurrency(metaAgg.costPerLpv)}
-            delta={deltaPct(metaAgg.costPerLpv, metaPrev.costPerLpv)}
-            direction="lower-better"
-            chart={<TileChart data={sparkCostPerLpv} variant="line" formatValue={(n) => fmtCurrency(n)} />}
-          />
-          <KpiTile
-            label="Conversions (Leads)"
-            value={fmtNum(metaAgg.conversions)}
-            delta={deltaPct(metaAgg.conversions, metaPrev.conversions)}
-            chart={<TileChart data={sparkConversions} />}
-          />
-          <KpiTile
-            label="Cost per Conversion"
-            value={membersAcquired === 0 ? '—' : fmtCurrency(costPerConversion)}
-            sublabel="spend ÷ members acquired"
-            delta={deltaPct(costPerConversion, costPerConversionPrev)}
-            direction="lower-better"
-            chart={<TileChart data={sparkCostPerConv} variant="line" formatValue={(n) => fmtCurrency(n)} />}
-          />
-          <KpiTile
             label="Video Views"
             value={fmtNum(metaAgg.videoViews)}
             delta={deltaPct(metaAgg.videoViews, metaPrev.videoViews)}
@@ -336,46 +579,107 @@ export default function MarketingPage() {
         </div>
       </section>
 
-      {/* ── Section 2 — Organic — Followers ── */}
+      {/* ── Section 3 — CAC trend ── */}
       <section>
-        <SectionHeading number={2} title="Organic — Followers" />
-        <div className="grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
-          <KpiTile
-            label="Facebook Followers"
-            value={facebook ? fmtNum(facebook.value) : '—'}
-            sublabel={facebook ? `as of ${facebook.date}` : 'no snapshot yet'}
-          />
+        <SectionHeading number={3} title="Customer Acquisition Cost — Daily" />
+        <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+          <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={sparkCac} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+              <CartesianGrid {...gridStyle} />
+              <XAxis dataKey="date" tick={axisTickStyle} axisLine={axisLineStyle} tickLine={false} minTickGap={32} />
+              <YAxis tick={axisTickStyle} axisLine={axisLineStyle} tickLine={false} tickFormatter={(v) => fmtCurrency(Number(v) || 0, { digits: 0 })} />
+              <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { digits: 2 })} />
+              <Line type="monotone" dataKey="value" stroke={TMRW_COLORS.red} strokeWidth={2} dot={false} name="CAC" />
+            </LineChart>
+          </ResponsiveContainer>
+          <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
+            Daily Meta spend ÷ daily members acquired. Spikes happen on low-acquisition days; smooth via the trend rather than reading single days.
+          </p>
         </div>
       </section>
 
-      {/* ── Section 3 — Organic — Social Views ── */}
+      {/* ── Section 4 — Organic Followers ── */}
       <section>
-        <SectionHeading number={3} title="Organic — Social Views" />
+        <SectionHeading number={4} title="Organic — Followers" />
+        <div className="grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
+          {FOLLOWER_PLATFORMS.map(p => {
+            const hit = lookupFollowers(p.aliases)
+            return hit
+              ? (
+                <KpiTile
+                  key={p.canonical}
+                  label={`${p.label} Followers`}
+                  value={fmtNum(hit.value)}
+                  sublabel={`as of ${hit.date}`}
+                />
+              ) : (
+                <LockedKpiTile
+                  key={p.canonical}
+                  label={`${p.label} Followers`}
+                  reason={`Awaiting upload — expecting platform = "${p.canonical}".`}
+                />
+              )
+          })}
+        </div>
+      </section>
+
+      {/* ── Section 5 — Social Views by Platform ── */}
+      <section>
+        <SectionHeading number={5} title="Organic — Social Views" />
         <div className="grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
           <KpiTile
-            label="Page Views"
+            label="Page Views (total)"
             value={fmtNum(viewsAgg.pageViews)}
             delta={deltaPct(viewsAgg.pageViews, viewsPrev.pageViews)}
-            chart={<TileChart data={sparkPageViews} />}
           />
           <KpiTile
-            label="Video Views"
+            label="Video Views (total)"
             value={fmtNum(viewsAgg.videoViews)}
             delta={deltaPct(viewsAgg.videoViews, viewsPrev.videoViews)}
-            chart={<TileChart data={sparkVideoViewsSocial} />}
           />
           <KpiTile
-            label="Post Engagements"
+            label="Post Engagements (total)"
             value={fmtNum(viewsAgg.postEngagements)}
             delta={deltaPct(viewsAgg.postEngagements, viewsPrev.postEngagements)}
-            chart={<TileChart data={sparkPostEngSocial} />}
           />
         </div>
+
+        {viewsPlatforms.length === 0 ? (
+          <div className="mt-4 rounded-lg border border-dashed border-dash-border bg-dash-surface/40 p-6 text-center font-sans text-[12px] italic text-dash-text-muted">
+            Awaiting per-platform Social Views data. The upload schema now expects a <code>Platform</code> column.
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+            {[
+              { title: 'Page Views by Platform',       data: dailyPageViewsByPlatform },
+              { title: 'Video Views by Platform',      data: dailyVideoViewsByPlatform },
+              { title: 'Post Engagements by Platform', data: dailyPostEngByPlatform },
+            ].map(({ title, data }) => (
+              <div key={title} className="rounded-lg border border-dash-border bg-dash-surface p-4">
+                <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  {title}
+                </div>
+                <ResponsiveContainer width="100%" height={240}>
+                  <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+                    <CartesianGrid {...gridStyle} />
+                    <XAxis dataKey="date" tick={axisTickStyle} axisLine={axisLineStyle} tickLine={false} minTickGap={32} />
+                    <YAxis tick={axisTickStyle} axisLine={axisLineStyle} tickLine={false} />
+                    <Tooltip />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    {viewsPlatforms.map(p => (
+                      <Line key={p} type="monotone" dataKey={p} stroke={platformColor(p)} strokeWidth={2} dot={false} name={p} />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
-      {/* ── Section 4 — Engagement Trend ── */}
+      {/* ── Section 6 — Engagement Trend (all platforms combined) ── */}
       <section>
-        <SectionHeading number={4} title="Engagement Trend" />
+        <SectionHeading number={6} title="Engagement Trend (all platforms)" />
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
           {trendData.length === 0 ? (
             <p className="py-12 text-center text-sm italic text-dash-text-muted">

@@ -836,7 +836,7 @@ export default function DashboardPage() {
             chart={<TileChart data={callConvSeries} variant="line" formatValue={(n) => `${n.toFixed(1)}%`} />}
           />
           <MetricTile
-            label="Cost per Conversion (CAC proxy)"
+            label="Customer Acquisition Cost"
             value={costPerConversion === null ? '—' : fmtCurrency(costPerConversion, { digits: 2 })}
             target="spend ÷ members acquired · target <$150"
             status={

@@ -91,7 +91,7 @@ async function applyWriteStrategy(
     case 'social_followers':
       return upsertStrategy(supabase, table, batchId, rows, 'date,platform')
     case 'social_views':
-      return upsertStrategy(supabase, table, batchId, rows, 'date')
+      return upsertStrategy(supabase, table, batchId, rows, 'date,platform')
     case 'pelagonia':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'pelagonia_created_at')
     case 'zendesk':

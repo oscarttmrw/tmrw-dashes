@@ -351,8 +351,11 @@ export const socialFollowersSchema: CsvSchema = {
 
 export const socialViewsSchema: CsvSchema = {
   source: 'social_views',
-  // TMRW_MARKETING workbook → Social Views sheet. Daily aggregate.
+  // TMRW_MARKETING workbook → Social Views sheet. Daily per-platform aggregate.
+  // Schema now expects Platform as the first column so views can be split by
+  // Facebook / Instagram / LinkedIn / etc.
   requiredColumns: [
+    'Platform',
     'Date',
     ['Page Views', 'Video Views', 'Post Engagements'],
   ],
@@ -363,6 +366,7 @@ export const socialViewsSchema: CsvSchema = {
   ],
   strippedColumns: [],
   canonicalColumns: [
+    'platform',
     'date',
     'page_views',
     'video_views',
