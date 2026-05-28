@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from 'react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
-import { SectionHeading } from '@/components/dashboard/section-heading'
 import { TrendIndicator } from '@/components/dashboard/trend-indicator'
 import { useDashboardData } from '@/lib/context/data-context'
 import {
@@ -142,7 +141,7 @@ function FunnelChart({ rows }: { rows: { label: string; value: number; tone: Fun
           <div key={i} className="flex items-center gap-3">
             <div className="relative h-9 flex-1">
               <div
-                className="absolute inset-y-0 left-0 flex items-center rounded-sm px-3"
+                className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center justify-center rounded-sm px-3"
                 style={{ width: `${Math.max(pct, 2)}%`, minWidth: '7rem', background: swatch.bg }}
               >
                 <span
@@ -160,6 +159,40 @@ function FunnelChart({ rows }: { rows: { label: string; value: number; tone: Fun
         )
       })}
     </div>
+  )
+}
+
+/* ─── Section heading (mirrors Home + Financial tabs) ─────────────── */
+
+function NarrativeSection({
+  number, question, subtitle, right, children,
+}: {
+  number: number
+  question: string
+  subtitle: string
+  right?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <section>
+      <div className="mb-5 md:mb-7 flex items-end justify-between gap-4">
+        <div>
+          <div className="flex items-start gap-4 md:gap-6">
+            <span className="font-display text-4xl leading-none text-dash-text md:text-6xl">
+              {String(number).padStart(2, '0')}
+            </span>
+            <h2 className="font-display uppercase tracking-tight text-dash-text text-2xl leading-none pt-[0.2rem] md:text-4xl md:pt-[0.4rem]">
+              {question}
+            </h2>
+          </div>
+          <p className="mt-2 ml-[3.5rem] md:ml-[5.5rem] font-ui text-[11px] uppercase tracking-[0.12em] text-dash-text-muted md:text-xs">
+            {subtitle}
+          </p>
+        </div>
+        {right && <div>{right}</div>}
+      </div>
+      {children}
+    </section>
   )
 }
 
@@ -478,8 +511,7 @@ export default function MarketingPage() {
       </div>
 
       {/* ── Section 1 — Spend ── */}
-      <section>
-        <SectionHeading number={1} title="Spend" />
+      <NarrativeSection number={1} question="Spend" subtitle="Every dollar · every outcome">
         <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
           <KpiTile
             label="Total Meta Ad Spend"
@@ -536,11 +568,10 @@ export default function MarketingPage() {
         <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
           LTV-per-Registration uses ${ltvAssumed.toLocaleString()} per closed member ({ltvFromSettings ? <>from <a href="/admin/settings" className="underline">Settings → Plan Targets</a></> : 'fallback — no value set in Settings yet'}); &ldquo;closed&rdquo; comes from GHL <code>status=won</code>, which is currently flaky. Both LTV per Registration and ROI update automatically once the LTV is set and the cleaned GHL feed lands.
         </p>
-      </section>
+      </NarrativeSection>
 
       {/* ── Section 2 — Paid — Meta Ads (funnel + tiles) ── */}
-      <section>
-        <SectionHeading number={2} title="Paid — Meta Ads" />
+      <NarrativeSection number={2} question="Paid — Meta Ads" subtitle="From impression to closed member">
         <div className="mb-3 rounded-lg border border-dash-border bg-dash-surface p-4 md:mb-4">
           <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
             The Funnel · period selected
@@ -597,11 +628,10 @@ export default function MarketingPage() {
             chart={<TileChart data={sparkPostEngMeta} />}
           />
         </div>
-      </section>
+      </NarrativeSection>
 
       {/* ── Section 3 — CAC trend ── */}
-      <section>
-        <SectionHeading number={3} title="Customer Acquisition Cost — Daily" />
+      <NarrativeSection number={3} question="Customer Acquisition Cost" subtitle="Spend per member acquired · day by day">
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={sparkCac} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
@@ -616,11 +646,10 @@ export default function MarketingPage() {
             Daily Meta spend ÷ daily members acquired. Spikes happen on low-acquisition days; smooth via the trend rather than reading single days.
           </p>
         </div>
-      </section>
+      </NarrativeSection>
 
       {/* ── Section 4 — Organic Followers ── */}
-      <section>
-        <SectionHeading number={4} title="Organic — Followers" />
+      <NarrativeSection number={4} question="Organic — Followers" subtitle="Audience size by platform">
         <div className="grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
           {FOLLOWER_PLATFORMS.map(p => {
             const hit = lookupFollowers(p.aliases)
@@ -641,11 +670,10 @@ export default function MarketingPage() {
               )
           })}
         </div>
-      </section>
+      </NarrativeSection>
 
       {/* ── Section 5 — Social Views by Platform ── */}
-      <section>
-        <SectionHeading number={5} title="Organic — Social Views" />
+      <NarrativeSection number={5} question="Organic — Social Views" subtitle="Eyeballs by platform">
         <div className="grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
           <KpiTile
             label="Page Views (total)"
@@ -695,11 +723,10 @@ export default function MarketingPage() {
             ))}
           </div>
         )}
-      </section>
+      </NarrativeSection>
 
       {/* ── Section 6 — Engagement Trend (all platforms combined) ── */}
-      <section>
-        <SectionHeading number={6} title="Engagement Trend (all platforms)" />
+      <NarrativeSection number={6} question="Engagement Trend" subtitle="All platforms combined · page views · post engagements · video views">
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
           {trendData.length === 0 ? (
             <p className="py-12 text-center text-sm italic text-dash-text-muted">
@@ -720,7 +747,7 @@ export default function MarketingPage() {
             </ResponsiveContainer>
           )}
         </div>
-      </section>
+      </NarrativeSection>
     </div>
   )
 }
