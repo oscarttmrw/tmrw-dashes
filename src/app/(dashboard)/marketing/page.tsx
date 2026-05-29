@@ -134,7 +134,7 @@ function FunnelChart({ rows }: { rows: { label: string; value: number; tone: Fun
   return (
     <div>
       {/* Legend strip — stage labels across the full width */}
-      <div className="mb-4 grid grid-cols-4 gap-3 border-b border-dash-border pb-3">
+      <div className="mb-4 grid grid-cols-2 gap-x-3 gap-y-2 border-b border-dash-border pb-3 sm:grid-cols-4 sm:gap-3">
         {rows.map((r, i) => {
           const swatch = palette[r.tone]
           return (

@@ -274,7 +274,7 @@ export default function UploadPage() {
                 <div key={idx} className="rounded-md border border-dash-border bg-dash-surface p-3">
                   <p className="text-xs text-dash-text-muted">{s.file.name} :: {s.sheetName}</p>
 
-                  <div className="mt-2 grid grid-cols-3 items-center gap-3">
+                  <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-center">
                     <div>
                       <label className="block text-xs text-dash-text-muted">Source</label>
                       <select

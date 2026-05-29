@@ -317,10 +317,10 @@ export function DateRangePicker({ value, onChange, className }: Props) {
             </TabButton>
           </div>
 
-          {/* Body — two columns */}
-          <div className="grid grid-cols-[14rem_1fr] gap-0">
+          {/* Body — two columns (stacks on mobile) */}
+          <div className="grid grid-cols-1 gap-0 sm:grid-cols-[14rem_1fr]">
             {/* Left — preset list */}
-            <div className="border-r border-dash-border py-2">
+            <div className="border-b border-dash-border py-2 sm:border-b-0 sm:border-r">
               {PRESETS.map(p => {
                 const active = (tab === 'period' && activePreset === p.key)
                 return (
