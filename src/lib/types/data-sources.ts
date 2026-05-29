@@ -10,6 +10,8 @@ export type DataSourceName =
   | 'social_followers'
   | 'social_views'
   | 'pelagonia'
+  | 'financial_revenue_net'
+  | 'financial_revenue_gross'
   | 'manual';
 
 /**

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback, useEffect } from 'react'
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -21,7 +21,15 @@ import { TileChart } from '@/components/dashboard/tile-chart'
 import { useDashboardData } from '@/lib/context/data-context'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
-import { Lock, Star } from 'lucide-react'
+import { Lock, Star, ChevronDown } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 
 /* ─── Tile primitives (mirrors home-dashboard styling) ─────────────── */
 
@@ -171,29 +179,103 @@ function endOfMonth(d: Date): Date {
 
 const MONTH_LABELS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
+type Row = Record<string, unknown>
+
+// Product columns on financial_revenue, in stack order (recurring first).
+const PRODUCT_KEYS = ['membership', 'joining_fees', 'tmrw_stacks', 'supplements', 'peptides', 'advanced_tests'] as const
+
+const PRODUCT_LABELS: Record<string, string> = {
+  membership: 'Membership',
+  joining_fees: 'Joining Fees',
+  tmrw_stacks: 'TMRW Stacks',
+  supplements: 'Supplements',
+  peptides: 'Peptides',
+  advanced_tests: 'Advanced Tests',
+}
+
+const PRODUCT_COLORS: Record<string, string> = {
+  membership: '#7A1F22',
+  joining_fees: '#1A1A1A',
+  tmrw_stacks: '#E5A04A',
+  supplements: '#3676C9',
+  peptides: '#16A34A',
+  advanced_tests: '#7C3AED',
+}
+
+function monthKey(dateVal: unknown): string | null {
+  const t = new Date(String(dateVal ?? '')).getTime()
+  if (isNaN(t)) return null
+  const d = new Date(t)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+type OverlaySeries = { key: string; m: string; isCurrent: boolean; data: { day: number; value: number }[] }
+
+// Pivot per-month cumulative series into one row per day-of-month, with a
+// column per month — the shape Recharts wants for an overlaid line chart.
+function combineOverlay(series: OverlaySeries[]): Record<string, number | null>[] {
+  const maxDay = series.reduce((m, s) => Math.max(m, s.data.length), 0)
+  const out: Record<string, number | null>[] = []
+  for (let d = 1; d <= maxDay; d++) {
+    const row: Record<string, number | null> = { day: d }
+    for (const s of series) {
+      const point = s.data.find(p => p.day === d)
+      row[s.key] = point ? point.value : null
+    }
+    out.push(row)
+  }
+  return out
+}
+
+const OVERLAY_GREYS = ['#D8D5CE', '#B8B5AE', '#9A9690', '#737373', '#4A4A4A']
+
 /* ─── Page ────────────────────────────────────────────────────────── */
 
-const RECURRING_REASONS = new Set(['subscription_cycle', 'subscription_update', 'subscription'])
-const JOINING_REASONS = new Set(['subscription_create', 'manual'])
-
 export default function FinancialPage() {
-  const { stripe, plan_targets, loading, error, refresh } = useDashboardData()
+  const { financial_revenue, stripe, plan_targets, loading, error, refresh } = useDashboardData()
   const [showTable, setShowTable] = useState(false)
 
-  // "Today" anchors the MTD / projection logic. Use the most recent invoice
-  // date in the data when available, else the system clock.
-  const today = useMemo(() => {
-    const maxTs = stripe.reduce((m, r) => {
-      const t = new Date(String(r.created ?? '')).getTime()
-      return isNaN(t) ? m : Math.max(m, t)
-    }, 0)
-    return maxTs > 0 ? new Date(maxTs) : new Date()
-  }, [stripe])
+  /* ── Split financial_revenue by type ──
+   * net  = revenue actually collected (post-discount)
+   * gross = list price (RRP). capture rate = net ÷ gross. */
+  const netRows = useMemo(() => financial_revenue.filter(r => String(r.revenue_type) === 'net'), [financial_revenue])
+  const grossRows = useMemo(() => financial_revenue.filter(r => String(r.revenue_type) === 'gross'), [financial_revenue])
+
+  // Row total = sum of product columns (robust even if the stored `total` is 0).
+  const rowTotal = useCallback((r: Row) => PRODUCT_KEYS.reduce((s, k) => s + num(r[k]), 0), [])
+
+  // Calendar "today" — anchors the month, day-of-month and days-remaining so
+  // they track the real date, not how fresh the data happens to be.
+  const today = useMemo(() => new Date(), [])
+
+  // Data freshness: most recent date in financial_revenue (else stripe). Used
+  // as the run-rate projection denominator so we extrapolate from days of data
+  // actually present, not calendar days.
+  const dataAsOf = useMemo(() => {
+    let maxTs = 0
+    for (const r of financial_revenue) {
+      const t = new Date(String(r.date ?? '')).getTime()
+      if (!isNaN(t)) maxTs = Math.max(maxTs, t)
+    }
+    if (maxTs === 0) {
+      for (const r of stripe) {
+        const t = new Date(String(r.created ?? '')).getTime()
+        if (!isNaN(t)) maxTs = Math.max(maxTs, t)
+      }
+    }
+    return maxTs > 0 ? new Date(maxTs) : today
+  }, [financial_revenue, stripe, today])
 
   const monthStart = startOfMonth(today)
   const monthEnd = endOfMonth(today)
   const dim = daysInMonth(today)
   const dayOfMonth = today.getDate()
+  // Days of data we have this month — used as the run-rate denominator. Falls
+  // back to the calendar day if the latest data point is from a prior month.
+  const dataDayOfMonth =
+    dataAsOf.getFullYear() === today.getFullYear() && dataAsOf.getMonth() === today.getMonth()
+      ? dataAsOf.getDate()
+      : dayOfMonth
 
   /* ── Plan target for the current month ── */
   const currentPlanTarget = useMemo(() => {
@@ -202,80 +284,89 @@ export default function FinancialPage() {
   }, [plan_targets, today])
   const planThisMonth = currentPlanTarget ? num(currentPlanTarget.gross_revenue_target) : null
 
-  /* ── Group invoices by YYYY-MM ── */
-  const byMonth = useMemo(() => {
-    const map = new Map<string, { actual: number; txns: number; recurring: number; joining: number }>()
-    for (const r of stripe) {
-      const t = new Date(String(r.created ?? '')).getTime()
-      if (isNaN(t)) continue
-      const d = new Date(t)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      const amt = num(r.amount_paid) / 100
-      const reason = String(r.billing_reason ?? '').toLowerCase()
-      const entry = map.get(key) ?? { actual: 0, txns: 0, recurring: 0, joining: 0 }
-      entry.actual += amt
-      entry.txns += 1
-      if (RECURRING_REASONS.has(reason)) entry.recurring += amt
-      else if (JOINING_REASONS.has(reason) || reason === '') entry.joining += amt
-      map.set(key, entry)
-    }
-    return map
-  }, [stripe])
-
+  /* ── Monthly aggregation (net + gross + per-product + stripe txns) ── */
   const monthlyRows = useMemo(() => {
-    const keys = Array.from(byMonth.keys()).sort()
+    type Agg = Record<string, number>
+    const blank = (): Agg => ({ total: 0, membership: 0, joining_fees: 0, tmrw_stacks: 0, supplements: 0, peptides: 0, advanced_tests: 0 })
+    const net = new Map<string, Agg>()
+    const gross = new Map<string, Agg>()
+    const accumulate = (map: Map<string, Agg>, rows: Row[]) => {
+      for (const r of rows) {
+        const k = monthKey(r.date)
+        if (!k) continue
+        const a = map.get(k) ?? blank()
+        for (const key of PRODUCT_KEYS) a[key] += num(r[key])
+        a.total += rowTotal(r)
+        map.set(k, a)
+      }
+    }
+    accumulate(net, netRows)
+    accumulate(gross, grossRows)
+
+    const txnByMonth = new Map<string, number>()
+    for (const r of stripe) {
+      const k = monthKey(r.created)
+      if (k) txnByMonth.set(k, (txnByMonth.get(k) ?? 0) + 1)
+    }
+
+    const keys = Array.from(new Set([...Array.from(net.keys()), ...Array.from(gross.keys())])).sort()
     return keys.map(k => {
       const [y, m] = k.split('-')
-      const data = byMonth.get(k)!
+      const n = net.get(k) ?? blank()
+      const g = gross.get(k) ?? blank()
       const planRow = plan_targets.find(p => typeof p.month === 'string' && p.month.startsWith(k))
-      const plan = planRow ? num(planRow.gross_revenue_target) : null
+      const txns = txnByMonth.get(k) ?? 0
       return {
         key: k,
         m: MONTH_LABELS[parseInt(m, 10) - 1],
         year: parseInt(y, 10),
-        actual: data.actual,
-        txns: data.txns,
-        recurring: data.recurring,
-        joining: data.joining,
-        plan,
-        aov: data.txns > 0 ? data.actual / data.txns : 0,
-        recurringPct: data.actual > 0 ? data.recurring / data.actual : 0,
+        net: n.total,
+        gross: g.total,
+        membership: n.membership,
+        joining: n.joining_fees,
+        tmrw_stacks: n.tmrw_stacks,
+        supplements: n.supplements,
+        peptides: n.peptides,
+        advanced_tests: n.advanced_tests,
+        plan: planRow ? num(planRow.gross_revenue_target) : null,
+        captureRate: g.total > 0 ? n.total / g.total : null,
+        txns,
+        aov: txns > 0 ? n.total / txns : 0,
+        recurringPct: n.total > 0 ? n.membership / n.total : 0,
       }
     })
-  }, [byMonth, plan_targets])
+  }, [netRows, grossRows, stripe, plan_targets, rowTotal])
 
   /* ── This month: MTD figures ── */
   const mtd = useMemo(() => {
-    let actual = 0, txns = 0, recurring = 0, joining = 0
-    for (const r of stripe) {
-      const t = new Date(String(r.created ?? '')).getTime()
-      if (isNaN(t) || t < monthStart.getTime() || t > monthEnd.getTime()) continue
-      const amt = num(r.amount_paid) / 100
-      const reason = String(r.billing_reason ?? '').toLowerCase()
-      actual += amt
-      txns += 1
-      if (RECURRING_REASONS.has(reason)) recurring += amt
-      else joining += amt
+    const inMonth = (v: unknown) => {
+      const t = new Date(String(v ?? '')).getTime()
+      return !isNaN(t) && t >= monthStart.getTime() && t <= monthEnd.getTime()
     }
-    return { actual, txns, recurring, joining }
-  }, [stripe, monthStart, monthEnd])
+    let net = 0, gross = 0, membership = 0, joining = 0, txns = 0
+    for (const r of netRows) if (inMonth(r.date)) { net += rowTotal(r); membership += num(r.membership); joining += num(r.joining_fees) }
+    for (const r of grossRows) if (inMonth(r.date)) gross += rowTotal(r)
+    for (const r of stripe) if (inMonth(r.created)) txns += 1
+    return { net, gross, membership, joining, txns }
+  }, [netRows, grossRows, stripe, monthStart, monthEnd, rowTotal])
 
-  // Run-rate projection: MTD × (days in month / day-of-month)
-  const projectedMonthEnd = dayOfMonth > 0 ? (mtd.actual / dayOfMonth) * dim : 0
+  // Run-rate projection on net revenue (what we actually collect).
+  const projectedMonthEnd = dataDayOfMonth > 0 ? (mtd.net / dataDayOfMonth) * dim : 0
   const gapToPlan = planThisMonth ? planThisMonth - projectedMonthEnd : null
   const daysRemaining = dim - dayOfMonth
   const requiredRunRate = gapToPlan !== null && daysRemaining > 0 ? Math.max(0, gapToPlan / daysRemaining) : null
-  const mtdAov = mtd.txns > 0 ? mtd.actual / mtd.txns : 0
+  const mtdAov = mtd.txns > 0 ? mtd.net / mtd.txns : 0
+  const captureRateMtd = mtd.gross > 0 ? mtd.net / mtd.gross : null
 
   /* ── YTD vs Plan ── */
   const yearStart = new Date(today.getFullYear(), 0, 1)
   const ytdActual = useMemo(() =>
-    stripe.reduce((s, r) => {
-      const t = new Date(String(r.created ?? '')).getTime()
+    netRows.reduce((s, r) => {
+      const t = new Date(String(r.date ?? '')).getTime()
       if (isNaN(t) || t < yearStart.getTime() || t > today.getTime()) return s
-      return s + num(r.amount_paid) / 100
+      return s + rowTotal(r)
     }, 0)
-  , [stripe, yearStart, today])
+  , [netRows, yearStart, today, rowTotal])
 
   const ytdPlan = useMemo(() => {
     const yPrefix = String(today.getFullYear())
@@ -288,52 +379,78 @@ export default function FinancialPage() {
       }, 0)
   }, [plan_targets, today])
 
-  /* ── §05 Cumulative MTD overlay: prior months + current month ── */
-  const cumulativeOverlay = useMemo(() => {
-    const keys = Array.from(byMonth.keys()).sort().slice(-6)
-    const series: Array<{ key: string; m: string; isCurrent: boolean; data: { day: number; value: number }[] }> = []
-    for (const k of keys) {
+  /* ── §05 month selector: which months to overlay ── */
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>()
+    for (const r of netRows) {
+      const k = monthKey(r.date)
+      if (k) set.add(k)
+    }
+    for (const r of grossRows) {
+      const k = monthKey(r.date)
+      if (k) set.add(k)
+    }
+    return Array.from(set).sort()
+  }, [netRows, grossRows])
+  const [selectedMonths, setSelectedMonths] = useState<Set<string> | null>(null)
+  useEffect(() => {
+    if (selectedMonths === null && availableMonths.length > 0) {
+      setSelectedMonths(new Set(availableMonths))
+    }
+  }, [availableMonths, selectedMonths])
+  const visibleMonths = selectedMonths ?? new Set(availableMonths)
+  const allSelected = availableMonths.length > 0 && availableMonths.every(k => visibleMonths.has(k))
+  const toggleMonth = (key: string) =>
+    setSelectedMonths(prev => {
+      const next = new Set(prev ?? availableMonths)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  const monthKeyLabel = (key: string) => {
+    const [y, m] = key.split('-')
+    return `${MONTH_LABELS[parseInt(m, 10) - 1]} ${y}`
+  }
+
+  /* ── §05 Cumulative MTD overlay — build one per rowset (net + gross) ── */
+  const buildOverlay = useCallback((rows: Row[]) => {
+    const grouped = new Map<string, Row[]>()
+    for (const r of rows) {
+      const k = monthKey(r.date)
+      if (!k) continue
+      const arr = grouped.get(k) ?? []
+      arr.push(r)
+      grouped.set(k, arr)
+    }
+    const curKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+    const sel = selectedMonths ?? new Set(availableMonths)
+    const keys = Array.from(grouped.keys()).sort().filter(k => sel.has(k))
+    return keys.map(k => {
       const [y, mIdx] = k.split('-').map(Number)
-      const start = new Date(y, mIdx - 1, 1)
       const dimK = new Date(y, mIdx, 0).getDate()
-      const isCurrent = k === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
-      const dailyTotals = new Array(dimK).fill(0) as number[]
-      for (const r of stripe) {
-        const t = new Date(String(r.created ?? '')).getTime()
-        if (isNaN(t) || t < start.getTime() || t > new Date(y, mIdx - 1, dimK, 23, 59, 59).getTime()) continue
-        const day = new Date(t).getDate()
-        dailyTotals[day - 1] += num(r.amount_paid) / 100
+      const isCurrent = k === curKey
+      const daily = new Array(dimK).fill(0) as number[]
+      for (const r of grouped.get(k)!) {
+        const d = new Date(String(r.date)).getDate()
+        if (d >= 1 && d <= dimK) daily[d - 1] += rowTotal(r)
       }
-      const cap = isCurrent ? dayOfMonth : dimK
+      const cap = isCurrent ? dataDayOfMonth : dimK
       let running = 0
       const data: { day: number; value: number }[] = []
-      for (let d = 1; d <= cap; d++) {
-        running += dailyTotals[d - 1]
-        data.push({ day: d, value: running })
-      }
-      series.push({ key: k, m: MONTH_LABELS[mIdx - 1], isCurrent, data })
-    }
-    return series
-  }, [byMonth, stripe, today, dayOfMonth])
+      for (let d = 1; d <= cap; d++) { running += daily[d - 1]; data.push({ day: d, value: running }) }
+      return { key: k, m: MONTH_LABELS[mIdx - 1], isCurrent, data }
+    })
+  }, [today, dataDayOfMonth, rowTotal, selectedMonths, availableMonths])
 
-  const cumOverlayCombined = useMemo(() => {
-    const maxDay = cumulativeOverlay.reduce((m, s) => Math.max(m, s.data.length), 0)
-    const out: Record<string, number | null>[] = []
-    for (let d = 1; d <= maxDay; d++) {
-      const row: Record<string, number | null> = { day: d }
-      for (const s of cumulativeOverlay) {
-        const point = s.data.find(p => p.day === d)
-        row[s.key] = point ? point.value : null
-      }
-      out.push(row)
-    }
-    return out
-  }, [cumulativeOverlay])
+  const netOverlay = useMemo(() => buildOverlay(netRows), [buildOverlay, netRows])
+  const grossOverlay = useMemo(() => buildOverlay(grossRows), [buildOverlay, grossRows])
+  const netOverlayCombined = useMemo(() => combineOverlay(netOverlay), [netOverlay])
+  const grossOverlayCombined = useMemo(() => combineOverlay(grossOverlay), [grossOverlay])
 
-  /* ── §08 Actual vs Forecast ── */
-  const actualVsForecast = useMemo(() => {
-    return monthlyRows.map(r => ({ m: r.m, actual: r.actual, forecast: null as number | null }))
-  }, [monthlyRows])
+  /* ── §08 Actual vs Forecast (actual = net collected) ── */
+  const actualVsForecast = useMemo(() =>
+    monthlyRows.map(r => ({ m: r.m, actual: r.net, forecast: null as number | null }))
+  , [monthlyRows])
 
   const sparkAov = monthlyRows.map(r => ({ date: r.m, value: r.aov }))
 
@@ -343,9 +460,16 @@ export default function FinancialPage() {
     : projectedMonthEnd >= planThisMonth * 0.85 ? 'amber'
     : 'red'
 
+  const captureStatus: Status = captureRateMtd === null
+    ? 'grey'
+    : captureRateMtd >= 0.65 ? 'green'
+    : captureRateMtd >= 0.5 ? 'amber'
+    : 'red'
+
   const monthlyChartData = monthlyRows.map(r => ({
     m: r.m,
-    actual: r.actual,
+    net: r.net,
+    gross: r.gross,
     plan: r.plan ?? null,
   }))
 
@@ -389,10 +513,23 @@ export default function FinancialPage() {
           </div>
           <StatusDot status={projectionStatus} />
         </div>
-        <LockedCard
-          title="Revenue Capture Rate"
-          reason="Requires list-price book to compute gross-at-list. Pending pricing data."
-        />
+        <div className="flex items-center gap-4 rounded-lg border border-dash-border bg-dash-surface p-4 shadow-sm md:p-5">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-dash-red/10 text-dash-red">
+            <Star size={18} />
+          </div>
+          <div className="flex-1">
+            <div className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+              Revenue Capture Rate (MTD)
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="font-mono text-2xl font-bold text-dash-text md:text-3xl">
+                {captureRateMtd === null ? '—' : `${Math.round(captureRateMtd * 100)}%`}
+              </span>
+              <span className="font-sans text-xs text-dash-text-muted">net ÷ gross (RRP)</span>
+            </div>
+          </div>
+          <StatusDot status={captureStatus} />
+        </div>
       </section>
 
       {/* ────────────── 01 PLAN VS ACTUAL ────────────── */}
@@ -440,7 +577,7 @@ export default function FinancialPage() {
           />
           <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
             <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Monthly Plan vs Actual
+              Monthly Net Revenue vs Plan
             </div>
             <div className="h-[220px]">
               <ResponsiveContainer>
@@ -449,7 +586,7 @@ export default function FinancialPage() {
                   <XAxis dataKey="m" tick={{ fontSize: 10, fill: '#737373' }} />
                   <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
                   <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                  <Bar dataKey="actual" fill="#E61317" name="Actual" />
+                  <Bar dataKey="net" fill="#E61317" name="Net revenue" />
                   <Line type="monotone" dataKey="plan" stroke="#1A1A1A" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 3, fill: '#1A1A1A' }} name="Plan" />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -462,17 +599,23 @@ export default function FinancialPage() {
       <NarrativeSection number={2} question="Revenue Headlines" subtitle="What's flowing right now">
         <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
           <MetricTile
-            label="Actual Revenue (MTD)"
-            value={fmtCurrency(mtd.actual, { compact: true })}
+            label="Net Revenue (MTD)"
+            value={fmtCurrency(mtd.net, { compact: true })}
             target={`${MONTH_LABELS[today.getMonth()]}, day ${dayOfMonth} of ${dim}`}
-            status={mtd.actual > 0 ? 'green' : 'grey'}
+            status={mtd.net > 0 ? 'green' : 'grey'}
             delta={null}
           />
-          <LockedTile label="Gross at List (MTD)" reason="Pending list-price book — unlocks capture rate." />
+          <MetricTile
+            label="Gross at List (MTD)"
+            value={fmtCurrency(mtd.gross, { compact: true })}
+            target={captureRateMtd === null ? 'RRP' : `Capture: ${Math.round(captureRateMtd * 100)}%`}
+            status={mtd.gross > 0 ? 'green' : 'grey'}
+            delta={null}
+          />
           <MetricTile
             label="Avg Order Value"
             value={mtdAov > 0 ? fmtCurrency(mtdAov) : '—'}
-            target="Target: $150+"
+            target="Net ÷ Stripe txns · target $150+"
             status={mtdAov >= 150 ? 'green' : mtdAov > 0 ? 'amber' : 'grey'}
             delta={null}
             chart={<TileChart data={sparkAov} variant="line" formatValue={(n) => fmtCurrency(n)} />}
@@ -482,11 +625,11 @@ export default function FinancialPage() {
       </NarrativeSection>
 
       {/* ────────────── 03 REVENUE BY MONTH ────────────── */}
-      <NarrativeSection number={3} question="Revenue by Month" subtitle="Gross · Actual · Net">
+      <NarrativeSection number={3} question="Revenue by Month" subtitle="Gross (RRP) · Net">
         <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
             <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Actual Revenue (Charged)
+              Gross (RRP) vs Net Collected
             </div>
             <div className="h-[240px]">
               <ResponsiveContainer>
@@ -495,26 +638,70 @@ export default function FinancialPage() {
                   <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
                   <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
                   <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                  <Bar dataKey="actual" fill="#1A1A1A" />
+                  <Bar dataKey="gross" fill="#D9D6D0" name="Gross (RRP)" />
+                  <Bar dataKey="net" fill="#7A1F22" name="Net collected" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
-              Gross (list) and Net (after refunds) bars locked — pending list-price book and Stripe refunds data.
+            <div className="mt-3 flex gap-4 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2" style={{ background: '#D9D6D0' }} />Gross (RRP)</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2" style={{ background: '#7A1F22' }} />Net collected</span>
+            </div>
+            <p className="mt-2 font-sans text-[11px] italic text-dash-text-muted">
+              The gap between the bars is discount leakage. Net = after discounts.
             </p>
           </div>
-          <LockedCard
-            title="By Product — Core · Pods · Add-ons"
-            reason="Stripe product field populated, but Core/Pods/Add-ons taxonomy needs a lookup table."
-          />
+          <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+              Net Revenue by Product
+            </div>
+            <div className="h-[240px]">
+              <ResponsiveContainer>
+                <BarChart data={monthlyRows} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="#EFEDE8" vertical={false} />
+                  <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
+                  <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                  <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
+                  {PRODUCT_KEYS.map(k => (
+                    <Bar key={k} dataKey={k} stackId="prod" fill={PRODUCT_COLORS[k]} name={PRODUCT_LABELS[k]} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
+              {PRODUCT_KEYS.map(k => (
+                <span key={k} className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2" style={{ background: PRODUCT_COLORS[k] }} />{PRODUCT_LABELS[k]}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
       </NarrativeSection>
 
       {/* ────────────── 04 DISCOUNT DISCIPLINE ────────────── */}
       <NarrativeSection number={4} question="Discount Discipline" subtitle="Where are we leaking?">
         <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
-          <LockedCard title="Revenue Capture Rate Trend" reason="Needs list-price book to compute actual ÷ gross." />
-          <LockedCard title="Discount Band Distribution" reason="Needs per-charge discount derived from list_price − amount_paid." />
+          <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+              Revenue Capture Rate (Net ÷ Gross)
+            </div>
+            <div className="h-[200px]">
+              <ResponsiveContainer>
+                <ComposedChart data={monthlyRows} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="#EFEDE8" vertical={false} />
+                  <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
+                  <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `${Math.round(v * 100)}%`} domain={[0, 1]} />
+                  <Tooltip formatter={(v: unknown) => `${Math.round((Number(v) || 0) * 100)}%`} />
+                  <Line type="monotone" dataKey="captureRate" stroke="#E61317" strokeWidth={2.5} dot={{ r: 4, fill: '#E61317' }} connectNulls />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
+              Higher = better discount discipline. 100% means full RRP collected.
+            </p>
+          </div>
+          <LockedCard title="Discount Band Distribution" reason="Needs per-charge discount (list_price − amount_paid). financial_revenue is daily aggregate, not per-transaction." />
         </div>
       </NarrativeSection>
 
@@ -523,57 +710,81 @@ export default function FinancialPage() {
         number={5}
         question="Cumulative Month-to-Date"
         subtitle="Each month overlaid · current in bold"
+        right={
+          <DropdownMenu>
+            <DropdownMenuTrigger className="flex items-center gap-2 rounded-md border border-dash-border bg-dash-surface px-3 py-1.5 font-ui text-[11px] uppercase tracking-wider text-dash-text-secondary hover:bg-dash-surface-hover">
+              {availableMonths.length === 0
+                ? 'No months'
+                : `${visibleMonths.size} of ${availableMonths.length} months`}
+              <ChevronDown size={13} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-[300px] overflow-y-auto">
+              <DropdownMenuItem
+                onSelect={e => { e.preventDefault(); setSelectedMonths(allSelected ? new Set() : new Set(availableMonths)) }}
+                className="font-ui text-[11px] uppercase tracking-wider text-dash-text-secondary"
+              >
+                {allSelected ? 'Deselect all' : 'Select all'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {availableMonths.map(k => (
+                <DropdownMenuCheckboxItem
+                  key={k}
+                  checked={visibleMonths.has(k)}
+                  onSelect={e => e.preventDefault()}
+                  onCheckedChange={() => toggleMonth(k)}
+                >
+                  {monthKeyLabel(k)}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        }
       >
         <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
-            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Actual (billed)
-            </div>
-            <div className="h-[260px]">
-              <ResponsiveContainer>
-                <LineChart data={cumOverlayCombined} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#EFEDE8" vertical={false} />
-                  <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#737373' }} />
-                  <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                  <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                  {cumulativeOverlay.map((s, i) => {
-                    const isCurrent = s.isCurrent
-                    const greys = ['#D8D5CE', '#B8B5AE', '#9A9690', '#737373', '#4A4A4A']
-                    const shade = isCurrent ? '#E61317' : greys[Math.max(0, greys.length - (cumulativeOverlay.length - i))] ?? '#A3A3A3'
-                    return (
-                      <Line
-                        key={s.key}
-                        type="monotone"
-                        dataKey={s.key}
-                        stroke={shade}
-                        strokeWidth={isCurrent ? 3 : 1.5}
-                        dot={false}
-                        connectNulls={false}
-                        name={`${s.m}${isCurrent ? ' (MTD)' : ''}`}
-                      />
-                    )
-                  })}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-3 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
-              {cumulativeOverlay.map((s, i) => {
-                const isCurrent = s.isCurrent
-                const greys = ['#D8D5CE', '#B8B5AE', '#9A9690', '#737373', '#4A4A4A']
-                const shade = isCurrent ? '#E61317' : greys[Math.max(0, greys.length - (cumulativeOverlay.length - i))] ?? '#A3A3A3'
-                return (
-                  <span key={s.key} className={cn('flex items-center gap-1.5', isCurrent && 'font-bold text-dash-text')}>
-                    <span className="inline-block h-0.5 w-4" style={{ background: shade }} />
-                    {s.m}{isCurrent ? ' (MTD)' : ''}
-                  </span>
-                )
-              })}
-            </div>
-          </div>
-          <LockedCard
-            title="Gross (list price) cumulative"
-            reason="Locked — needs list-price book."
-          />
+          {([
+            { title: 'Net Collected', overlay: netOverlay, combined: netOverlayCombined },
+            { title: 'Gross (RRP / list price)', overlay: grossOverlay, combined: grossOverlayCombined },
+          ] as const).map(({ title, overlay, combined }) => {
+            const shadeFor = (s: OverlaySeries, i: number) =>
+              s.isCurrent ? '#E61317' : OVERLAY_GREYS[Math.max(0, OVERLAY_GREYS.length - (overlay.length - i))] ?? '#A3A3A3'
+            return (
+              <div key={title} className="rounded-lg border border-dash-border bg-dash-surface p-4">
+                <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  {title}
+                </div>
+                <div className="h-[260px]">
+                  <ResponsiveContainer>
+                    <LineChart data={combined} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke="#EFEDE8" vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#737373' }} />
+                      <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                      <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
+                      {overlay.map((s, i) => (
+                        <Line
+                          key={s.key}
+                          type="monotone"
+                          dataKey={s.key}
+                          stroke={shadeFor(s, i)}
+                          strokeWidth={s.isCurrent ? 3 : 1.5}
+                          dot={false}
+                          connectNulls={false}
+                          name={`${s.m}${s.isCurrent ? ' (MTD)' : ''}`}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-3 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
+                  {overlay.map((s, i) => (
+                    <span key={s.key} className={cn('flex items-center gap-1.5', s.isCurrent && 'font-bold text-dash-text')}>
+                      <span className="inline-block h-0.5 w-4" style={{ background: shadeFor(s, i) }} />
+                      {s.m}{s.isCurrent ? ' (MTD)' : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </div>
       </NarrativeSection>
 
@@ -601,7 +812,7 @@ export default function FinancialPage() {
                   <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
                   <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
                   <Bar dataKey="joining" fill="#1A1A1A" name="Joining (one-time)" />
-                  <Bar dataKey="recurring" fill="#E61317" name="Recurring" />
+                  <Bar dataKey="membership" fill="#E61317" name="Recurring (Membership)" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -632,24 +843,24 @@ export default function FinancialPage() {
         <div className="mt-4 grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
           <MetricTile
             label="Recurring Revenue (MTD)"
-            value={fmtCurrency(mtd.recurring, { compact: true })}
-            target={`${MONTH_LABELS[today.getMonth()]} to date`}
-            status={mtd.recurring > 0 ? 'green' : 'grey'}
+            value={fmtCurrency(mtd.membership, { compact: true })}
+            target={`${MONTH_LABELS[today.getMonth()]} to date · Membership`}
+            status={mtd.membership > 0 ? 'green' : 'grey'}
             delta={null}
-            chart={<TileChart data={monthlyRows.map(r => ({ date: r.m, value: r.recurring }))} variant="line" formatValue={(n) => fmtCurrency(n, { compact: true })} />}
+            chart={<TileChart data={monthlyRows.map(r => ({ date: r.m, value: r.membership }))} variant="line" formatValue={(n) => fmtCurrency(n, { compact: true })} />}
           />
           <MetricTile
             label="Implied ARR (Proxy)"
-            value={fmtCurrency(mtd.recurring * 12, { compact: true })}
-            target="MTD recurring × 12 · see caveat"
+            value={fmtCurrency(mtd.membership * 12, { compact: true })}
+            target="MTD membership × 12 · see caveat"
             status="amber"
             delta={null}
           />
           <MetricTile
             label="Recurring Share (MTD)"
-            value={mtd.actual > 0 ? `${Math.round((mtd.recurring / mtd.actual) * 100)}%` : '—'}
+            value={mtd.net > 0 ? `${Math.round((mtd.membership / mtd.net) * 100)}%` : '—'}
             target="Trending toward 50%+"
-            status={mtd.actual > 0 ? (mtd.recurring / mtd.actual >= 0.5 ? 'green' : 'amber') : 'grey'}
+            status={mtd.net > 0 ? (mtd.membership / mtd.net >= 0.5 ? 'green' : 'amber') : 'grey'}
             delta={null}
             chart={<TileChart data={monthlyRows.map(r => ({ date: r.m, value: r.recurringPct * 100 }))} variant="line" formatValue={(n) => `${Math.round(n)}%`} />}
           />
@@ -657,11 +868,35 @@ export default function FinancialPage() {
       </NarrativeSection>
 
       {/* ────────────── 07 NON-CORE REVENUE ────────────── */}
-      <NarrativeSection number={7} question="Non-Core Revenue" subtitle="Add-ons · supplements · one-offs">
-        <LockedCard
-          title="Add-on Revenue Deep Dive"
-          reason="Needs product taxonomy (Core/Pods/Add-ons) mapped from Stripe product field."
-        />
+      <NarrativeSection number={7} question="Non-Core Revenue" subtitle="Stacks · supplements · peptides · advanced tests">
+        <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+          <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+            Net Revenue from Non-Core Products
+          </div>
+          <div className="h-[260px]">
+            <ResponsiveContainer>
+              <BarChart data={monthlyRows} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke="#EFEDE8" vertical={false} />
+                <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
+                <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
+                {(['tmrw_stacks', 'supplements', 'peptides', 'advanced_tests'] as const).map(k => (
+                  <Bar key={k} dataKey={k} stackId="nc" fill={PRODUCT_COLORS[k]} name={PRODUCT_LABELS[k]} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
+            {(['tmrw_stacks', 'supplements', 'peptides', 'advanced_tests'] as const).map(k => (
+              <span key={k} className="flex items-center gap-1.5">
+                <span className="inline-block h-2 w-2" style={{ background: PRODUCT_COLORS[k] }} />{PRODUCT_LABELS[k]}
+              </span>
+            ))}
+          </div>
+          <p className="mt-2 font-sans text-[11px] italic text-dash-text-muted">
+            Excludes Membership + Joining Fees. Net (post-discount) figures.
+          </p>
+        </div>
       </NarrativeSection>
 
       {/* ────────────── 08 ACTUAL VS FORECAST ────────────── */}
@@ -743,7 +978,7 @@ export default function FinancialPage() {
             <table className="w-full font-mono text-[12px]">
               <thead>
                 <tr className="bg-dash-header text-white">
-                  {['Month', 'Gross (List)', 'Actual', 'Discount %', 'Refunds', 'Net', '# Txn', 'Fail %', 'AOV', 'MoM %'].map((h, i) => (
+                  {['Month', 'Gross (RRP)', 'Net', 'Capture %', 'Refunds', '# Txn', 'Fail %', 'AOV', 'MoM %'].map((h, i) => (
                     <th key={h} className={cn('px-3 py-3 font-ui text-[10px] uppercase tracking-wider font-medium', i === 0 ? 'text-left' : 'text-center')}>
                       {h}
                     </th>
@@ -753,15 +988,14 @@ export default function FinancialPage() {
               <tbody>
                 {monthlyRows.map((row, i) => {
                   const prev = i > 0 ? monthlyRows[i - 1] : null
-                  const mom = prev && prev.actual > 0 ? ((row.actual - prev.actual) / prev.actual) * 100 : null
+                  const mom = prev && prev.net > 0 ? ((row.net - prev.net) / prev.net) * 100 : null
                   return (
                     <tr key={row.key} className="border-b border-dash-border-subtle last:border-b-0">
                       <td className="px-3 py-3 text-left text-dash-text">{row.m} {row.year}</td>
+                      <td className="px-3 py-3 text-center text-dash-text-secondary">{row.gross > 0 ? fmtCurrency(row.gross) : '—'}</td>
+                      <td className="px-3 py-3 text-center text-dash-text">{fmtCurrency(row.net)}</td>
+                      <td className="px-3 py-3 text-center text-dash-text-secondary">{row.captureRate === null ? '—' : `${Math.round(row.captureRate * 100)}%`}</td>
                       <td className="px-3 py-3 text-center text-dash-text-muted">—</td>
-                      <td className="px-3 py-3 text-center text-dash-text">{fmtCurrency(row.actual)}</td>
-                      <td className="px-3 py-3 text-center text-dash-text-muted">—</td>
-                      <td className="px-3 py-3 text-center text-dash-text-muted">—</td>
-                      <td className="px-3 py-3 text-center text-dash-text">{fmtCurrency(row.actual)}</td>
                       <td className="px-3 py-3 text-center text-dash-text-secondary">{row.txns}</td>
                       <td className="px-3 py-3 text-center text-dash-text-muted">—</td>
                       <td className="px-3 py-3 text-center text-dash-text">{row.aov > 0 ? fmtCurrency(row.aov) : '—'}</td>
@@ -774,7 +1008,7 @@ export default function FinancialPage() {
               </tbody>
             </table>
             <p className="px-4 py-3 font-sans text-[11px] italic text-dash-text-muted">
-              Gross, Discount %, Refunds, Fail % columns locked — pending list-price book and Stripe Charges export.
+              Refunds and Fail % columns locked — pending Stripe Charges export. # Txn / AOV from Stripe invoices.
             </p>
           </div>
         )}

@@ -13,6 +13,7 @@ type SourceKey =
   | 'pelagonia'
   | 'tableau'
   | 'zendesk'
+  | 'financial_revenue'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
   meta_ads: 'meta_ads',
@@ -25,6 +26,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   pelagonia: 'pelagonia_data',
   tableau: 'tableau_data',
   zendesk: 'zendesk_data',
+  financial_revenue: 'financial_revenue',
 }
 
 const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
@@ -38,6 +40,7 @@ const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
   pelagonia: 'pelagonia_created_at',
   tableau: 'event_date',
   zendesk: 'zendesk_created_at',
+  financial_revenue: 'date',
 }
 
 export async function GET() {
@@ -60,6 +63,7 @@ export async function GET() {
     'pelagonia',
     'tableau',
     'zendesk',
+    'financial_revenue',
   ]
 
   const results = await Promise.all(
@@ -72,16 +76,19 @@ export async function GET() {
   )
 
   const refreshLogs = await Promise.all(
-    sources.map(s =>
-      supabase
+    sources.map(s => {
+      const q = supabase
         .from('upload_log')
         .select('uploaded_at')
-        .eq('source', s)
         .eq('status', 'complete')
         .order('uploaded_at', { ascending: false })
         .limit(1)
-        .maybeSingle()
-    )
+      // financial_revenue is written by two upload sources (net + gross).
+      return (s === 'financial_revenue'
+        ? q.in('source', ['financial_revenue_net', 'financial_revenue_gross'])
+        : q.eq('source', s)
+      ).maybeSingle()
+    })
   )
 
   // plan_targets is a small admin-managed table — fetch all rows.

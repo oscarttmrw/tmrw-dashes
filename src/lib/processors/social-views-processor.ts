@@ -1,4 +1,4 @@
-import { num, type ProcessorResult } from './_canonical-helpers'
+import { num, txt, type ProcessorResult } from './_canonical-helpers'
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
 
@@ -9,9 +9,9 @@ function parseDateOnly(v: unknown): string | null {
 }
 
 /**
- * Social Views processor. Daily aggregate engagement counts.
- * One row per day in → one row per day out (page_views, video_views,
- * post_engagements). Any missing metric is stored as null.
+ * Social Views processor. Daily per-platform engagement counts.
+ * One row per (platform, day) in → one row out. The Platform column was added
+ * so the dashboard can split views across Facebook / Instagram / LinkedIn.
  */
 export function processSocialViews(data: Record<string, unknown>[]): ProcessorResult {
   const validRows: Record<string, unknown>[] = []
@@ -21,12 +21,18 @@ export function processSocialViews(data: Record<string, unknown>[]): ProcessorRe
     const nk = Object.fromEntries(
       Object.entries(row).map(([k, v]) => [norm(k), v])
     )
+    const platform = txt(nk['platform'])
+    if (!platform) {
+      errors.push({ rowIndex: i, reason: `Row ${i}: missing Platform` })
+      return
+    }
     const date = parseDateOnly(nk['date'])
     if (!date) {
       errors.push({ rowIndex: i, reason: `Row ${i}: missing or invalid Date` })
       return
     }
     validRows.push({
+      platform,
       date,
       page_views: num(nk['pageviews']),
       video_views: num(nk['videoviews']),

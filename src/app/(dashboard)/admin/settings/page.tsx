@@ -17,6 +17,7 @@ interface PlanTargetRow {
   gross_revenue_target: number | null
   net_revenue_target: number | null
   mrr_target: number | null
+  ltv_assumed: number | null
   updated_at?: string | null
 }
 
@@ -26,6 +27,7 @@ interface FormState {
   gross: string
   net: string
   mrr: string
+  ltv: string
 }
 
 function currentMonthYM(): string {
@@ -40,6 +42,7 @@ function rowToForm(row: PlanTargetRow | null, month: string): FormState {
     gross: row?.gross_revenue_target?.toString() ?? '',
     net: row?.net_revenue_target?.toString() ?? '',
     mrr: row?.mrr_target?.toString() ?? '',
+    ltv: row?.ltv_assumed?.toString() ?? '',
   }
 }
 
@@ -100,6 +103,7 @@ function PlanTargetsSection() {
         gross_revenue_target: form.gross === '' ? null : Number(form.gross),
         net_revenue_target: form.net === '' ? null : Number(form.net),
         mrr_target: form.mrr === '' ? null : Number(form.mrr),
+        ltv_assumed: form.ltv === '' ? null : Number(form.ltv),
       }
       const res = await fetch('/api/plan-targets', {
         method: 'POST',
@@ -139,7 +143,7 @@ function PlanTargetsSection() {
       </h2>
       <div className="rounded-lg border border-dash-border bg-dash-surface p-5">
         <p className="mb-5 text-sm text-dash-text-secondary">
-          Monthly targets for Registrations, Gross Revenue, Net Revenue and MRR. Powers the vs-plan progress on the home dashboard.
+          Monthly targets for Registrations, Gross Revenue, Net Revenue, MRR and the assumed LTV. Powers the vs-plan progress on the home dashboard and the LTV/ROI tiles on the Marketing tab.
         </p>
 
         {/* Form */}
@@ -180,6 +184,13 @@ function PlanTargetsSection() {
             onChange={(v) => setForm(f => ({ ...f, mrr: v }))}
             placeholder="e.g. 50000"
             hint="Locked tile — enter ahead of time"
+          />
+          <NumberField
+            label="LTV — assumed ($ per member)"
+            value={form.ltv}
+            onChange={(v) => setForm(f => ({ ...f, ltv: v }))}
+            placeholder="e.g. 3500"
+            hint="Drives LTV-per-Registration and ROI on the Marketing tab. Carries forward until a later month overrides it."
           />
         </div>
 
@@ -225,6 +236,7 @@ function PlanTargetsSection() {
                       <th className="px-3 py-2 text-right font-medium text-dash-text-secondary">Gross</th>
                       <th className="px-3 py-2 text-right font-medium text-dash-text-secondary">Net</th>
                       <th className="px-3 py-2 text-right font-medium text-dash-text-secondary">MRR</th>
+                      <th className="px-3 py-2 text-right font-medium text-dash-text-secondary">LTV</th>
                       <th className="px-3 py-2 font-medium text-dash-text-secondary"></th>
                     </tr>
                   </thead>
@@ -236,6 +248,7 @@ function PlanTargetsSection() {
                         <td className="px-3 py-2 text-right font-mono text-dash-text">${formatNum(r.gross_revenue_target)}</td>
                         <td className="px-3 py-2 text-right font-mono text-dash-text">${formatNum(r.net_revenue_target)}</td>
                         <td className="px-3 py-2 text-right font-mono text-dash-text">${formatNum(r.mrr_target)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-dash-text">{r.ltv_assumed === null || r.ltv_assumed === undefined ? '—' : `$${formatNum(r.ltv_assumed)}`}</td>
                         <td className="px-3 py-2">
                           <button
                             type="button"
