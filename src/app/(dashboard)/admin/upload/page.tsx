@@ -19,16 +19,22 @@ type SourceKey =
   | 'pelagonia'
   | 'tableau'
   | 'zendesk'
+  | 'financial_revenue_net'
+  | 'financial_revenue_gross'
 
 // Sheet-name shortcuts — speed up auto-routing when a workbook uses a known
 // sheet name even if its headers are slightly off. Header-signature matching
-// is the fallback below.
+// is the fallback below. The two revenue sheets share identical headers, so
+// they MUST route by name (signature matching can't tell them apart).
 const SHEET_NAME_TO_SOURCE: Record<string, SourceKey> = {
   'meta ads': 'meta_ads',
   'social media followers': 'social_followers',
   'social followers': 'social_followers',
   'social media views': 'social_views',
   'social views': 'social_views',
+  'net revenue': 'financial_revenue_net',
+  'gross revenue (rrp)': 'financial_revenue_gross',
+  'gross revenue': 'financial_revenue_gross',
 }
 
 const VALID_SOURCES: SourceKey[] = [
@@ -42,6 +48,8 @@ const VALID_SOURCES: SourceKey[] = [
   'pelagonia',
   'tableau',
   'zendesk',
+  'financial_revenue_net',
+  'financial_revenue_gross',
 ]
 
 // Column the schema's date filter keys off. Used to auto-fill the from/to
@@ -55,6 +63,8 @@ const DATE_COL: Partial<Record<SourceKey, string>> = {
   operational_data: 'date',
   pelagonia: 'created at',
   zendesk: 'created at',
+  financial_revenue_net: 'date',
+  financial_revenue_gross: 'date',
 }
 
 // lastRefresh returns one key per source. Same snake_case keys context-side.
@@ -69,6 +79,9 @@ const REFRESH_KEY: Record<SourceKey, string> = {
   pelagonia: 'pelagonia',
   tableau: 'tableau',
   zendesk: 'zendesk',
+  // Both revenue sheets surface under the single financial_revenue read key.
+  financial_revenue_net: 'financial_revenue',
+  financial_revenue_gross: 'financial_revenue',
 }
 
 interface DetectedSheet {

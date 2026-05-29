@@ -55,6 +55,7 @@ export interface DashboardData {
   ghl_opportunities: CanonicalRow[]
   operational_data: CanonicalRow[]
   plan_targets: CanonicalRow[]
+  financial_revenue: CanonicalRow[]
 
   lastRefresh: Record<string, string | null>
   // Legacy alias for code that still references `lastRefreshed`.
@@ -87,6 +88,7 @@ const emptyLastRefresh: Record<string, string | null> = {
   hubspot_contacts: null,
   ghl_opportunities: null,
   operational_data: null,
+  financial_revenue: null,
 }
 
 const defaultData: DashboardData = {
@@ -113,6 +115,7 @@ const defaultData: DashboardData = {
   ghl_opportunities: [],
   operational_data: [],
   plan_targets: [],
+  financial_revenue: [],
   lastRefresh: { ...emptyLastRefresh },
   lastRefreshed: { ...emptyLastRefresh },
 }
@@ -195,6 +198,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         ghl_opportunities: asRows(body.ghl_opportunities),
         operational_data: asRows(body.operational_data),
         plan_targets: asRows(body.plan_targets),
+        financial_revenue: asRows(body.financial_revenue),
         lastRefresh,
         lastRefreshed: lastRefresh,
       }))

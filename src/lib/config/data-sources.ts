@@ -3,7 +3,7 @@
  * Used to validate uploaded files before processing.
  */
 
-import type { CsvSchema, DataSourceConfig } from '@/lib/types/data-sources';
+import type { CsvSchema, DataSourceConfig, RequiredColumn } from '@/lib/types/data-sources';
 import { getMetricsPoweredBy } from '@/lib/utils/metric-source';
 
 export const hubspotContactsSchema: CsvSchema = {
@@ -417,6 +417,49 @@ export const pelagoniaSchema: CsvSchema = {
   ],
 };
 
+// The two revenue sheets share identical headers, so they can't be told apart
+// by column signature — the upload UI routes them by sheet name instead. Each
+// is its own source but both write to the financial_revenue table.
+const financialRevenueColumns: RequiredColumn[] = [
+  'Date',
+  'Membership',
+  'TOTAL',
+];
+const financialRevenueOptional = [
+  'Joining Fees',
+  'TMRW Stacks',
+  'Supplements',
+  'Peptides',
+  'Advanced Tests',
+];
+const financialRevenueCanonical = [
+  'date',
+  'revenue_type',
+  'membership',
+  'joining_fees',
+  'tmrw_stacks',
+  'supplements',
+  'peptides',
+  'advanced_tests',
+  'total',
+];
+
+export const financialRevenueNetSchema: CsvSchema = {
+  source: 'financial_revenue_net',
+  requiredColumns: financialRevenueColumns,
+  optionalColumns: financialRevenueOptional,
+  strippedColumns: [],
+  canonicalColumns: financialRevenueCanonical,
+};
+
+export const financialRevenueGrossSchema: CsvSchema = {
+  source: 'financial_revenue_gross',
+  requiredColumns: financialRevenueColumns,
+  optionalColumns: financialRevenueOptional,
+  strippedColumns: [],
+  canonicalColumns: financialRevenueCanonical,
+};
+
 /**
  * All schemas indexed by source name for easy lookup.
  */
@@ -431,6 +474,8 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   social_followers: socialFollowersSchema,
   social_views: socialViewsSchema,
   pelagonia: pelagoniaSchema,
+  financial_revenue_net: financialRevenueNetSchema,
+  financial_revenue_gross: financialRevenueGrossSchema,
 };
 
 /**
@@ -575,5 +620,25 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
       'Drop the file into the upload zone below.',
     ],
     poweredMetrics: getMetricsPoweredBy('pelagonia'),
+  },
+  financial_revenue_net: {
+    name: 'Financial Revenue — Net',
+    exportSteps: [
+      'Open the Stripe revenue workbook.',
+      'Confirm the "Net Revenue" sheet has columns: Date, Membership, Joining Fees, TMRW Stacks, Supplements, Peptides, Advanced Tests, TOTAL.',
+      'Dates should read like 30-Dec-2025. Monthly subtotal, blank, and grand-total rows are ignored automatically.',
+      'Drop the whole .xlsx into the upload zone — the Net and Gross sheets route by name.',
+    ],
+    poweredMetrics: [],
+  },
+  financial_revenue_gross: {
+    name: 'Financial Revenue — Gross (RRP)',
+    exportSteps: [
+      'Open the Stripe revenue workbook.',
+      'Confirm the "Gross Revenue (RRP)" sheet has columns: Date, Membership, Joining Fees, TMRW Stacks, Supplements, Peptides, Advanced Tests, TOTAL.',
+      'Dates should read like 30-Dec-2025. Monthly subtotal, blank, and grand-total rows are ignored automatically.',
+      'Drop the whole .xlsx into the upload zone — the Net and Gross sheets route by name.',
+    ],
+    poweredMetrics: [],
   },
 };

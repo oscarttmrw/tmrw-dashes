@@ -181,6 +181,7 @@ export default function DashboardPage() {
     operational_data,
     plan_targets,
     social_followers,
+    financial_revenue,
     lastRefresh,
     loading,
     error,
@@ -237,21 +238,40 @@ export default function DashboardPage() {
   const registrationsTarget = currentPlanTarget ? num(currentPlanTarget.registrations_target) : null
   const registrationsDelta = deltaPct(registrationsCurrent, registrationsPrev)
 
-  // 1.2 Gross Revenue — sum stripe.amount_paid (cents) / 100, scoped to `created` in period.
+  // 1.2 Revenue — from financial_revenue (the authoritative net/gross source).
+  // net = collected (post-discount), gross = RRP/list. Sum the product columns
+  // so the figure is robust even if the stored `total` is 0.
+  const FIN_PRODUCTS = ['membership', 'joining_fees', 'tmrw_stacks', 'supplements', 'peptides', 'advanced_tests'] as const
+  const finRowTotal = (r: typeof financial_revenue[number]) =>
+    FIN_PRODUCTS.reduce((s, k) => s + num(r[k]), 0)
+  const sumFinRevenue = (type: 'net' | 'gross', start: Date, end: Date) =>
+    financial_revenue
+      .filter(r => String(r.revenue_type) === type && inPeriod(r.date, start, end))
+      .reduce((s, r) => s + finRowTotal(r), 0)
+
+  // Net revenue (collected) — this is what we compare to the plan target.
+  const netRevenueCurrent = useMemo(
+    () => sumFinRevenue('net', periodStart, periodEnd),
+    [financial_revenue, periodStart, periodEnd]
+  )
+  const netRevenuePrev = useMemo(
+    () => sumFinRevenue('net', prevPeriodStart, prevPeriodEnd),
+    [financial_revenue, prevPeriodStart, prevPeriodEnd]
+  )
+  const netRevenueTarget = currentPlanTarget ? num(currentPlanTarget.gross_revenue_target) : null
+  const netRevenueDelta = deltaPct(netRevenueCurrent, netRevenuePrev)
+
+  // Gross revenue (RRP/list) — no plan comparison; shows capture rate instead.
   const grossRevenueCurrent = useMemo(
-    () => stripe
-      .filter(r => inPeriod(r.created, periodStart, periodEnd))
-      .reduce((s, r) => s + num(r.amount_paid), 0) / 100,
-    [stripe, periodStart, periodEnd]
+    () => sumFinRevenue('gross', periodStart, periodEnd),
+    [financial_revenue, periodStart, periodEnd]
   )
   const grossRevenuePrev = useMemo(
-    () => stripe
-      .filter(r => inPeriod(r.created, prevPeriodStart, prevPeriodEnd))
-      .reduce((s, r) => s + num(r.amount_paid), 0) / 100,
-    [stripe, prevPeriodStart, prevPeriodEnd]
+    () => sumFinRevenue('gross', prevPeriodStart, prevPeriodEnd),
+    [financial_revenue, prevPeriodStart, prevPeriodEnd]
   )
-  const grossRevenueTarget = currentPlanTarget ? num(currentPlanTarget.gross_revenue_target) : null
   const grossRevenueDelta = deltaPct(grossRevenueCurrent, grossRevenuePrev)
+  const captureRate = grossRevenueCurrent > 0 ? netRevenueCurrent / grossRevenueCurrent : null
 
   /* ── Section 2 — Scale ── */
   const totalCustomers = customerRows.length
@@ -426,10 +446,19 @@ export default function DashboardPage() {
       (rows) => rows.reduce((s, r) => s + num(r.customers_registered), 0)),
     [operational_data, periodStart, periodEnd]
   )
+  const netRevenueSeries = useMemo(
+    () => bucketByDay(
+      financial_revenue.filter(r => String(r.revenue_type) === 'net'),
+      'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + finRowTotal(r), 0)),
+    [financial_revenue, periodStart, periodEnd]
+  )
   const grossRevenueSeries = useMemo(
-    () => bucketByDay(stripe, 'created', periodStart, periodEnd,
-      (rows) => rows.reduce((s, r) => s + num(r.amount_paid), 0) / 100),
-    [stripe, periodStart, periodEnd]
+    () => bucketByDay(
+      financial_revenue.filter(r => String(r.revenue_type) === 'gross'),
+      'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + finRowTotal(r), 0)),
+    [financial_revenue, periodStart, periodEnd]
   )
   const churnSeries = useMemo(
     () => bucketByDay(operational_data, 'date', periodStart, periodEnd,
@@ -493,12 +522,18 @@ export default function DashboardPage() {
     ),
     [registrationsSeries, registrationsTarget, daysInPeriodMonth]
   )
-  const grossRevenueCumulative = useMemo(
+  // Net revenue carries the pro-rata target line (it's what we compare to plan).
+  const netRevenueCumulative = useMemo(
     () => toCumulative(
-      grossRevenueSeries,
-      grossRevenueTarget ? grossRevenueTarget / daysInPeriodMonth : undefined,
+      netRevenueSeries,
+      netRevenueTarget ? netRevenueTarget / daysInPeriodMonth : undefined,
     ),
-    [grossRevenueSeries, grossRevenueTarget, daysInPeriodMonth]
+    [netRevenueSeries, netRevenueTarget, daysInPeriodMonth]
+  )
+  // Gross (RRP) — plain cumulative, no target.
+  const grossRevenueCumulative = useMemo(
+    () => toCumulative(grossRevenueSeries),
+    [grossRevenueSeries]
   )
 
   /* ── CYTD running-sum series for Section 2 throughput tiles ──
@@ -606,7 +641,7 @@ export default function DashboardPage() {
   }, [monthlyChurnRate, costPerLead, costPerCall])
 
   /* ── Source freshness footer — iterate the NEW source keys ── */
-  const sourceFreshness = (['hubspot_contacts', 'stripe', 'ghl_opportunities', 'meta_ads', 'operational_data'] as const).map(source => {
+  const sourceFreshness = (['hubspot_contacts', 'stripe', 'ghl_opportunities', 'meta_ads', 'operational_data', 'financial_revenue'] as const).map(source => {
     const ts = lastRefresh[source]
     const days = ts ? Math.floor((Date.now() - new Date(ts).getTime()) / 86_400_000) : null
     const label = ts ? new Date(ts).toLocaleDateString('en-AU', { month: 'short', day: 'numeric' }) : 'Never'
@@ -666,16 +701,35 @@ export default function DashboardPage() {
           />
           <MetricTile
             prominent
-            label="Gross Revenue"
+            label="Net Revenue"
+            value={netRevenueCurrent > 0
+              ? fmtCurrency(netRevenueCurrent, { compact: true })
+              : '—'}
+            target={netRevenueTarget
+              ? `${Math.round((netRevenueCurrent / netRevenueTarget) * 100)}% of ${fmtCurrency(netRevenueTarget, { compact: true })} target`
+              : 'no target set'}
+            status={netRevenueTarget
+              ? statusPctVsTarget(netRevenueCurrent, netRevenueTarget)
+              : (netRevenueCurrent > 0 ? 'green' : 'grey')}
+            delta={netRevenueDelta === null ? null : { value: Math.round(netRevenueDelta), period: 'vs previous' }}
+            href="/financial"
+            chart={<TileChart
+              variant="cumulative"
+              data={netRevenueCumulative}
+              formatValue={(n) => fmtCurrency(n, { compact: true })}
+              height={96}
+            />}
+          />
+          <MetricTile
+            prominent
+            label="Gross Revenue (RRP)"
             value={grossRevenueCurrent > 0
               ? fmtCurrency(grossRevenueCurrent, { compact: true })
               : '—'}
-            target={grossRevenueTarget
-              ? `${Math.round((grossRevenueCurrent / grossRevenueTarget) * 100)}% of ${fmtCurrency(grossRevenueTarget, { compact: true })} target`
-              : 'no target set'}
-            status={grossRevenueTarget
-              ? statusPctVsTarget(grossRevenueCurrent, grossRevenueTarget)
-              : (grossRevenueCurrent > 0 ? 'green' : 'grey')}
+            target={captureRate !== null
+              ? `${Math.round(captureRate * 100)}% capture vs RRP`
+              : 'list price'}
+            status={grossRevenueCurrent > 0 ? 'green' : 'grey'}
             delta={grossRevenueDelta === null ? null : { value: Math.round(grossRevenueDelta), period: 'vs previous' }}
             href="/financial"
             chart={<TileChart
@@ -686,12 +740,8 @@ export default function DashboardPage() {
             />}
           />
           <LockedTile
-            label="Net Revenue"
-            reason="Requires refund data — pending Stripe refunds export"
-          />
-          <LockedTile
             label="MRR"
-            reason="Pending MRR derivation from billing_reason='subscription_cycle' invoices"
+            reason="Pending subscription-state data (active count × price)"
           />
         </div>
       </NarrativeSection>
