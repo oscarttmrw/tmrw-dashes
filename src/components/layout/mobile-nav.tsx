@@ -8,7 +8,7 @@ import {
   DollarSign,
   Stethoscope,
   RefreshCw,
-  MoreHorizontal,
+  Menu,
 } from 'lucide-react'
 
 const tabs = [
@@ -16,38 +16,56 @@ const tabs = [
   { label: 'Financial', href: '/financial', icon: DollarSign },
   { label: 'Delivery', href: '/clinical', icon: Stethoscope },
   { label: 'Retention', href: '/retention', icon: RefreshCw },
-  { label: 'More', href: '/members', icon: MoreHorizontal },
-]
+] as const
 
-export function MobileNav() {
+interface MobileNavProps {
+  onMenuOpen: () => void
+  menuOpen: boolean
+}
+
+export function MobileNav({ onMenuOpen, menuOpen }: MobileNavProps) {
   const pathname = usePathname()
 
+  // "Menu" reads as active whenever the drawer is open OR the current route
+  // isn't one of the four quick tabs (so the user is never left without a
+  // highlighted destination).
+  const onQuickTab = tabs.some((t) =>
+    t.href === '/' ? pathname === '/' : pathname.startsWith(t.href)
+  )
+
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-dash-border bg-white md:hidden">
-      <div className="flex items-center justify-around pb-[env(safe-area-inset-bottom)]">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-dash-border bg-dash-surface/95 backdrop-blur-sm md:hidden">
+      <div className="flex items-stretch justify-around pb-[env(safe-area-inset-bottom)]">
         {tabs.map((tab) => {
           const isActive =
-            tab.href === '/'
-              ? pathname === '/'
-              : pathname.startsWith(tab.href)
+            tab.href === '/' ? pathname === '/' : pathname.startsWith(tab.href)
           const Icon = tab.icon
-
           return (
             <Link
               key={tab.href}
               href={tab.href}
               className={cn(
-                'flex flex-col items-center gap-0.5 px-3 py-2.5 min-w-[64px]',
-                isActive
-                  ? 'text-dash-red'
-                  : 'text-dash-text-muted'
+                'flex min-w-[60px] flex-col items-center gap-0.5 px-2 py-2.5',
+                isActive ? 'text-dash-red' : 'text-dash-text-muted'
               )}
             >
-              <Icon size={22} strokeWidth={isActive ? 2.5 : 1.5} />
+              <Icon size={21} strokeWidth={isActive ? 2.5 : 1.5} />
               <span className="text-[10px] font-medium">{tab.label}</span>
             </Link>
           )
         })}
+        <button
+          onClick={onMenuOpen}
+          aria-label="Open menu"
+          aria-expanded={menuOpen}
+          className={cn(
+            'flex min-w-[60px] flex-col items-center gap-0.5 px-2 py-2.5',
+            menuOpen || !onQuickTab ? 'text-dash-red' : 'text-dash-text-muted'
+          )}
+        >
+          <Menu size={21} strokeWidth={menuOpen || !onQuickTab ? 2.5 : 1.5} />
+          <span className="text-[10px] font-medium">Menu</span>
+        </button>
       </div>
     </nav>
   )

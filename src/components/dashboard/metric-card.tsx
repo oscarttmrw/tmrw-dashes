@@ -41,9 +41,9 @@ export function MetricCard({
       onClick={onClick}
       data-metric-card
       className={cn(
-        'rounded-lg border border-dash-border bg-dash-surface p-3 md:p-5',
+        'rounded-lg border border-dash-border bg-dash-surface p-3 shadow-card md:p-5',
         'transition-all duration-150',
-        onClick && 'cursor-pointer hover:border-dash-border-strong hover:shadow-sm hover:-translate-y-px',
+        onClick && 'cursor-pointer hover:-translate-y-px hover:border-dash-border-strong hover:shadow-card-hover',
         className
       )}
     >

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { MobileNav } from './mobile-nav'
+import { MobileDrawer } from './mobile-drawer'
 import { TopBar } from './top-bar'
 import { NorthStarBar } from './north-star-bar'
 import { CommandBar } from './command-bar'
@@ -40,18 +41,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         />
       </div>
 
-      {/* Mobile overlay menu */}
-      {mobileMenuOpen && (
-        <div className="fixed inset-0 z-50 md:hidden">
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setMobileMenuOpen(false)}
-          />
-          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl">
-            <Sidebar collapsed={false} onToggle={() => setMobileMenuOpen(false)} />
-          </div>
-        </div>
-      )}
+      {/* Mobile navigation drawer — animated, scroll-locking */}
+      <MobileDrawer open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
 
       {/* Main content */}
       <div
@@ -67,10 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onMobileMenuOpen={() => setMobileMenuOpen(true)}
         />
         <DemoBanner />
-        {/* North Star bar — hidden on mobile */}
-        <div className="hidden md:block">
-          <NorthStarBar />
-        </div>
+        <NorthStarBar />
         <AnimatePresence mode="wait">
           <motion.main
             key={pathname}
@@ -87,7 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Mobile bottom tab bar */}
-      <MobileNav />
+      <MobileNav onMenuOpen={() => setMobileMenuOpen(true)} menuOpen={mobileMenuOpen} />
 
       <CommandBar open={commandBarOpen} onOpenChange={setCommandBarOpen} />
     </div>

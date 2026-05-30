@@ -24,8 +24,10 @@
   --font-display: 'ApocRevelations', serif;
   --font-ui: 'Brown', ui-sans-serif, system-ui, sans-serif;
 
-  /* Surfaces — INCREASED CONTRAST */
-  --color-dash-bg: #FFFFFF;
+  /* Surfaces — INCREASED CONTRAST.
+     Page bg is a hair off-white so white surfaces (cards, sidebar) gain
+     natural elevation against it without needing heavy borders. */
+  --color-dash-bg: #FAFAF9;
   --color-dash-surface: #FFFFFF;
   --color-dash-surface-hover: #F7F7F7;
   --color-dash-surface-alt: #F5F5F5;
@@ -93,13 +95,35 @@
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
+
+  /* Elevation — soft, low-contrast shadows that read as depth, not drop-shadow.
+     Paired with the off-white page background so white surfaces lift cleanly. */
+  --shadow-card: 0 1px 2px rgba(16, 16, 16, 0.04), 0 1px 1px rgba(16, 16, 16, 0.03);
+  --shadow-card-hover: 0 6px 20px -4px rgba(16, 16, 16, 0.10), 0 2px 6px -2px rgba(16, 16, 16, 0.06);
+  --shadow-pop: 0 12px 32px -8px rgba(16, 16, 16, 0.16);
 }
 
 @layer base {
   body {
     background-color: var(--color-dash-bg);
+    /* Faint brand-tinted atmosphere in the top-right — adds depth without
+       texture noise. Fixed so it stays put as content scrolls. */
+    background-image: radial-gradient(
+      1100px 560px at 100% -8%,
+      rgba(139, 0, 0, 0.04),
+      transparent 62%
+    );
+    background-attachment: fixed;
+    background-repeat: no-repeat;
     color: var(--color-dash-text);
     font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Lock background scroll when a mobile drawer/sheet is open. */
+  body.overflow-hidden-scroll {
+    overflow: hidden;
   }
 
   /* ── Tremor colour overrides ────────────────────────────── */

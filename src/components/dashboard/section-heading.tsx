@@ -2,10 +2,11 @@
 
 export function SectionHeading({ number, title }: { number: number; title: string }) {
   return (
-    <div className="mb-3 flex items-center gap-2.5 md:mb-4 md:gap-3">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-dash-red font-sans text-[11px] font-bold text-white shadow-sm md:h-7 md:w-7 md:text-[13px]">
+    <div className="mb-3 flex items-center gap-3 md:mb-4">
+      <span className="font-display text-2xl leading-none text-dash-red md:text-3xl">
         {String(number).padStart(2, '0')}
       </span>
+      <span className="h-5 w-px bg-dash-border md:h-6" />
       <h2 className="font-sans text-sm font-semibold tracking-tight text-dash-text md:text-base">
         {title}
       </h2>

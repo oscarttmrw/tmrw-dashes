@@ -34,11 +34,11 @@ interface TileProps {
 
 function MetricTile({ label, value, target, delta, status, direction = 'higher-better', href, chart, prominent }: TileProps) {
   const tileClass = cn(
-    'flex h-full flex-col rounded-lg border bg-dash-surface transition-all duration-150',
+    'flex h-full flex-col rounded-lg border bg-dash-surface shadow-card transition-all duration-150',
     prominent
-      ? 'border-dash-border-strong p-4 md:p-5 shadow-sm'
+      ? 'border-dash-border-strong p-4 md:p-5'
       : 'border-dash-border p-3 md:p-4',
-    href && 'hover:border-dash-border-strong hover:shadow-sm hover:-translate-y-px'
+    href && 'hover:-translate-y-px hover:border-dash-border-strong hover:shadow-card-hover'
   )
   const inner = (
     <div className={tileClass}>

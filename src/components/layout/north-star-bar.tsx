@@ -37,8 +37,8 @@ export function NorthStarBar() {
   }, [operational_data])
 
   return (
-    <div className="border-b border-dash-border bg-dash-surface/50 px-6 py-3">
-      <div className="mx-auto flex max-w-[1440px] gap-8">
+    <div className="border-b border-dash-border bg-dash-surface/60 px-4 py-2.5 backdrop-blur-sm md:px-6 md:py-3">
+      <div className="mx-auto flex max-w-[1440px] gap-5 md:gap-8">
         <NorthStarMetric
           label="TOTAL CASEBOOK"
           value={totalCasebook === null ? '—' : fmt(totalCasebook)}
@@ -65,19 +65,19 @@ function NorthStarMetric({
   subtitle: string
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-dash-red-light">
+    <div className="flex items-center gap-2.5 md:gap-3">
+      <div className="hidden h-8 w-8 items-center justify-center rounded-md bg-dash-red-light sm:flex">
         <Star size={14} className="text-dash-red" />
       </div>
-      <div className="border-l-[3px] border-dash-red pl-3">
-        <span className="font-ui text-[11px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary">
+      <div className="border-l-[3px] border-dash-red pl-2.5 md:pl-3">
+        <span className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary md:text-[11px]">
           {label}
         </span>
         <div className="flex items-baseline gap-2">
-          <span className="font-mono text-xl font-semibold tracking-[-0.02em] text-dash-text">
+          <span className="font-mono text-lg font-semibold tracking-[-0.02em] text-dash-text md:text-xl">
             {value}
           </span>
-          <span className="font-sans text-xs text-dash-text-muted">{subtitle}</span>
+          <span className="hidden font-sans text-xs text-dash-text-muted sm:inline">{subtitle}</span>
         </div>
       </div>
     </div>
