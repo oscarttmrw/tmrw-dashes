@@ -462,10 +462,11 @@ export default function FinancialPage() {
   const netOverlayCombined = useMemo(() => combineOverlay(netOverlay), [netOverlay])
   const grossOverlayCombined = useMemo(() => combineOverlay(grossOverlay), [grossOverlay])
 
-  /* ── §08 Actual vs Forecast (actual = net collected) ── */
-  const actualVsForecast = useMemo(() =>
-    monthlyRows.map(r => ({ m: r.m, actual: r.net, forecast: null as number | null }))
+  /* ── §08 Actual vs Plan (actual = net collected; plan = monthly target) ── */
+  const actualVsPlan = useMemo(() =>
+    monthlyRows.map(r => ({ m: r.m, actual: r.net, plan: r.plan }))
   , [monthlyRows])
+  const hasAnyPlan = useMemo(() => actualVsPlan.some(r => r.plan !== null), [actualVsPlan])
 
   const sparkAov = monthlyRows.map(r => ({ date: r.m, value: r.aov }))
 
@@ -917,35 +918,37 @@ export default function FinancialPage() {
         </div>
       </NarrativeSection>
 
-      {/* ────────────── 08 ACTUAL VS FORECAST ────────────── */}
+      {/* ────────────── 08 ACTUAL VS PLAN ────────────── */}
       <NarrativeSection
         number={8}
-        question="Actual vs Forecast"
+        question="Actual vs Plan"
         subtitle="Where are we heading?"
         right={
-          <span className="rounded-full bg-status-amber/10 px-3 py-1 font-ui text-[10px] uppercase tracking-wider text-status-amber">
-            Forecast CSV Pending
-          </span>
+          !hasAnyPlan ? (
+            <span className="rounded-full bg-status-amber/10 px-3 py-1 font-ui text-[10px] uppercase tracking-wider text-status-amber">
+              No Targets Set
+            </span>
+          ) : undefined
         }
       >
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
           <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-            Actual ({monthlyRows.length > 0 ? `${monthlyRows[0].m}–${monthlyRows[monthlyRows.length - 1].m}` : '—'}) · Forecast pending
+            Actual ({monthlyRows.length > 0 ? `${monthlyRows[0].m}–${monthlyRows[monthlyRows.length - 1].m}` : '—'}) · Plan from monthly targets
           </div>
           <div className="h-[300px]">
             <ResponsiveContainer>
-              <ComposedChart data={actualVsForecast} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
+              <ComposedChart data={actualVsPlan} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="#EFEDE8" vertical={false} />
                 <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
                 <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
                 <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                <Line type="monotone" dataKey="actual" stroke="#1A1A1A" strokeWidth={2.5} dot={{ r: 3, fill: '#1A1A1A' }} connectNulls={false} name="Actual" />
-                <Line type="monotone" dataKey="forecast" stroke="#E61317" strokeWidth={2} strokeDasharray="5 4" dot={{ r: 4, fill: '#E61317' }} connectNulls={false} name="Forecast" />
+                <Line type="monotone" dataKey="actual" stroke="#1A1A1A" strokeWidth={2.5} dot={{ r: 3, fill: '#1A1A1A' }} connectNulls={false} name="Actual (net)" />
+                <Line type="monotone" dataKey="plan" stroke="#E61317" strokeWidth={2} strokeDasharray="5 4" dot={{ r: 4, fill: '#E61317' }} connectNulls={false} name="Plan (target)" />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
           <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
-            Forecast line activates when <code>forecast.csv</code> is uploaded (columns: month, forecast_revenue).
+            Plan line uses the monthly revenue targets set in Admin → Settings. Months without a target are skipped. Actual is net collected; targets are gross (RRP), per the rest of this page.
           </p>
         </div>
       </NarrativeSection>
