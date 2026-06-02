@@ -12,6 +12,7 @@ import { processSocialViewsToCanonical } from '@/lib/processors/social-views-pro
 import { processStripeToCanonical } from '@/lib/processors/stripe-processor'
 import { processHubspotContactsToCanonical } from '@/lib/processors/hubspot-contacts-processor'
 import { processGhlToCanonical } from '@/lib/processors/ghl-processor'
+import { processFunnelMetricsToCanonical } from '@/lib/processors/funnel-metrics-processor'
 import { processOperationalDataToCanonical } from '@/lib/processors/operational-data-processor'
 import { processPelagoniaToCanonical } from '@/lib/processors/pelagonia-processor'
 import { processTableauToCanonical } from '@/lib/processors/tableau-processor'
@@ -26,6 +27,7 @@ type SourceKey =
   | 'tableau'
   | 'hubspot_contacts'
   | 'ghl_opportunities'
+  | 'funnel_metrics'
   | 'operational_data'
   | 'stripe'
   | 'zendesk'
@@ -40,6 +42,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   tableau: 'tableau_data',
   hubspot_contacts: 'hubspot_contacts',
   ghl_opportunities: 'ghl_opportunities',
+  funnel_metrics: 'funnel_metrics',
   operational_data: 'operational_data',
   stripe: 'stripe_data',
   zendesk: 'zendesk_data',
@@ -55,6 +58,7 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   tableau: null,
   hubspot_contacts: null,
   ghl_opportunities: 'created_on',
+  funnel_metrics: 'month',
   operational_data: 'date',
   stripe: 'created',
   zendesk: null,
@@ -73,6 +77,7 @@ const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => P
   stripe: processStripeToCanonical,
   hubspot_contacts: processHubspotContactsToCanonical,
   ghl_opportunities: processGhlToCanonical,
+  funnel_metrics: processFunnelMetricsToCanonical,
   operational_data: processOperationalDataToCanonical,
   pelagonia: processPelagoniaToCanonical,
   tableau: processTableauToCanonical,
@@ -94,6 +99,8 @@ async function applyWriteStrategy(
       return fullReplaceStrategy(supabase, table, batchId, rows)
     case 'ghl_opportunities':
       return upsertStrategy(supabase, table, batchId, rows, 'opportunity_id')
+    case 'funnel_metrics':
+      return upsertStrategy(supabase, table, batchId, rows, 'month')
     case 'operational_data':
       return upsertStrategy(supabase, table, batchId, rows, 'date')
     case 'stripe':

@@ -2,6 +2,7 @@ export type DataSourceName =
   | 'hubspot'
   | 'hubspot_contacts'
   | 'ghl_opportunities'
+  | 'funnel_metrics'
   | 'operational_data'
   | 'stripe'
   | 'zendesk'

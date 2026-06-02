@@ -139,6 +139,34 @@ export const ghlOpportunitiesSchema: CsvSchema = {
   ],
 };
 
+export const funnelMetricsSchema: CsvSchema = {
+  source: 'funnel_metrics',
+  // GHL funnel summary — a pivoted sheet (metric per row, month per column)
+  // sitting under title rows, so the header keys are unreliable. Routing is by
+  // sheet name ("Funnel Metrics"); the processor finds the embedded header row
+  // and un-pivots. No required columns so the messy header passes validation.
+  requiredColumns: [],
+  optionalColumns: [
+    'Metric',
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'month',
+    'total_leads',
+    'booked_calls',
+    'held_calls',
+    'won_opportunities',
+    'won_value',
+    'win_pct',
+    'call_conversion_rate',
+    'showed_appointments',
+    'no_show_appointments',
+    'upcoming_appointments',
+  ],
+};
+
 export const operationalDataSchema: CsvSchema = {
   source: 'operational_data',
   // Single sheet (xlsx) keyed on `date` (Excel serial). Upsert by date.
@@ -466,6 +494,7 @@ export const financialRevenueGrossSchema: CsvSchema = {
 export const dataSourceSchemas: Record<string, CsvSchema> = {
   hubspot_contacts: hubspotContactsSchema,
   ghl_opportunities: ghlOpportunitiesSchema,
+  funnel_metrics: funnelMetricsSchema,
   operational_data: operationalDataSchema,
   stripe: stripeSchema,
   zendesk: zendeskSchema,
@@ -546,6 +575,16 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
       'Drop the downloaded file into the upload zone below.',
     ],
     poweredMetrics: getMetricsPoweredBy('pelagonia'),
+  },
+  funnel_metrics: {
+    name: 'GHL Funnel Metrics',
+    exportSteps: [
+      'Open the TMRW marketing workbook.',
+      'Go to the "Funnel Metrics" sheet (monthly summary from GoHighLevel).',
+      'Confirm it has a "Metric" column and a column per month (April, May, …).',
+      'Save as .xlsx and drop into the upload zone below — it auto-routes by sheet name.',
+    ],
+    poweredMetrics: [],
   },
   operational_data: {
     name: 'Operational Data',

@@ -15,6 +15,7 @@ type SourceKey =
   | 'stripe'
   | 'hubspot_contacts'
   | 'ghl_opportunities'
+  | 'funnel_metrics'
   | 'operational_data'
   | 'pelagonia'
   | 'tableau'
@@ -32,6 +33,7 @@ const SHEET_NAME_TO_SOURCE: Record<string, SourceKey> = {
   'social followers': 'social_followers',
   'social media views': 'social_views',
   'social views': 'social_views',
+  'funnel metrics': 'funnel_metrics',
   'net revenue': 'financial_revenue_net',
   'gross revenue (rrp)': 'financial_revenue_gross',
   'gross revenue': 'financial_revenue_gross',
@@ -44,6 +46,7 @@ const VALID_SOURCES: SourceKey[] = [
   'stripe',
   'hubspot_contacts',
   'ghl_opportunities',
+  'funnel_metrics',
   'operational_data',
   'pelagonia',
   'tableau',
@@ -75,6 +78,7 @@ const REFRESH_KEY: Record<SourceKey, string> = {
   stripe: 'stripe',
   hubspot_contacts: 'hubspot_contacts',
   ghl_opportunities: 'ghl_opportunities',
+  funnel_metrics: 'funnel_metrics',
   operational_data: 'operational_data',
   pelagonia: 'pelagonia',
   tableau: 'tableau',

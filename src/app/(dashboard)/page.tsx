@@ -11,6 +11,7 @@ import { DateRangePicker } from '@/components/dashboard/date-range-picker'
 import { TileChart, bucketByDay, toCumulative, buildCytdRunningSum } from '@/components/dashboard/tile-chart'
 import { useDashboardData } from '@/lib/context/data-context'
 import { useDateFilter } from '@/lib/context/filter-context'
+import { aggregateFunnel } from '@/lib/utils/funnel'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
 import { Lock } from 'lucide-react'
@@ -175,6 +176,7 @@ export default function DashboardPage() {
     stripe,
     hubspot_contacts,
     ghl_opportunities,
+    funnel_metrics,
     operational_data,
     plan_targets,
     social_followers,
@@ -419,21 +421,18 @@ export default function DashboardPage() {
   const costPerConversionDelta = costPerConversion !== null && costPerConversionPrev !== null
     ? deltaPct(costPerConversion, costPerConversionPrev) : null
 
-  // Calls booked per period — GHL opportunities at the call stages, by created_on
-  const callsBookedCurrent = useMemo(
-    () => ghl_opportunities.filter(r =>
-      CALL_STAGES.has(String(r.stage ?? ''))
-      && inPeriod(r.created_on, periodStart, periodEnd)
-    ).length,
-    [ghl_opportunities, periodStart, periodEnd]
+  // Funnel metrics — monthly GHL summary aggregated over the selected period.
+  const funnelCurrent = useMemo(
+    () => aggregateFunnel(funnel_metrics, periodStart, periodEnd),
+    [funnel_metrics, periodStart, periodEnd]
   )
-  const callsBookedPrev = useMemo(
-    () => ghl_opportunities.filter(r =>
-      CALL_STAGES.has(String(r.stage ?? ''))
-      && inPeriod(r.created_on, prevPeriodStart, prevPeriodEnd)
-    ).length,
-    [ghl_opportunities, prevPeriodStart, prevPeriodEnd]
+  const funnelPrev = useMemo(
+    () => aggregateFunnel(funnel_metrics, prevPeriodStart, prevPeriodEnd),
+    [funnel_metrics, prevPeriodStart, prevPeriodEnd]
   )
+  // Calls booked / won come from the GHL funnel summary.
+  const callsBookedCurrent = funnelCurrent.bookedCalls
+  const callsBookedPrev = funnelPrev.bookedCalls
 
   // 4.2 Cost per Call
   const costPerCall = callsBookedCurrent > 0 ? metaSpendCurrent / callsBookedCurrent : null
@@ -442,20 +441,8 @@ export default function DashboardPage() {
     ? deltaPct(costPerCall, costPerCallPrev) : null
 
   // 4.3 Call Conversion Rate
-  const callsWonCurrent = useMemo(
-    () => ghl_opportunities.filter(r =>
-      String(r.status ?? '').toLowerCase() === 'won'
-      && inPeriod(r.created_on, periodStart, periodEnd)
-    ).length,
-    [ghl_opportunities, periodStart, periodEnd]
-  )
-  const callsWonPrev = useMemo(
-    () => ghl_opportunities.filter(r =>
-      String(r.status ?? '').toLowerCase() === 'won'
-      && inPeriod(r.created_on, prevPeriodStart, prevPeriodEnd)
-    ).length,
-    [ghl_opportunities, prevPeriodStart, prevPeriodEnd]
-  )
+  const callsWonCurrent = funnelCurrent.won
+  const callsWonPrev = funnelPrev.won
   const callConvRate = callsBookedCurrent > 0 ? (callsWonCurrent / callsBookedCurrent) * 100 : null
   const callConvRatePrev = callsBookedPrev > 0 ? (callsWonPrev / callsBookedPrev) * 100 : null
   const callConvDelta = callConvRate !== null && callConvRatePrev !== null

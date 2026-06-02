@@ -52,6 +52,7 @@ export interface DashboardData {
   zendesk: CanonicalRow[]
   hubspot_contacts: CanonicalRow[]
   ghl_opportunities: CanonicalRow[]
+  funnel_metrics: CanonicalRow[]
   operational_data: CanonicalRow[]
   plan_targets: CanonicalRow[]
   financial_revenue: CanonicalRow[]
@@ -111,6 +112,7 @@ const defaultData: DashboardData = {
   zendesk: [],
   hubspot_contacts: [],
   ghl_opportunities: [],
+  funnel_metrics: [],
   operational_data: [],
   plan_targets: [],
   financial_revenue: [],
@@ -193,6 +195,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         zendesk: asRows(body.zendesk),
         hubspot_contacts: asRows(body.hubspot_contacts),
         ghl_opportunities: asRows(body.ghl_opportunities),
+        funnel_metrics: asRows(body.funnel_metrics),
         operational_data: asRows(body.operational_data),
         plan_targets: asRows(body.plan_targets),
         financial_revenue: asRows(body.financial_revenue),

@@ -9,6 +9,7 @@ type SourceKey =
   | 'stripe'
   | 'hubspot_contacts'
   | 'ghl_opportunities'
+  | 'funnel_metrics'
   | 'operational_data'
   | 'pelagonia'
   | 'tableau'
@@ -22,6 +23,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   stripe: 'stripe_data',
   hubspot_contacts: 'hubspot_contacts',
   ghl_opportunities: 'ghl_opportunities',
+  funnel_metrics: 'funnel_metrics',
   operational_data: 'operational_data',
   pelagonia: 'pelagonia_data',
   tableau: 'tableau_data',
@@ -36,6 +38,7 @@ const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
   stripe: 'created',
   hubspot_contacts: 'create_date',
   ghl_opportunities: 'created_on',
+  funnel_metrics: 'month',
   operational_data: 'date',
   pelagonia: 'pelagonia_created_at',
   tableau: 'event_date',
@@ -59,6 +62,7 @@ export async function GET() {
     'stripe',
     'hubspot_contacts',
     'ghl_opportunities',
+    'funnel_metrics',
     'operational_data',
     'pelagonia',
     'tableau',

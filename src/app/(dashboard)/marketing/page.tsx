@@ -5,6 +5,7 @@ import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { TrendIndicator } from '@/components/dashboard/trend-indicator'
 import { useDashboardData } from '@/lib/context/data-context'
 import { useDateFilter } from '@/lib/context/filter-context'
+import { aggregateFunnel } from '@/lib/utils/funnel'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
@@ -46,12 +47,6 @@ function deltaPct(current: number, previous: number): number | null {
 
 // Fallback LTV if no value has been entered in Settings → Plan Targets yet.
 const LTV_FALLBACK = 3500
-
-// Booked = any record with one of the call lifecycle stages set.
-// Held   = the stages that imply the call actually happened.
-// Closed = status='won'.
-const CALL_STAGES_BOOKED = new Set(['Call Booked', 'No Show', 'Call Attended', 'Won', 'Cancelled', 'Rescheduled'])
-const CALL_STAGES_HELD = new Set(['Call Attended', 'Won'])
 
 // Follower tiles to render. Aliases support legacy data labelled without
 // the "(TMRW)" suffix.
@@ -212,7 +207,7 @@ function NarrativeSection({
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 export default function MarketingPage() {
-  const { meta_ads, social_followers, social_views, operational_data, ghl_opportunities, plan_targets } = useDashboardData()
+  const { meta_ads, social_followers, social_views, operational_data, funnel_metrics, plan_targets } = useDashboardData()
 
   const { value: pickerValue, setValue: setPickerValue } = useDateFilter()
   const periodStart = pickerValue.period.start
@@ -262,42 +257,21 @@ export default function MarketingPage() {
     [operational_data, prevStart, prevEnd]
   )
 
-  /* ── GHL: booked / held / closed counts (data currently flaky) ── */
-  const callsBooked = useMemo(
-    () => ghl_opportunities.filter(r =>
-      CALL_STAGES_BOOKED.has(String(r.stage ?? ''))
-      && inPeriod(r.created_on, periodStart, periodEnd)
-    ).length,
-    [ghl_opportunities, periodStart, periodEnd]
+  /* ── GHL funnel summary — aggregated over the selected period ── */
+  const funnelCur = useMemo(
+    () => aggregateFunnel(funnel_metrics, periodStart, periodEnd),
+    [funnel_metrics, periodStart, periodEnd]
   )
-  const callsBookedPrev = useMemo(
-    () => ghl_opportunities.filter(r =>
-      CALL_STAGES_BOOKED.has(String(r.stage ?? ''))
-      && inPeriod(r.created_on, prevStart, prevEnd)
-    ).length,
-    [ghl_opportunities, prevStart, prevEnd]
+  const funnelPrev = useMemo(
+    () => aggregateFunnel(funnel_metrics, prevStart, prevEnd),
+    [funnel_metrics, prevStart, prevEnd]
   )
-  const callsHeld = useMemo(
-    () => ghl_opportunities.filter(r =>
-      CALL_STAGES_HELD.has(String(r.stage ?? ''))
-      && inPeriod(r.created_on, periodStart, periodEnd)
-    ).length,
-    [ghl_opportunities, periodStart, periodEnd]
-  )
-  const callsClosed = useMemo(
-    () => ghl_opportunities.filter(r =>
-      String(r.status ?? '').toLowerCase() === 'won'
-      && inPeriod(r.created_on, periodStart, periodEnd)
-    ).length,
-    [ghl_opportunities, periodStart, periodEnd]
-  )
-  const callsClosedPrev = useMemo(
-    () => ghl_opportunities.filter(r =>
-      String(r.status ?? '').toLowerCase() === 'won'
-      && inPeriod(r.created_on, prevStart, prevEnd)
-    ).length,
-    [ghl_opportunities, prevStart, prevEnd]
-  )
+  const funnelLeads = funnelCur.leads
+  const callsBooked = funnelCur.bookedCalls
+  const callsBookedPrev = funnelPrev.bookedCalls
+  const callsHeld = funnelCur.heldCalls
+  const callsClosed = funnelCur.won
+  const callsClosedPrev = funnelPrev.won
 
   /* ── LTV in effect for this period — most recent plan_targets row at or
         before periodEnd that actually carries an ltv_assumed value. ── */
@@ -357,18 +331,15 @@ export default function MarketingPage() {
       }),
     [meta_ads, periodStart, periodEnd]
   )
+  // Funnel calls are monthly, so there's no per-day call count. Shape the
+  // cost-per-call sparkline from daily spend scaled by the period's average
+  // calls-per-day (booked ÷ days in range).
   const sparkCostPerCall = useMemo(() => {
     const spend = bucketByDay(meta_ads, 'date', periodStart, periodEnd,
       (rows) => rows.reduce((s, r) => s + num(r.spend), 0))
-    return spend.map(d => {
-      const day = d.date
-      const calls = ghl_opportunities.filter(o =>
-        CALL_STAGES_BOOKED.has(String(o.stage ?? ''))
-        && String(o.created_on ?? '').slice(0, 10) === day
-      ).length
-      return { date: day, value: calls > 0 ? d.value / calls : 0 }
-    })
-  }, [meta_ads, ghl_opportunities, periodStart, periodEnd])
+    const callsPerDay = spend.length > 0 && callsBooked > 0 ? callsBooked / spend.length : 0
+    return spend.map(d => ({ date: d.date, value: callsPerDay > 0 ? d.value / callsPerDay : 0 }))
+  }, [meta_ads, periodStart, periodEnd, callsBooked])
   const sparkCac = useMemo(() => {
     const spend = bucketByDay(meta_ads, 'date', periodStart, periodEnd,
       (rows) => rows.reduce((s, r) => s + num(r.spend), 0))
@@ -591,14 +562,14 @@ export default function MarketingPage() {
           </div>
           <FunnelChart
             rows={[
-              { label: 'Total Leads', value: metaAgg.conversions, tone: 'dark'  },
-              { label: 'Booked',      value: callsBooked,         tone: 'mid'   },
-              { label: 'Held',        value: callsHeld,           tone: 'light' },
-              { label: 'Closed',      value: callsClosed,         tone: 'red'   },
+              { label: 'Total Leads', value: funnelLeads, tone: 'dark'  },
+              { label: 'Booked',      value: callsBooked, tone: 'mid'   },
+              { label: 'Held',        value: callsHeld,   tone: 'light' },
+              { label: 'Closed (Won)', value: callsClosed, tone: 'red'  },
             ]}
           />
           <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
-            Leads from Meta Ads · Booked / Held / Closed from GHL (feed currently unreliable — Marko is fixing).
+            Leads · Booked · Held · Closed from the GHL funnel summary (monthly).
           </p>
         </div>
 
