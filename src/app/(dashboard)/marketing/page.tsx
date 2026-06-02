@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { TrendIndicator } from '@/components/dashboard/trend-indicator'
 import { useDashboardData } from '@/lib/context/data-context'
@@ -12,7 +12,8 @@ import {
 import { axisTickStyle, axisLineStyle, gridStyle, TMRW_COLORS } from '@/lib/utils/chart-styles'
 import { DateRangePicker } from '@/components/dashboard/date-range-picker'
 import { TileChart, bucketByDay } from '@/components/dashboard/tile-chart'
-import { Lock } from 'lucide-react'
+import { Lock, ChevronDown } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
 
@@ -114,8 +115,32 @@ function LockedKpiTile({ label, reason }: { label: string; reason: string }) {
 /* ─── Funnel ──────────────────────────────────────────────────────── */
 
 type FunnelTone = 'dark' | 'mid' | 'light' | 'red'
+type SegmentTone = 'success' | 'pending' | 'lost' | 'muted'
 
-function FunnelChart({ rows }: { rows: { label: string; value: number; tone: FunnelTone }[] }) {
+interface FunnelSegment { label: string; value: number; tone: SegmentTone }
+interface FunnelRow {
+  label: string
+  value: number
+  tone: FunnelTone
+  /** Optional breakdown of this stage, revealed on click. */
+  breakdown?: FunnelSegment[]
+  /** Caption shown under an expanded breakdown. */
+  note?: string
+}
+
+const SEGMENT_PALETTE: Record<SegmentTone, { bg: string; label: string }> = {
+  success: { bg: '#16A34A', label: 'Held / taken' },
+  pending: { bg: '#E5A04A', label: 'Pending' },
+  lost:    { bg: '#E61317', label: 'Lost' },
+  muted:   { bg: '#B8B5AE', label: 'Other' },
+}
+
+function fmtFunnelPct(n: number): string {
+  return n < 10 ? `${n.toFixed(1)}%` : `${Math.round(n)}%`
+}
+
+function FunnelChart({ rows }: { rows: FunnelRow[] }) {
+  const [expanded, setExpanded] = useState<number | null>(null)
   const top = rows[0]?.value ?? 0
   const palette: Record<FunnelTone, { bg: string; text: string }> = {
     dark:  { bg: '#1A1A1A', text: '#FFFFFF' },
@@ -125,43 +150,75 @@ function FunnelChart({ rows }: { rows: { label: string; value: number; tone: Fun
   }
   return (
     <div>
-      {/* Legend strip — stage labels across the full width */}
-      <div className="mb-4 grid grid-cols-4 gap-3 border-b border-dash-border pb-3">
-        {rows.map((r, i) => {
-          const swatch = palette[r.tone]
-          return (
-            <span key={i} className="flex items-center gap-2 font-ui text-[11px] font-medium uppercase tracking-[0.06em] text-dash-text-secondary">
-              <span className="inline-block h-3 w-3 shrink-0 rounded-sm" style={{ background: swatch.bg }} />
-              {r.label}
-            </span>
-          )
-        })}
-      </div>
-
-      {/* Bars — count only, centred on a vertical axis */}
+      {/* Bars — width is % of leads (the funnel shape); right label is the
+          stage-over-stage conversion %. Rows with a breakdown are clickable. */}
       <div className="space-y-2">
         {rows.map((r, i) => {
-          const pct = top > 0 ? (r.value / top) * 100 : 0
+          const pctOfTop = top > 0 ? (r.value / top) * 100 : 0
+          const prev = i > 0 ? rows[i - 1].value : null
+          const stepPct = prev && prev > 0 ? (r.value / prev) * 100 : null
           const swatch = palette[r.tone]
-          const pctLabel = top === 0 ? '—' : pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`
+          const isExpandable = !!r.breakdown && r.breakdown.length > 0
+          const isOpen = expanded === i
           return (
-            <div key={i} className="flex items-center gap-3">
-              <div className="relative h-9 flex-1">
-                <div
-                  className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center justify-center rounded-sm px-3"
-                  style={{ width: `${Math.max(pct, 0.5)}%`, minWidth: '3rem', background: swatch.bg }}
-                >
-                  <span
-                    className="whitespace-nowrap font-mono text-[13px] font-bold"
-                    style={{ color: swatch.text }}
+            <div key={i}>
+              <div
+                className={cn('flex items-center gap-3', isExpandable && 'cursor-pointer')}
+                onClick={isExpandable ? () => setExpanded(isOpen ? null : i) : undefined}
+                role={isExpandable ? 'button' : undefined}
+                tabIndex={isExpandable ? 0 : undefined}
+                onKeyDown={isExpandable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(isOpen ? null : i) } } : undefined}
+              >
+                <span className="flex w-28 shrink-0 items-center gap-1 font-ui text-[11px] font-medium uppercase tracking-[0.06em] text-dash-text-secondary">
+                  <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: swatch.bg }} />
+                  <span className="truncate">{r.label}</span>
+                  {isExpandable && (
+                    <ChevronDown size={12} className={cn('shrink-0 transition-transform', isOpen && 'rotate-180')} />
+                  )}
+                </span>
+                <div className="relative h-9 flex-1">
+                  <div
+                    className="absolute inset-y-0 left-0 flex items-center justify-center rounded-sm px-3"
+                    style={{ width: `${Math.max(pctOfTop, 0.5)}%`, minWidth: '3rem', background: swatch.bg }}
                   >
-                    {fmtNum(r.value)}
-                  </span>
+                    <span className="whitespace-nowrap font-mono text-[13px] font-bold" style={{ color: swatch.text }}>
+                      {fmtNum(r.value)}
+                    </span>
+                  </div>
                 </div>
+                <span className="w-20 text-right font-mono text-[11px] text-dash-text-secondary">
+                  {stepPct === null ? 'of leads' : `${fmtFunnelPct(stepPct)} ↓`}
+                </span>
               </div>
-              <span className="w-14 text-right font-mono text-[11px] text-dash-text-secondary">
-                {pctLabel}
-              </span>
+
+              {/* Expanded breakdown — segmented bar + legend */}
+              {isExpandable && isOpen && (
+                <div className="ml-28 mr-20 mt-2 rounded-md border border-dash-border bg-dash-bg/50 p-3">
+                  <div className="mb-2 flex h-4 w-full overflow-hidden rounded-sm">
+                    {r.breakdown!.map((seg, si) => {
+                      const w = r.value > 0 ? (seg.value / r.value) * 100 : 0
+                      if (w <= 0) return null
+                      return <div key={si} style={{ width: `${w}%`, background: SEGMENT_PALETTE[seg.tone].bg }} />
+                    })}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4">
+                    {r.breakdown!.map((seg, si) => {
+                      const w = r.value > 0 ? (seg.value / r.value) * 100 : 0
+                      return (
+                        <div key={si} className="flex items-center gap-1.5 font-ui text-[11px] text-dash-text-secondary">
+                          <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: SEGMENT_PALETTE[seg.tone].bg }} />
+                          <span className="truncate">{seg.label}</span>
+                          <span className="ml-auto font-mono text-dash-text">{fmtNum(seg.value)}</span>
+                          <span className="w-10 text-right font-mono text-dash-text-muted">{fmtFunnelPct(w)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {r.note && (
+                    <p className="mt-2 font-sans text-[10px] italic text-dash-text-muted">{r.note}</p>
+                  )}
+                </div>
+              )}
             </div>
           )
         })}
@@ -272,6 +329,9 @@ export default function MarketingPage() {
   const callsHeld = funnelCur.heldCalls
   const callsClosed = funnelCur.won
   const callsClosedPrev = funnelPrev.won
+  // Booked outcomes (snapshot): held + upcoming + no-show, with a residual for
+  // cancelled/rescheduled that the monthly summary doesn't itemise.
+  const bookedOther = Math.max(0, callsBooked - callsHeld - funnelCur.upcoming - funnelCur.noShow)
 
   /* ── LTV in effect for this period — most recent plan_targets row at or
         before periodEnd that actually carries an ltv_assumed value. ── */
@@ -562,14 +622,23 @@ export default function MarketingPage() {
           </div>
           <FunnelChart
             rows={[
-              { label: 'Total Leads', value: funnelLeads, tone: 'dark'  },
-              { label: 'Booked',      value: callsBooked, tone: 'mid'   },
-              { label: 'Held',        value: callsHeld,   tone: 'light' },
-              { label: 'Closed (Won)', value: callsClosed, tone: 'red'  },
+              { label: 'Total Leads', value: funnelLeads, tone: 'dark' },
+              {
+                label: 'Booked Calls', value: callsBooked, tone: 'mid',
+                breakdown: [
+                  { label: 'Held / taken', value: callsHeld, tone: 'success' },
+                  { label: 'Upcoming', value: funnelCur.upcoming, tone: 'pending' },
+                  { label: 'No-show', value: funnelCur.noShow, tone: 'lost' },
+                  { label: 'Other / cancelled', value: bookedOther, tone: 'muted' },
+                ],
+                note: 'Snapshot — upcoming calls will resolve into held / no-show over time. "Other" covers cancelled/rescheduled not itemised in the monthly summary.',
+              },
+              { label: 'Held', value: callsHeld, tone: 'light' },
+              { label: 'Won', value: callsClosed, tone: 'red' },
             ]}
           />
           <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
-            Leads · Booked · Held · Closed from the GHL funnel summary (monthly).
+            GHL funnel summary (monthly) · right column shows stage-over-stage conversion · click <b>Booked Calls</b> to break down outcomes.
           </p>
         </div>
 
