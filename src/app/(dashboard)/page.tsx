@@ -247,6 +247,16 @@ export default function DashboardPage() {
       .filter(r => String(r.revenue_type) === type && inPeriod(r.date, start, end))
       .reduce((s, r) => s + finRowTotal(r), 0)
 
+  // Recurring products (for MRR). Joining fees + advanced tests are one-off
+  // and excluded; membership, stacks, supplements and peptides recur.
+  const RECURRING_PRODUCTS = ['membership', 'tmrw_stacks', 'supplements', 'peptides'] as const
+  const recurringRowTotal = (r: typeof financial_revenue[number]) =>
+    RECURRING_PRODUCTS.reduce((s, k) => s + num(r[k]), 0)
+  const sumRecurringGross = (start: Date, end: Date) =>
+    financial_revenue
+      .filter(r => String(r.revenue_type) === 'gross' && inPeriod(r.date, start, end))
+      .reduce((s, r) => s + recurringRowTotal(r), 0)
+
   // Net revenue (collected) — this is what we compare to the plan target.
   const netRevenueCurrent = useMemo(
     () => sumFinRevenue('net', periodStart, periodEnd),
@@ -270,6 +280,19 @@ export default function DashboardPage() {
   )
   const grossRevenueDelta = deltaPct(grossRevenueCurrent, grossRevenuePrev)
   const captureRate = grossRevenueCurrent > 0 ? netRevenueCurrent / grossRevenueCurrent : null
+
+  // MRR (Gross) — recurring-product revenue at list price (RRP) for the
+  // period. A proxy: there's no subscription-state feed, so this is the gross
+  // value of recurring products rather than active-count × price.
+  const mrrGrossCurrent = useMemo(
+    () => sumRecurringGross(periodStart, periodEnd),
+    [financial_revenue, periodStart, periodEnd]
+  )
+  const mrrGrossPrev = useMemo(
+    () => sumRecurringGross(prevPeriodStart, prevPeriodEnd),
+    [financial_revenue, prevPeriodStart, prevPeriodEnd]
+  )
+  const mrrGrossDelta = deltaPct(mrrGrossCurrent, mrrGrossPrev)
 
   /* ── Section 2 — Scale ── */
   const totalCustomers = customerRows.length
@@ -458,6 +481,13 @@ export default function DashboardPage() {
       (rows) => rows.reduce((s, r) => s + finRowTotal(r), 0)),
     [financial_revenue, periodStart, periodEnd]
   )
+  const mrrGrossSeries = useMemo(
+    () => bucketByDay(
+      financial_revenue.filter(r => String(r.revenue_type) === 'gross'),
+      'date', periodStart, periodEnd,
+      (rows) => rows.reduce((s, r) => s + recurringRowTotal(r), 0)),
+    [financial_revenue, periodStart, periodEnd]
+  )
   const churnSeries = useMemo(
     () => bucketByDay(operational_data, 'date', periodStart, periodEnd,
       (rows) => rows.reduce((s, r) => s + num(r.churned_members), 0)),
@@ -532,6 +562,10 @@ export default function DashboardPage() {
   const grossRevenueCumulative = useMemo(
     () => toCumulative(grossRevenueSeries),
     [grossRevenueSeries]
+  )
+  const mrrGrossCumulative = useMemo(
+    () => toCumulative(mrrGrossSeries),
+    [mrrGrossSeries]
   )
 
   /* ── CYTD running-sum series for Section 2 throughput tiles ──
@@ -737,9 +771,22 @@ export default function DashboardPage() {
               height={96}
             />}
           />
-          <LockedTile
-            label="MRR"
-            reason="Pending subscription-state data (active count × price)"
+          <MetricTile
+            prominent
+            label="MRR (Gross)"
+            value={mrrGrossCurrent > 0
+              ? fmtCurrency(mrrGrossCurrent, { compact: true })
+              : '—'}
+            target="Recurring at RRP · membership + stacks + supplements + peptides"
+            status={mrrGrossCurrent > 0 ? 'green' : 'grey'}
+            delta={mrrGrossDelta === null ? null : { value: Math.round(mrrGrossDelta), period: 'vs previous' }}
+            href="/financial"
+            chart={<TileChart
+              variant="cumulative"
+              data={mrrGrossCumulative}
+              formatValue={(n) => fmtCurrency(n, { compact: true })}
+              height={96}
+            />}
           />
         </div>
       </NarrativeSection>
