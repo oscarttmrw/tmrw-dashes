@@ -47,7 +47,6 @@ export interface DashboardData {
   social_followers: CanonicalRow[]
   social_views: CanonicalRow[]
   stripe: CanonicalRow[]
-  hubspot: CanonicalRow[]
   pelagonia: CanonicalRow[]
   tableau: CanonicalRow[]
   zendesk: CanonicalRow[]
@@ -107,7 +106,6 @@ const defaultData: DashboardData = {
   social_followers: [],
   social_views: [],
   stripe: [],
-  hubspot: [],
   pelagonia: [],
   tableau: [],
   zendesk: [],
@@ -190,7 +188,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
         social_followers: asRows(body.social_followers),
         social_views: asRows(body.social_views),
         stripe: asRows(body.stripe),
-        hubspot: asRows(body.hubspot),
         pelagonia: asRows(body.pelagonia),
         tableau: asRows(body.tableau),
         zendesk: asRows(body.zendesk),
