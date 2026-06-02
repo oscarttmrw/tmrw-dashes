@@ -18,7 +18,9 @@ import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { StatusDot } from '@/components/dashboard/status-dot'
 import { TrendIndicator } from '@/components/dashboard/trend-indicator'
 import { TileChart } from '@/components/dashboard/tile-chart'
+import { DateRangePicker } from '@/components/dashboard/date-range-picker'
 import { useDashboardData } from '@/lib/context/data-context'
+import { useDateFilter } from '@/lib/context/filter-context'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
 import { Lock, Star, ChevronDown } from 'lucide-react'
@@ -244,9 +246,22 @@ export default function FinancialPage() {
   // Row total = sum of product columns (robust even if the stored `total` is 0).
   const rowTotal = useCallback((r: Row) => PRODUCT_KEYS.reduce((s, k) => s + num(r[k]), 0), [])
 
-  // Calendar "today" — anchors the month, day-of-month and days-remaining so
-  // they track the real date, not how fresh the data happens to be.
-  const today = useMemo(() => new Date(), [])
+  // Tool-wide date filter (shared with Dashboard + Marketing). The Financial
+  // page is month-oriented, so we anchor the month view on the END of the
+  // selected period — picking "Last month" shows that month's finals, etc.
+  const { value: pickerValue, setValue: setPickerValue } = useDateFilter()
+  const realNow = useMemo(() => new Date(), [])
+
+  // `today` anchors the month, day-of-month and days-remaining. When the
+  // selected period ends in the real current month we anchor on the true
+  // "now" (so MTD + run-rate track the live date); for a completed prior
+  // month we anchor on the period end (the month is already done).
+  const today = useMemo(() => {
+    const end = pickerValue.period.end
+    const isCurrentMonth =
+      end.getFullYear() === realNow.getFullYear() && end.getMonth() === realNow.getMonth()
+    return isCurrentMonth ? realNow : end
+  }, [pickerValue.period.end, realNow])
 
   // Data freshness: most recent date in financial_revenue (else stripe). Used
   // as the run-rate projection denominator so we extrapolate from days of data
@@ -475,7 +490,10 @@ export default function FinancialPage() {
 
   return (
     <div className="space-y-8 md:space-y-12">
-      <Breadcrumb items={[{ label: 'Financial' }, { label: 'Summary' }]} />
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <Breadcrumb items={[{ label: 'Financial' }, { label: 'Summary' }]} />
+        <DateRangePicker value={pickerValue} onChange={setPickerValue} />
+      </div>
 
       {error && (
         <div className="flex items-center justify-between rounded-lg border border-status-red/30 bg-status-red/5 px-4 py-3">

@@ -1,19 +1,16 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import Link from 'next/link'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { AlertCard } from '@/components/dashboard/alert-card'
 import { SectionHeading } from '@/components/dashboard/section-heading'
 import { StatusDot } from '@/components/dashboard/status-dot'
 import { TrendIndicator } from '@/components/dashboard/trend-indicator'
-import {
-  DateRangePicker,
-  defaultDateRangePicker,
-  type DateRangePickerValue,
-} from '@/components/dashboard/date-range-picker'
+import { DateRangePicker } from '@/components/dashboard/date-range-picker'
 import { TileChart, bucketByDay, toCumulative, buildCytdRunningSum } from '@/components/dashboard/tile-chart'
 import { useDashboardData } from '@/lib/context/data-context'
+import { useDateFilter } from '@/lib/context/filter-context'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
 import { Lock } from 'lucide-react'
@@ -188,8 +185,9 @@ export default function DashboardPage() {
     refresh,
   } = useDashboardData()
 
-  // User-controlled date range picker (PR C). Independent state per page.
-  const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
+  // Tool-wide date range picker — shared across Dashboard / Marketing /
+  // Financial via FilterProvider so changing it on one page carries across.
+  const { value: pickerValue, setValue: setPickerValue } = useDateFilter()
   const periodStart = pickerValue.period.start
   const periodEnd = pickerValue.period.end
   const prevPeriodStart = pickerValue.comparison.start

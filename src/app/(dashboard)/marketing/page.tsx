@@ -1,18 +1,15 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { TrendIndicator } from '@/components/dashboard/trend-indicator'
 import { useDashboardData } from '@/lib/context/data-context'
+import { useDateFilter } from '@/lib/context/filter-context'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
 import { axisTickStyle, axisLineStyle, gridStyle, TMRW_COLORS } from '@/lib/utils/chart-styles'
-import {
-  DateRangePicker,
-  defaultDateRangePicker,
-  type DateRangePickerValue,
-} from '@/components/dashboard/date-range-picker'
+import { DateRangePicker } from '@/components/dashboard/date-range-picker'
 import { TileChart, bucketByDay } from '@/components/dashboard/tile-chart'
 import { Lock } from 'lucide-react'
 
@@ -217,7 +214,7 @@ function NarrativeSection({
 export default function MarketingPage() {
   const { meta_ads, social_followers, social_views, operational_data, ghl_opportunities, plan_targets } = useDashboardData()
 
-  const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
+  const { value: pickerValue, setValue: setPickerValue } = useDateFilter()
   const periodStart = pickerValue.period.start
   const periodEnd = pickerValue.period.end
   const prevStart = pickerValue.comparison.start
