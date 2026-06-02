@@ -169,7 +169,7 @@ function FunnelChart({ rows }: { rows: FunnelRow[] }) {
                 tabIndex={isExpandable ? 0 : undefined}
                 onKeyDown={isExpandable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(isOpen ? null : i) } } : undefined}
               >
-                <span className="flex w-28 shrink-0 items-center gap-1 font-ui text-[11px] font-medium uppercase tracking-[0.06em] text-dash-text-secondary">
+                <span className="flex w-40 shrink-0 items-center gap-1 font-ui text-[11px] font-medium uppercase tracking-[0.06em] text-dash-text-secondary">
                   <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: swatch.bg }} />
                   <span className="truncate">{r.label}</span>
                   {isExpandable && (
@@ -193,7 +193,7 @@ function FunnelChart({ rows }: { rows: FunnelRow[] }) {
 
               {/* Expanded breakdown — segmented bar + legend */}
               {isExpandable && isOpen && (
-                <div className="ml-28 mr-20 mt-2 rounded-md border border-dash-border bg-dash-bg/50 p-3">
+                <div className="ml-40 mr-20 mt-2 rounded-md border border-dash-border bg-dash-bg/50 p-3">
                   <div className="mb-2 flex h-4 w-full overflow-hidden rounded-sm">
                     {r.breakdown!.map((seg, si) => {
                       const w = r.value > 0 ? (seg.value / r.value) * 100 : 0
