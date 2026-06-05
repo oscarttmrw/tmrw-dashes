@@ -25,10 +25,10 @@ interface DestinationTarget {
 const destinationTargets: DestinationTarget[] = [
   { label: 'Active Members', now: '270', target: '500', status: 'amber', href: '/members' },
   { label: 'MRR', now: '$18K', target: '$60K', status: 'red', href: '/financial' },
-  { label: 'Churn', now: '3.8%', target: '<3%', status: 'green', href: '/retention' },
+  { label: 'Churn', now: '3.8%', target: '<3%', status: 'green', href: '/members' },
   { label: 'Reg→Dashboard', now: '98d', target: '<30d', status: 'red', href: '/clinical' },
   { label: 'NPS', now: '62', target: '70+', status: 'amber', href: '/support' },
-  { label: 'Retest Rate', now: 'TBC', target: '40%+', status: 'grey', href: '/retention' },
+  { label: 'Retest Rate', now: 'TBC', target: '40%+', status: 'grey', href: '/members' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -98,8 +98,8 @@ const ORG_COLORS: Record<string, { color: string; bg: string }> = {
 const METRIC_KEYWORDS: Record<string, { metricId: string; label: string; page: string }> = {
   queue: { metricId: 'pipeline-queue', label: 'Pipeline Queue', page: '/clinical' },
   dashboard: { metricId: 'dashboards-waiting', label: 'Dashboards Waiting', page: '/clinical' },
-  churn: { metricId: 'monthly-churn', label: 'Monthly Churn', page: '/retention' },
-  retention: { metricId: 'retention-rate', label: 'Retention Rate', page: '/retention' },
+  churn: { metricId: 'monthly-churn', label: 'Monthly Churn', page: '/members' },
+  retention: { metricId: 'retention-rate', label: 'Retention Rate', page: '/members' },
   revenue: { metricId: 'mrr', label: 'MRR', page: '/financial' },
   mrr: { metricId: 'mrr', label: 'MRR', page: '/financial' },
   stripe: { metricId: 'stripe-status', label: 'Stripe', page: '/admin/registry' },
@@ -111,7 +111,7 @@ const METRIC_KEYWORDS: Record<string, { metricId: string; label: string; page: s
   ticket: { metricId: 'open-tickets', label: 'Open Tickets', page: '/support' },
   csat: { metricId: 'csat', label: 'CSAT', page: '/support' },
   registration: { metricId: 'weekly-registrations', label: 'Registrations', page: '/members' },
-  retest: { metricId: 'retests', label: 'Retests', page: '/retention' },
+  retest: { metricId: 'retests', label: 'Retests', page: '/members' },
   supplement: { metricId: 'supplement-protocols', label: 'Protocols', page: '/clinical' },
   landing: { metricId: 'website-status', label: 'Website', page: '/marketing' },
   compliance: { metricId: 'tga-status', label: 'TGA', page: '/strategy' },

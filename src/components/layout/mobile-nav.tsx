@@ -7,7 +7,7 @@ import {
   LayoutDashboard,
   DollarSign,
   Stethoscope,
-  RefreshCw,
+  Users,
   Menu,
 } from 'lucide-react'
 
@@ -15,7 +15,7 @@ const tabs = [
   { label: 'Home', href: '/', icon: LayoutDashboard },
   { label: 'Financial', href: '/financial', icon: DollarSign },
   { label: 'Delivery', href: '/clinical', icon: Stethoscope },
-  { label: 'Retention', href: '/retention', icon: RefreshCw },
+  { label: 'Members', href: '/members', icon: Users },
 ] as const
 
 interface MobileNavProps {

@@ -622,7 +622,7 @@ export default function DashboardPage() {
       out.push({
         severity: 'high',
         title: `Monthly churn at ${monthlyChurnRate.toFixed(1)}% exceeds 5% guardrail.`,
-        href: '/retention',
+        href: '/members',
       })
     }
     if (costPerLead !== null && costPerLead > 80) {
@@ -833,7 +833,7 @@ export default function DashboardPage() {
             }
             direction="lower-better"
             delta={churnDelta === null ? null : { value: Math.round(churnDelta), period: 'vs previous' }}
-            href="/retention"
+            href="/members"
             chart={<TileChart data={churnSeries} variant="line" />}
           />
           <LockedTile

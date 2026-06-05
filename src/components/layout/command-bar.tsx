@@ -43,7 +43,7 @@ const categoryRoutes: Record<string, string> = {
   members: '/members',
   clinical: '/clinical',
   support: '/support',
-  retention: '/retention',
+  retention: '/members',
   marketing: '/marketing',
   strategy: '/strategy',
   eos: '/eos',
