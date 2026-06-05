@@ -8,7 +8,7 @@ import { SectionHeading } from '@/components/dashboard/section-heading'
 import { StatusDot } from '@/components/dashboard/status-dot'
 import { TrendIndicator } from '@/components/dashboard/trend-indicator'
 import { DateRangePicker } from '@/components/dashboard/date-range-picker'
-import { TileChart, bucketByDay, toCumulative, buildCytdRunningSum } from '@/components/dashboard/tile-chart'
+import { TileChart, bucketByDay, toCumulative } from '@/components/dashboard/tile-chart'
 import { useDashboardData } from '@/lib/context/data-context'
 import { useDateFilter } from '@/lib/context/filter-context'
 import { aggregateFunnel } from '@/lib/utils/funnel'
@@ -34,7 +34,7 @@ function MetricTile({ label, value, target, delta, status, direction = 'higher-b
   const tileClass = cn(
     'flex h-full flex-col rounded-lg border bg-dash-surface shadow-card transition-all duration-150',
     prominent
-      ? 'border-dash-border-strong p-4 md:p-5'
+      ? 'border-dash-border-strong border-t-2 border-t-dash-red p-5 md:p-6 shadow-card-hover'
       : 'border-dash-border p-3 md:p-4',
     href && 'hover:-translate-y-px hover:border-dash-border-strong hover:shadow-card-hover'
   )
@@ -52,7 +52,7 @@ function MetricTile({ label, value, target, delta, status, direction = 'higher-b
       <div className="mt-1 md:mt-2 flex items-baseline gap-2">
         <span className={cn(
           'font-mono font-bold tracking-[-0.01em] text-dash-text',
-          prominent ? 'text-2xl md:text-3xl' : 'text-lg md:text-2xl'
+          prominent ? 'text-3xl md:text-4xl' : 'text-lg md:text-2xl'
         )}>
           {value}
         </span>
@@ -62,7 +62,7 @@ function MetricTile({ label, value, target, delta, status, direction = 'higher-b
       </div>
       {chart && <div className="mt-3 mb-2">{chart}</div>}
       <div className="mt-auto pt-3 flex items-center justify-between text-[10px] text-dash-text-muted md:text-[11px]">
-        {target ? <span>{target}</span> : <span />}
+        {target ? <span className={cn(prominent && 'font-medium text-dash-text-secondary md:text-[12px]')}>{target}</span> : <span />}
         {delta?.period && <span className="font-sans">{delta.period}</span>}
       </div>
     </div>
@@ -298,18 +298,6 @@ export default function DashboardPage() {
 
   /* ── Section 2 — Scale ── */
   const totalCustomers = customerRows.length
-
-  // D1: eScript Sent (lifetime count)
-  const escriptCount = useMemo(
-    () => customerRows.filter(r => r.escript_sent === true).length,
-    [customerRows]
-  )
-
-  // Di1: Blood Dashboards Released (lifetime)
-  const bloodDashboardCount = useMemo(
-    () => customerRows.filter(r => r.blood_dashboard_published === true).length,
-    [customerRows]
-  )
 
   // In2: Time TruDiag → Epi (avg days)
   const avgDaysTruDiagToEpi = useMemo(() => {
@@ -555,42 +543,37 @@ export default function DashboardPage() {
     [mrrGrossSeries]
   )
 
-  /* ── CYTD running-sum series for Section 2 throughput tiles ──
-   * Always Jan 1 → today of the period's calendar year, independent of
-   * the selected period filter. Shows acceleration of operational output.
-   * eScript + Blood Dashboards have no dedicated date field on HubSpot —
-   * we proxy with customer_entered_at (eScript happens early in onboarding)
-   * and blood_draw_date (close to dashboard publication). Approximate but
-   * directionally honest. */
-  const cytdEnd = periodEnd
-  const escriptCytdSeries = useMemo(
-    () => buildCytdRunningSum(
+  /* ── Period running-sum series for Section 2 throughput tiles ──
+   * Month-to-date by default, but follows the tool-wide date filter (so
+   * "Last month" etc. work here too). eScript + Blood Dashboards have no
+   * dedicated date field on HubSpot — we proxy with customer_entered_at
+   * (eScript happens early in onboarding) and blood_draw_date (close to
+   * dashboard publication). Approximate but directionally honest. */
+  const escriptPeriodSeries = useMemo(
+    () => toCumulative(bucketByDay(
       customerRows.filter(r => r.escript_sent === true),
-      'customer_entered_at',
-      cytdEnd,
-    ),
-    [customerRows, cytdEnd]
+      'customer_entered_at', periodStart, periodEnd,
+      (rows) => rows.length)),
+    [customerRows, periodStart, periodEnd]
   )
-  const bloodDashboardCytdSeries = useMemo(
-    () => buildCytdRunningSum(
+  const bloodDashboardPeriodSeries = useMemo(
+    () => toCumulative(bucketByDay(
       customerRows.filter(r => r.blood_dashboard_published === true),
-      'blood_draw_date',
-      cytdEnd,
-    ),
-    [customerRows, cytdEnd]
+      'blood_draw_date', periodStart, periodEnd,
+      (rows) => rows.length)),
+    [customerRows, periodStart, periodEnd]
   )
-  const epiDashCytdSeries = useMemo(
-    () => buildCytdRunningSum(
+  const epiDashPeriodSeries = useMemo(
+    () => toCumulative(bucketByDay(
       customerRows.filter(r => r.epigenetics_dashboard_unlocked === true),
-      'epigenetics_dashboard_unlocked_date',
-      cytdEnd,
-    ),
-    [customerRows, cytdEnd]
+      'epigenetics_dashboard_unlocked_date', periodStart, periodEnd,
+      (rows) => rows.length)),
+    [customerRows, periodStart, periodEnd]
   )
-  // CYTD lifetime totals (peak of the running-sum series).
-  const escriptCytdTotal = escriptCytdSeries.length ? escriptCytdSeries[escriptCytdSeries.length - 1].value : escriptCount
-  const bloodCytdTotal = bloodDashboardCytdSeries.length ? bloodDashboardCytdSeries[bloodDashboardCytdSeries.length - 1].value : bloodDashboardCount
-  const epiCytdTotal = epiDashCytdSeries.length ? epiDashCytdSeries[epiDashCytdSeries.length - 1].value : 0
+  // Period totals (peak of the running-sum series).
+  const escriptPeriodTotal = escriptPeriodSeries.length ? escriptPeriodSeries[escriptPeriodSeries.length - 1].value : 0
+  const bloodPeriodTotal = bloodDashboardPeriodSeries.length ? bloodDashboardPeriodSeries[bloodDashboardPeriodSeries.length - 1].value : 0
+  const epiPeriodTotal = epiDashPeriodSeries.length ? epiDashPeriodSeries[epiDashPeriodSeries.length - 1].value : 0
 
   /* ── D.8: Time HS → Pods (avg days health_story_completed → cp_shipped) ── */
   const avgDaysHsToPods = useMemo(() => {
@@ -715,7 +698,7 @@ export default function DashboardPage() {
             chart={<TileChart
               variant="cumulative"
               data={registrationsCumulative}
-              height={96}
+              height={120}
             />}
           />
           <MetricTile
@@ -736,7 +719,7 @@ export default function DashboardPage() {
               variant="cumulative"
               data={netRevenueCumulative}
               formatValue={(n) => fmtCurrency(n, { compact: true })}
-              height={96}
+              height={120}
             />}
           />
           <MetricTile
@@ -755,7 +738,7 @@ export default function DashboardPage() {
               variant="cumulative"
               data={grossRevenueCumulative}
               formatValue={(n) => fmtCurrency(n, { compact: true })}
-              height={96}
+              height={120}
             />}
           />
           <MetricTile
@@ -772,7 +755,7 @@ export default function DashboardPage() {
               variant="cumulative"
               data={mrrGrossCumulative}
               formatValue={(n) => fmtCurrency(n, { compact: true })}
-              height={96}
+              height={120}
             />}
           />
         </div>
@@ -783,14 +766,12 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3 md:gap-4">
           <Column heading="Discovery">
             <MetricTile
-              label="eScript Sent · CYTD"
-              value={String(escriptCytdTotal)}
-              target={totalCustomers > 0
-                ? `${escriptCytdTotal} of ${totalCustomers} (${Math.round((escriptCytdTotal / totalCustomers) * 100)}%)`
-                : 'CYTD running total'}
+              label="eScript Sent · MTD"
+              value={String(escriptPeriodTotal)}
+              target="this period (running total)"
               status="grey"
               delta={null}
-              chart={<TileChart variant="cumulative" data={escriptCytdSeries} />}
+              chart={<TileChart variant="cumulative" data={escriptPeriodSeries} />}
             />
             <MetricTile
               label="Time HS → Pods"
@@ -805,14 +786,12 @@ export default function DashboardPage() {
           </Column>
           <Column heading="Diagnostic">
             <MetricTile
-              label="Blood Dashboards · CYTD"
-              value={String(bloodCytdTotal)}
-              target={totalCustomers > 0
-                ? `${bloodCytdTotal} of ${totalCustomers} (${Math.round((bloodCytdTotal / totalCustomers) * 100)}%)`
-                : 'CYTD running total'}
+              label="Blood Dashboards · MTD"
+              value={String(bloodPeriodTotal)}
+              target="this period (running total)"
               status="grey"
               delta={null}
-              chart={<TileChart variant="cumulative" data={bloodDashboardCytdSeries} />}
+              chart={<TileChart variant="cumulative" data={bloodDashboardPeriodSeries} />}
             />
             <LockedTile
               label="Time Blood Results → Dashboard"
@@ -821,14 +800,12 @@ export default function DashboardPage() {
           </Column>
           <Column heading="Integrative">
             <MetricTile
-              label="Epi Dashboards · CYTD"
-              value={String(epiCytdTotal)}
-              target={totalCustomers > 0
-                ? `${epiCytdTotal} of ${totalCustomers} (${Math.round((epiCytdTotal / totalCustomers) * 100)}%)`
-                : 'CYTD running total'}
+              label="Epi Dashboards · MTD"
+              value={String(epiPeriodTotal)}
+              target="this period (running total)"
               status="grey"
               delta={null}
-              chart={<TileChart variant="cumulative" data={epiDashCytdSeries} />}
+              chart={<TileChart variant="cumulative" data={epiDashPeriodSeries} />}
             />
             <MetricTile
               label="Time TruDiag → Epi"
