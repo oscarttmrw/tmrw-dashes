@@ -30,11 +30,11 @@ export interface NavItem {
 }
 
 export const navigation: NavItem[] = [
-  { label: 'Dashboard', href: '/', icon: LayoutDashboard, section: 'home' },
+  { label: 'Pulse', href: '/', icon: LayoutDashboard, section: 'home' },
 
-  { label: 'Financial', href: '/financial', icon: DollarSign, section: 'operations' },
-  { label: 'Marketing', href: '/marketing', icon: Megaphone, section: 'operations' },
-  { label: 'Members', href: '/members', icon: Users, section: 'operations', tag: 'DEMO' },
+  { label: 'Revenue', href: '/financial', icon: DollarSign, section: 'operations' },
+  { label: 'Growth', href: '/marketing', icon: Megaphone, section: 'operations' },
+  { label: 'Members', href: '/members', icon: Users, section: 'operations' },
   { label: 'Delivery', href: '/clinical', icon: Stethoscope, section: 'operations', tag: 'DEMO' },
   { label: 'Retention', href: '/retention', icon: RefreshCw, section: 'operations', tag: 'DEMO' },
   { label: 'Support', href: '/support', icon: HeadphonesIcon, section: 'operations', tag: 'DEMO' },

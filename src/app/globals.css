@@ -24,13 +24,13 @@
   --font-display: 'ApocRevelations', serif;
   --font-ui: 'Brown', ui-sans-serif, system-ui, sans-serif;
 
-  /* Surfaces — INCREASED CONTRAST */
-  --color-dash-bg: #FFFFFF;
+  /* Surfaces — warm paper background, white cards for contrast */
+  --color-dash-bg: #FAF9F6;
   --color-dash-surface: #FFFFFF;
-  --color-dash-surface-hover: #F7F7F7;
-  --color-dash-surface-alt: #F5F5F5;
+  --color-dash-surface-hover: #F7F6F2;
+  --color-dash-surface-alt: #F4F3EE;
   --color-dash-header: #1A1A1A;
-  --color-dash-sidebar: #F9F9F9;
+  --color-dash-sidebar: #F6F5F1;
 
   /* Borders — STRONGER */
   --color-dash-border: #D4D4D4;

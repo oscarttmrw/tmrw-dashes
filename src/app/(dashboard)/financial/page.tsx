@@ -1,1101 +1,299 @@
 'use client'
 
-import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useMemo, useState } from 'react'
+import { motion } from 'framer-motion'
 import {
-  ResponsiveContainer,
-  ComposedChart,
-  BarChart,
-  LineChart,
-  Bar,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
+  Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import Link from 'next/link'
-import { Breadcrumb } from '@/components/layout/breadcrumb'
-import { StatusDot } from '@/components/dashboard/status-dot'
-import { TrendIndicator } from '@/components/dashboard/trend-indicator'
-import { TileChart } from '@/components/dashboard/tile-chart'
 import { useDashboardData } from '@/lib/context/data-context'
-import { cn } from '@/lib/utils'
-import type { Status } from '@/lib/types'
-import { Lock, Star, ChevronDown } from 'lucide-react'
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu'
+  DateRangePicker,
+  defaultDateRangePicker,
+  type DateRangePickerValue,
+} from '@/components/dashboard/date-range-picker'
+import { axisTickStyle, gridStyle, tooltipStyle, legendStyle } from '@/lib/utils/chart-styles'
+import {
+  aggRevenue, aggStripe, aggOps, dailySeries, deltaPct, revenueRows, sparkValues,
+  REVENUE_STREAMS,
+} from '@/lib/pulse/metrics'
+import { fmtMoney, fmtNum, fmtPct, fmtDateShort } from '@/components/pulse/format'
+import { KpiTile, MiniStat } from '@/components/pulse/kpi'
+import { PulseSection, CardTitle } from '@/components/pulse/section'
+import { Reveal, Stagger, StaggerItem, LiftCard } from '@/components/pulse/motion'
+import { CountUp } from '@/components/pulse/count-up'
 
-/* ─── Tile primitives (mirrors home-dashboard styling) ─────────────── */
-
-interface TileProps {
-  label: string
-  value: string
-  target?: string
-  delta?: { value: number; period?: string } | null
-  status: Status
-  direction?: 'higher-better' | 'lower-better'
-  href?: string
-  chart?: React.ReactNode
-  prominent?: boolean
+/** Warm-to-dark editorial palette for the six revenue streams. */
+const STREAM_COLORS: Record<string, string> = {
+  membership: '#8B0000',
+  joining_fees: '#E61317',
+  tmrw_stacks: '#1A1A1A',
+  supplements: '#D97706',
+  peptides: '#7C3AED',
+  advanced_tests: '#2563EB',
 }
 
-function MetricTile({ label, value, target, delta, status, direction = 'higher-better', href, chart, prominent }: TileProps) {
-  const tileClass = cn(
-    'flex h-full flex-col rounded-lg border bg-dash-surface transition-all duration-150',
-    prominent
-      ? 'border-dash-border-strong p-4 md:p-5 shadow-sm'
-      : 'border-dash-border p-3 md:p-4',
-    href && 'hover:border-dash-border-strong hover:shadow-sm hover:-translate-y-px'
+export default function RevenuePage() {
+  const { financial_revenue, stripe, operational_data } = useDashboardData()
+  const [picker, setPicker] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
+  const [view, setView] = useState<'net' | 'gross'>('net')
+  const period = picker.period
+  const comparison = picker.comparison
+
+  const rev = useMemo(() => aggRevenue(financial_revenue, period, view), [financial_revenue, period, view])
+  const revPrev = useMemo(() => aggRevenue(financial_revenue, comparison, view), [financial_revenue, comparison, view])
+  const net = useMemo(() => aggRevenue(financial_revenue, period, 'net'), [financial_revenue, period])
+  const gross = useMemo(() => aggRevenue(financial_revenue, period, 'gross'), [financial_revenue, period])
+  const stripeAgg = useMemo(() => aggStripe(stripe, period), [stripe, period])
+  const stripePrev = useMemo(() => aggStripe(stripe, comparison), [stripe, comparison])
+  const ops = useMemo(() => aggOps(operational_data, period), [operational_data, period])
+
+  const streamKeys = REVENUE_STREAMS.map(s => s.key)
+  const daily = useMemo(
+    () => dailySeries(revenueRows(financial_revenue, view), 'date', [...streamKeys, 'total'], period),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [financial_revenue, period, view]
   )
-  const inner = (
-    <div className={tileClass}>
-      <div className="flex items-start justify-between gap-2">
-        <span className={cn(
-          'font-ui font-medium uppercase tracking-[0.05em] text-dash-text-secondary',
-          prominent ? 'text-[11px] md:text-[12px]' : 'text-[10px] md:text-[11px]'
-        )}>
-          {label}
-        </span>
-        <StatusDot status={status} />
-      </div>
-      <div className="mt-1 md:mt-2 flex items-baseline gap-2">
-        <span className={cn(
-          'font-mono font-bold tracking-[-0.01em] text-dash-text',
-          prominent ? 'text-2xl md:text-3xl' : 'text-lg md:text-2xl'
-        )}>
-          {value}
-        </span>
-        {delta !== null && delta !== undefined && (
-          <TrendIndicator value={delta.value} direction={direction} />
-        )}
-      </div>
-      {chart && <div className="mt-3 mb-2">{chart}</div>}
-      <div className="mt-auto pt-3 flex items-center justify-between text-[10px] text-dash-text-muted md:text-[11px]">
-        {target ? <span>{target}</span> : <span />}
-        {delta?.period && <span className="font-sans">{delta.period}</span>}
-      </div>
-    </div>
-  )
-  return href ? <Link href={href} className="block h-full">{inner}</Link> : inner
-}
+  const chart = useMemo(() => daily.map(r => ({ ...r, label: fmtDateShort(String(r.date)) })), [daily])
 
-function LockedTile({ label, reason, target }: { label: string; reason: string; target?: string }) {
-  return (
-    <div className="flex h-full flex-col rounded-lg border border-dashed border-dash-border bg-dash-surface/40 p-3 md:p-4 opacity-75">
-      <div className="flex items-start justify-between gap-2">
-        <span className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted md:text-[11px]">
-          {label}
-        </span>
-        <Lock size={11} className="text-dash-text-muted" />
-      </div>
-      <div className="mt-1 md:mt-2">
-        <span className="font-mono text-base text-dash-text-muted md:text-lg">—</span>
-      </div>
-      <p className="mt-auto pt-1.5 font-sans text-[10px] italic text-dash-text-muted md:text-[11px]">
-        {reason}
-      </p>
-      {target && (
-        <p className="font-sans text-[10px] text-dash-text-muted/80 md:text-[11px]">{target}</p>
-      )}
-    </div>
-  )
-}
-
-function LockedCard({ title, reason }: { title: string; reason: string }) {
-  return (
-    <div className="flex h-full min-h-[180px] flex-col items-center justify-center rounded-lg border border-dashed border-dash-border bg-dash-surface/40 p-6 text-center opacity-80">
-      <Lock size={16} className="mb-2 text-dash-text-muted" />
-      <p className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">{title}</p>
-      <p className="mt-1 max-w-md font-sans text-[11px] italic text-dash-text-muted">{reason}</p>
-    </div>
-  )
-}
-
-function NarrativeSection({
-  number, question, subtitle, right, children,
-}: {
-  number: number
-  question: string
-  subtitle: string
-  right?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <section>
-      <div className="mb-5 md:mb-7 flex items-end justify-between gap-4">
-        <div>
-          <div className="flex items-start gap-4 md:gap-6">
-            <span className="font-display text-4xl leading-none text-dash-text md:text-6xl">
-              {String(number).padStart(2, '0')}
-            </span>
-            <h2 className="font-display uppercase tracking-tight text-dash-text text-2xl leading-none pt-[0.2rem] md:text-4xl md:pt-[0.4rem]">
-              {question}
-            </h2>
-          </div>
-          <p className="mt-2 ml-[3.5rem] md:ml-[5.5rem] font-ui text-[11px] uppercase tracking-[0.12em] text-dash-text-muted md:text-xs">
-            {subtitle}
-          </p>
-        </div>
-        {right && <div>{right}</div>}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-/* ─── Formatters / helpers ────────────────────────────────────────── */
-
-const fmtCurrency = (n: number, opts: { compact?: boolean; digits?: number } = {}) => {
-  if (opts.compact && Math.abs(n) >= 1000) {
-    return `$${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`
-  }
-  const digits = opts.digits ?? 0
-  return `$${n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
-}
-
-const num = (v: unknown): number => {
-  if (v === null || v === undefined) return 0
-  const n = typeof v === 'number' ? v : Number(v)
-  return isNaN(n) ? 0 : n
-}
-
-function daysInMonth(d: Date): number {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
-}
-
-function startOfMonth(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), 1)
-}
-
-function endOfMonth(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999)
-}
-
-const MONTH_LABELS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
-
-type Row = Record<string, unknown>
-
-// Product columns on financial_revenue, in stack order (recurring first).
-const PRODUCT_KEYS = ['membership', 'joining_fees', 'tmrw_stacks', 'supplements', 'peptides', 'advanced_tests'] as const
-
-const PRODUCT_LABELS: Record<string, string> = {
-  membership: 'Membership',
-  joining_fees: 'Joining Fees',
-  tmrw_stacks: 'TMRW Stacks',
-  supplements: 'Supplements',
-  peptides: 'Peptides',
-  advanced_tests: 'Advanced Tests',
-}
-
-const PRODUCT_COLORS: Record<string, string> = {
-  membership: '#7A1F22',
-  joining_fees: '#1A1A1A',
-  tmrw_stacks: '#E5A04A',
-  supplements: '#3676C9',
-  peptides: '#16A34A',
-  advanced_tests: '#7C3AED',
-}
-
-function monthKey(dateVal: unknown): string | null {
-  const t = new Date(String(dateVal ?? '')).getTime()
-  if (isNaN(t)) return null
-  const d = new Date(t)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
-type OverlaySeries = { key: string; m: string; isCurrent: boolean; data: { day: number; value: number }[] }
-
-// Pivot per-month cumulative series into one row per day-of-month, with a
-// column per month — the shape Recharts wants for an overlaid line chart.
-function combineOverlay(series: OverlaySeries[]): Record<string, number | null>[] {
-  const maxDay = series.reduce((m, s) => Math.max(m, s.data.length), 0)
-  const out: Record<string, number | null>[] = []
-  for (let d = 1; d <= maxDay; d++) {
-    const row: Record<string, number | null> = { day: d }
-    for (const s of series) {
-      const point = s.data.find(p => p.day === d)
-      row[s.key] = point ? point.value : null
-    }
-    out.push(row)
-  }
-  return out
-}
-
-const OVERLAY_GREYS = ['#D8D5CE', '#B8B5AE', '#9A9690', '#737373', '#4A4A4A']
-
-/* ─── Page ────────────────────────────────────────────────────────── */
-
-export default function FinancialPage() {
-  const { financial_revenue, stripe, plan_targets, loading, error, refresh } = useDashboardData()
-  const [showTable, setShowTable] = useState(false)
-
-  /* ── Split financial_revenue by type ──
-   * net  = revenue actually collected (post-discount)
-   * gross = list price (RRP). capture rate = net ÷ gross. */
-  const netRows = useMemo(() => financial_revenue.filter(r => String(r.revenue_type) === 'net'), [financial_revenue])
-  const grossRows = useMemo(() => financial_revenue.filter(r => String(r.revenue_type) === 'gross'), [financial_revenue])
-
-  // Row total = sum of product columns (robust even if the stored `total` is 0).
-  const rowTotal = useCallback((r: Row) => PRODUCT_KEYS.reduce((s, k) => s + num(r[k]), 0), [])
-
-  // Calendar "today" — anchors the month, day-of-month and days-remaining so
-  // they track the real date, not how fresh the data happens to be.
-  const today = useMemo(() => new Date(), [])
-
-  // Data freshness: most recent date in financial_revenue (else stripe). Used
-  // as the run-rate projection denominator so we extrapolate from days of data
-  // actually present, not calendar days.
-  const dataAsOf = useMemo(() => {
-    let maxTs = 0
-    for (const r of financial_revenue) {
-      const t = new Date(String(r.date ?? '')).getTime()
-      if (!isNaN(t)) maxTs = Math.max(maxTs, t)
-    }
-    if (maxTs === 0) {
-      for (const r of stripe) {
-        const t = new Date(String(r.created ?? '')).getTime()
-        if (!isNaN(t)) maxTs = Math.max(maxTs, t)
-      }
-    }
-    return maxTs > 0 ? new Date(maxTs) : today
-  }, [financial_revenue, stripe, today])
-
-  const monthStart = startOfMonth(today)
-  const monthEnd = endOfMonth(today)
-  const dim = daysInMonth(today)
-  const dayOfMonth = today.getDate()
-  // Days of data we have this month — used as the run-rate denominator. Falls
-  // back to the calendar day if the latest data point is from a prior month.
-  const dataDayOfMonth =
-    dataAsOf.getFullYear() === today.getFullYear() && dataAsOf.getMonth() === today.getMonth()
-      ? dataAsOf.getDate()
-      : dayOfMonth
-
-  /* ── Plan target for the current month ── */
-  const currentPlanTarget = useMemo(() => {
-    const ym = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
-    return plan_targets.find(p => typeof p.month === 'string' && p.month.startsWith(ym)) ?? null
-  }, [plan_targets, today])
-  const planThisMonth = currentPlanTarget ? num(currentPlanTarget.gross_revenue_target) : null
-
-  /* ── Monthly aggregation (net + gross + per-product + stripe txns) ── */
-  const monthlyRows = useMemo(() => {
-    type Agg = Record<string, number>
-    const blank = (): Agg => ({ total: 0, membership: 0, joining_fees: 0, tmrw_stacks: 0, supplements: 0, peptides: 0, advanced_tests: 0 })
-    const net = new Map<string, Agg>()
-    const gross = new Map<string, Agg>()
-    const accumulate = (map: Map<string, Agg>, rows: Row[]) => {
-      for (const r of rows) {
-        const k = monthKey(r.date)
-        if (!k) continue
-        const a = map.get(k) ?? blank()
-        for (const key of PRODUCT_KEYS) a[key] += num(r[key])
-        a.total += rowTotal(r)
-        map.set(k, a)
-      }
-    }
-    accumulate(net, netRows)
-    accumulate(gross, grossRows)
-
-    const txnByMonth = new Map<string, number>()
-    for (const r of stripe) {
-      const k = monthKey(r.created)
-      if (k) txnByMonth.set(k, (txnByMonth.get(k) ?? 0) + 1)
-    }
-
-    const keys = Array.from(new Set([...Array.from(net.keys()), ...Array.from(gross.keys())])).sort()
-    return keys.map(k => {
-      const [y, m] = k.split('-')
-      const n = net.get(k) ?? blank()
-      const g = gross.get(k) ?? blank()
-      const planRow = plan_targets.find(p => typeof p.month === 'string' && p.month.startsWith(k))
-      const txns = txnByMonth.get(k) ?? 0
-      return {
-        key: k,
-        m: MONTH_LABELS[parseInt(m, 10) - 1],
-        year: parseInt(y, 10),
-        net: n.total,
-        gross: g.total,
-        membership: n.membership,
-        joining: n.joining_fees,
-        tmrw_stacks: n.tmrw_stacks,
-        supplements: n.supplements,
-        peptides: n.peptides,
-        advanced_tests: n.advanced_tests,
-        plan: planRow ? num(planRow.gross_revenue_target) : null,
-        captureRate: g.total > 0 ? n.total / g.total : null,
-        txns,
-        aov: txns > 0 ? n.total / txns : 0,
-        recurringPct: n.total > 0 ? n.membership / n.total : 0,
-      }
-    })
-  }, [netRows, grossRows, stripe, plan_targets, rowTotal])
-
-  /* ── This month: MTD figures ── */
-  const mtd = useMemo(() => {
-    const inMonth = (v: unknown) => {
-      const t = new Date(String(v ?? '')).getTime()
-      return !isNaN(t) && t >= monthStart.getTime() && t <= monthEnd.getTime()
-    }
-    let net = 0, gross = 0, membership = 0, joining = 0, txns = 0
-    for (const r of netRows) if (inMonth(r.date)) { net += rowTotal(r); membership += num(r.membership); joining += num(r.joining_fees) }
-    for (const r of grossRows) if (inMonth(r.date)) gross += rowTotal(r)
-    for (const r of stripe) if (inMonth(r.created)) txns += 1
-    return { net, gross, membership, joining, txns }
-  }, [netRows, grossRows, stripe, monthStart, monthEnd, rowTotal])
-
-  // Run-rate projection on net revenue (what we actually collect).
-  const projectedMonthEnd = dataDayOfMonth > 0 ? (mtd.net / dataDayOfMonth) * dim : 0
-  const gapToPlan = planThisMonth ? planThisMonth - projectedMonthEnd : null
-  const daysRemaining = dim - dayOfMonth
-  const requiredRunRate = gapToPlan !== null && daysRemaining > 0 ? Math.max(0, gapToPlan / daysRemaining) : null
-  const mtdAov = mtd.txns > 0 ? mtd.net / mtd.txns : 0
-  const captureRateMtd = mtd.gross > 0 ? mtd.net / mtd.gross : null
-
-  /* ── YTD vs Plan ── */
-  const yearStart = new Date(today.getFullYear(), 0, 1)
-  const ytdActual = useMemo(() =>
-    netRows.reduce((s, r) => {
-      const t = new Date(String(r.date ?? '')).getTime()
-      if (isNaN(t) || t < yearStart.getTime() || t > today.getTime()) return s
-      return s + rowTotal(r)
-    }, 0)
-  , [netRows, yearStart, today, rowTotal])
-
-  const ytdPlan = useMemo(() => {
-    const yPrefix = String(today.getFullYear())
-    return plan_targets
-      .filter(p => typeof p.month === 'string' && p.month.startsWith(yPrefix))
-      .reduce((s, p) => {
-        const mDate = new Date(String(p.month))
-        if (mDate.getTime() <= today.getTime()) return s + num(p.gross_revenue_target)
-        return s
-      }, 0)
-  }, [plan_targets, today])
-
-  /* ── §05 month selector: which months to overlay ── */
-  const availableMonths = useMemo(() => {
-    const set = new Set<string>()
-    for (const r of netRows) {
-      const k = monthKey(r.date)
-      if (k) set.add(k)
-    }
-    for (const r of grossRows) {
-      const k = monthKey(r.date)
-      if (k) set.add(k)
-    }
-    return Array.from(set).sort()
-  }, [netRows, grossRows])
-  const [selectedMonths, setSelectedMonths] = useState<Set<string> | null>(null)
-  useEffect(() => {
-    if (selectedMonths === null && availableMonths.length > 0) {
-      setSelectedMonths(new Set(availableMonths))
-    }
-  }, [availableMonths, selectedMonths])
-  const visibleMonths = selectedMonths ?? new Set(availableMonths)
-  const allSelected = availableMonths.length > 0 && availableMonths.every(k => visibleMonths.has(k))
-  const toggleMonth = (key: string) =>
-    setSelectedMonths(prev => {
-      const next = new Set(prev ?? availableMonths)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  const monthKeyLabel = (key: string) => {
-    const [y, m] = key.split('-')
-    return `${MONTH_LABELS[parseInt(m, 10) - 1]} ${y}`
-  }
-
-  /* ── §05 Cumulative MTD overlay — build one per rowset (net + gross) ── */
-  const buildOverlay = useCallback((rows: Row[]) => {
-    const grouped = new Map<string, Row[]>()
-    for (const r of rows) {
-      const k = monthKey(r.date)
-      if (!k) continue
-      const arr = grouped.get(k) ?? []
-      arr.push(r)
-      grouped.set(k, arr)
-    }
-    const curKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
-    const sel = selectedMonths ?? new Set(availableMonths)
-    const keys = Array.from(grouped.keys()).sort().filter(k => sel.has(k))
-    return keys.map(k => {
-      const [y, mIdx] = k.split('-').map(Number)
-      const dimK = new Date(y, mIdx, 0).getDate()
-      const isCurrent = k === curKey
-      const daily = new Array(dimK).fill(0) as number[]
-      for (const r of grouped.get(k)!) {
-        const d = new Date(String(r.date)).getDate()
-        if (d >= 1 && d <= dimK) daily[d - 1] += rowTotal(r)
-      }
-      const cap = isCurrent ? dataDayOfMonth : dimK
-      let running = 0
-      const data: { day: number; value: number }[] = []
-      for (let d = 1; d <= cap; d++) { running += daily[d - 1]; data.push({ day: d, value: running }) }
-      return { key: k, m: MONTH_LABELS[mIdx - 1], isCurrent, data }
-    })
-  }, [today, dataDayOfMonth, rowTotal, selectedMonths, availableMonths])
-
-  const netOverlay = useMemo(() => buildOverlay(netRows), [buildOverlay, netRows])
-  const grossOverlay = useMemo(() => buildOverlay(grossRows), [buildOverlay, grossRows])
-  const netOverlayCombined = useMemo(() => combineOverlay(netOverlay), [netOverlay])
-  const grossOverlayCombined = useMemo(() => combineOverlay(grossOverlay), [grossOverlay])
-
-  /* ── §08 Actual vs Forecast (actual = net collected) ── */
-  const actualVsForecast = useMemo(() =>
-    monthlyRows.map(r => ({ m: r.m, actual: r.net, forecast: null as number | null }))
-  , [monthlyRows])
-
-  const sparkAov = monthlyRows.map(r => ({ date: r.m, value: r.aov }))
-
-  const projectionStatus: Status = planThisMonth === null
-    ? 'grey'
-    : projectedMonthEnd >= planThisMonth ? 'green'
-    : projectedMonthEnd >= planThisMonth * 0.85 ? 'amber'
-    : 'red'
-
-  const captureStatus: Status = captureRateMtd === null
-    ? 'grey'
-    : captureRateMtd >= 0.65 ? 'green'
-    : captureRateMtd >= 0.5 ? 'amber'
-    : 'red'
-
-  const monthlyChartData = monthlyRows.map(r => ({
-    m: r.m,
-    net: r.net,
-    gross: r.gross,
-    plan: r.plan ?? null,
-  }))
+  const margin = gross.total > 0 ? (net.total / gross.total) * 100 : null
+  const sortedStreams = [...rev.byStream].sort((a, b) => b.value - a.value)
+  const maxStream = sortedStreams[0]?.value ?? 0
 
   return (
-    <div className="space-y-8 md:space-y-12">
-      <Breadcrumb items={[{ label: 'Financial' }, { label: 'Summary' }]} />
-
-      {error && (
-        <div className="flex items-center justify-between rounded-lg border border-status-red/30 bg-status-red/5 px-4 py-3">
-          <p className="font-sans text-sm text-status-red">Could not load financial data: {error}</p>
-          <button onClick={() => refresh()} className="ml-4 rounded border border-status-red/40 px-3 py-1 font-sans text-xs text-status-red hover:bg-status-red/10">Retry</button>
-        </div>
-      )}
-      {loading && !error && (
-        <div className="rounded-lg border border-dash-border bg-dash-bg/60 px-4 py-3">
-          <p className="font-sans text-sm text-dash-text-muted">Loading latest data…</p>
-        </div>
-      )}
-
-      {/* ────────────── HEADER STRIP — north-star tiles ────────────── */}
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
-        <div className="flex items-center gap-4 rounded-lg border border-dash-border bg-dash-surface p-4 shadow-sm md:p-5">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-dash-red/10 text-dash-red">
-            <Star size={18} />
-          </div>
-          <div className="flex-1">
-            <div className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Projected Month-End ({MONTH_LABELS[today.getMonth()]})
+    <div className="space-y-12 md:space-y-16">
+      <header>
+        <Reveal>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="font-ui text-[11px] uppercase tracking-[0.16em] text-dash-text-muted">
+                Streams · Quality · Run rate
+              </p>
+              <h1 className="mt-2 font-display text-5xl uppercase leading-[0.9] tracking-tight text-dash-text md:text-7xl">
+                Revenue
+              </h1>
             </div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="font-mono text-2xl font-bold text-dash-text md:text-3xl">
-                {fmtCurrency(projectedMonthEnd, { compact: true })}
-              </span>
-              {planThisMonth !== null && planThisMonth > 0 && (
-                <span className="font-sans text-xs text-dash-text-muted">
-                  vs plan {fmtCurrency(planThisMonth, { compact: true })} ·{' '}
-                  {Math.round((projectedMonthEnd / planThisMonth) * 100)}%
-                </span>
-              )}
-            </div>
-          </div>
-          <StatusDot status={projectionStatus} />
-        </div>
-        <div className="flex items-center gap-4 rounded-lg border border-dash-border bg-dash-surface p-4 shadow-sm md:p-5">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-dash-red/10 text-dash-red">
-            <Star size={18} />
-          </div>
-          <div className="flex-1">
-            <div className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Revenue Capture Rate (MTD)
-            </div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="font-mono text-2xl font-bold text-dash-text md:text-3xl">
-                {captureRateMtd === null ? '—' : `${Math.round(captureRateMtd * 100)}%`}
-              </span>
-              <span className="font-sans text-xs text-dash-text-muted">net ÷ gross (RRP)</span>
-            </div>
-          </div>
-          <StatusDot status={captureStatus} />
-        </div>
-      </section>
-
-      {/* ────────────── 01 PLAN VS ACTUAL ────────────── */}
-      <NarrativeSection number={1} question="Plan vs Actual" subtitle="Will we hit this month?">
-        <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
-          <MetricTile
-            prominent
-            label="Month-End Projection"
-            value={fmtCurrency(projectedMonthEnd, { compact: true })}
-            target={planThisMonth ? `Plan: ${fmtCurrency(planThisMonth, { compact: true })} · ${Math.round((projectedMonthEnd / planThisMonth) * 100)}%` : 'No plan set'}
-            status={projectionStatus}
-            delta={null}
-          />
-          <MetricTile
-            prominent
-            label="Gap to Plan"
-            value={gapToPlan === null ? '—' : fmtCurrency(Math.abs(gapToPlan), { compact: true })}
-            target={`${daysRemaining} day${daysRemaining === 1 ? '' : 's'} remaining`}
-            status={gapToPlan === null ? 'grey' : gapToPlan <= 0 ? 'green' : gapToPlan <= (planThisMonth ?? 0) * 0.15 ? 'amber' : 'red'}
-            direction="lower-better"
-            delta={null}
-          />
-          <MetricTile
-            prominent
-            label="Required Run Rate"
-            value={requiredRunRate === null ? '—' : fmtCurrency(requiredRunRate)}
-            target="Per day to close gap"
-            status={requiredRunRate === null ? 'grey' : 'amber'}
-            delta={null}
-          />
-          <MetricTile
-            prominent
-            label="YTD vs Plan"
-            value={ytdPlan > 0 ? `${Math.round((ytdActual / ytdPlan) * 100)}%` : '—'}
-            target={ytdPlan > 0 ? `${fmtCurrency(ytdActual, { compact: true })} of ${fmtCurrency(ytdPlan, { compact: true })}` : 'No YTD plan'}
-            status={ytdPlan === 0 ? 'grey' : ytdActual >= ytdPlan ? 'green' : ytdActual >= ytdPlan * 0.85 ? 'amber' : 'red'}
-            delta={null}
-          />
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
-          <LockedCard
-            title="Variance Waterfall"
-            reason="Joining/recurring split is buildable today; discount-leakage + refunds segments need list-price + Stripe refunds data."
-          />
-          <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
-            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Monthly Net Revenue vs Plan
-            </div>
-            <div className="h-[220px]">
-              <ResponsiveContainer>
-                <ComposedChart data={monthlyChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#EFEDE8" vertical={false} />
-                  <XAxis dataKey="m" tick={{ fontSize: 10, fill: '#737373' }} />
-                  <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                  <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                  <Bar dataKey="net" fill="#E61317" name="Net revenue" />
-                  <Line type="monotone" dataKey="plan" stroke="#1A1A1A" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 3, fill: '#1A1A1A' }} name="Plan" />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      </NarrativeSection>
-
-      {/* ────────────── 02 REVENUE HEADLINES ────────────── */}
-      <NarrativeSection number={2} question="Revenue Headlines" subtitle="What's flowing right now">
-        <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
-          <MetricTile
-            label="Net Revenue (MTD)"
-            value={fmtCurrency(mtd.net, { compact: true })}
-            target={`${MONTH_LABELS[today.getMonth()]}, day ${dayOfMonth} of ${dim}`}
-            status={mtd.net > 0 ? 'green' : 'grey'}
-            delta={null}
-          />
-          <MetricTile
-            label="Gross at List (MTD)"
-            value={fmtCurrency(mtd.gross, { compact: true })}
-            target={captureRateMtd === null ? 'RRP' : `Capture: ${Math.round(captureRateMtd * 100)}%`}
-            status={mtd.gross > 0 ? 'green' : 'grey'}
-            delta={null}
-          />
-          <MetricTile
-            label="Avg Order Value"
-            value={mtdAov > 0 ? fmtCurrency(mtdAov) : '—'}
-            target="Net ÷ Stripe txns · target $150+"
-            status={mtdAov >= 150 ? 'green' : mtdAov > 0 ? 'amber' : 'grey'}
-            delta={null}
-            chart={<TileChart data={sparkAov} variant="line" formatValue={(n) => fmtCurrency(n)} />}
-          />
-          <LockedTile label="Declined Rate" reason="Stripe Invoices export carries no failure status. Needs Charges export." />
-        </div>
-      </NarrativeSection>
-
-      {/* ────────────── 03 REVENUE BY MONTH ────────────── */}
-      <NarrativeSection number={3} question="Revenue by Month" subtitle="Gross (RRP) · Net">
-        <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
-            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Gross (RRP) vs Net Collected
-            </div>
-            <div className="h-[240px]">
-              <ResponsiveContainer>
-                <BarChart data={monthlyChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#EFEDE8" vertical={false} />
-                  <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
-                  <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                  <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                  <Bar dataKey="gross" fill="#D9D6D0" name="Gross (RRP)" />
-                  <Bar dataKey="net" fill="#7A1F22" name="Net collected" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="mt-3 flex gap-4 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2" style={{ background: '#D9D6D0' }} />Gross (RRP)</span>
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2" style={{ background: '#7A1F22' }} />Net collected</span>
-            </div>
-            <p className="mt-2 font-sans text-[11px] italic text-dash-text-muted">
-              The gap between the bars is discount leakage. Net = after discounts.
-            </p>
-          </div>
-          <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
-            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Net Revenue by Product
-            </div>
-            <div className="h-[240px]">
-              <ResponsiveContainer>
-                <BarChart data={monthlyRows} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#EFEDE8" vertical={false} />
-                  <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
-                  <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                  <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                  {PRODUCT_KEYS.map(k => (
-                    <Bar key={k} dataKey={k} stackId="prod" fill={PRODUCT_COLORS[k]} name={PRODUCT_LABELS[k]} />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
-              {PRODUCT_KEYS.map(k => (
-                <span key={k} className="flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-2" style={{ background: PRODUCT_COLORS[k] }} />{PRODUCT_LABELS[k]}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </NarrativeSection>
-
-      {/* ────────────── 04 DISCOUNT DISCIPLINE ────────────── */}
-      <NarrativeSection number={4} question="Discount Discipline" subtitle="Where are we leaking?">
-        <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
-            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Revenue Capture Rate (Net ÷ Gross)
-            </div>
-            <div className="h-[200px]">
-              <ResponsiveContainer>
-                <ComposedChart data={monthlyRows} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#EFEDE8" vertical={false} />
-                  <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
-                  <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `${Math.round(v * 100)}%`} domain={[0, 1]} />
-                  <Tooltip formatter={(v: unknown) => `${Math.round((Number(v) || 0) * 100)}%`} />
-                  <Line type="monotone" dataKey="captureRate" stroke="#E61317" strokeWidth={2.5} dot={{ r: 4, fill: '#E61317' }} connectNulls />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-            <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
-              Higher = better discount discipline. 100% means full RRP collected.
-            </p>
-          </div>
-          <LockedCard title="Discount Band Distribution" reason="Needs per-charge discount (list_price − amount_paid). financial_revenue is daily aggregate, not per-transaction." />
-        </div>
-      </NarrativeSection>
-
-      {/* ────────────── 05 CUMULATIVE MTD OVERLAY ────────────── */}
-      <NarrativeSection
-        number={5}
-        question="Cumulative Month-to-Date"
-        subtitle="Each month overlaid · current in bold"
-        right={
-          <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2 rounded-md border border-dash-border bg-dash-surface px-3 py-1.5 font-ui text-[11px] uppercase tracking-wider text-dash-text-secondary hover:bg-dash-surface-hover">
-              {availableMonths.length === 0
-                ? 'No months'
-                : `${visibleMonths.size} of ${availableMonths.length} months`}
-              <ChevronDown size={13} />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="max-h-[300px] overflow-y-auto">
-              <DropdownMenuItem
-                onSelect={e => { e.preventDefault(); setSelectedMonths(allSelected ? new Set() : new Set(availableMonths)) }}
-                className="font-ui text-[11px] uppercase tracking-wider text-dash-text-secondary"
-              >
-                {allSelected ? 'Deselect all' : 'Select all'}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {availableMonths.map(k => (
-                <DropdownMenuCheckboxItem
-                  key={k}
-                  checked={visibleMonths.has(k)}
-                  onSelect={e => e.preventDefault()}
-                  onCheckedChange={() => toggleMonth(k)}
-                >
-                  {monthKeyLabel(k)}
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        }
-      >
-        <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
-          {([
-            { title: 'Net Collected', overlay: netOverlay, combined: netOverlayCombined },
-            { title: 'Gross (RRP / list price)', overlay: grossOverlay, combined: grossOverlayCombined },
-          ] as const).map(({ title, overlay, combined }) => {
-            const shadeFor = (s: OverlaySeries, i: number) =>
-              s.isCurrent ? '#E61317' : OVERLAY_GREYS[Math.max(0, OVERLAY_GREYS.length - (overlay.length - i))] ?? '#A3A3A3'
-            return (
-              <div key={title} className="rounded-lg border border-dash-border bg-dash-surface p-4">
-                <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-                  {title}
-                </div>
-                <div className="h-[260px]">
-                  <ResponsiveContainer>
-                    <LineChart data={combined} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <CartesianGrid stroke="#EFEDE8" vertical={false} />
-                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#737373' }} />
-                      <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                      <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                      {overlay.map((s, i) => (
-                        <Line
-                          key={s.key}
-                          type="monotone"
-                          dataKey={s.key}
-                          stroke={shadeFor(s, i)}
-                          strokeWidth={s.isCurrent ? 3 : 1.5}
-                          dot={false}
-                          connectNulls={false}
-                          name={`${s.m}${s.isCurrent ? ' (MTD)' : ''}`}
-                        />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-3 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
-                  {overlay.map((s, i) => (
-                    <span key={s.key} className={cn('flex items-center gap-1.5', s.isCurrent && 'font-bold text-dash-text')}>
-                      <span className="inline-block h-0.5 w-4" style={{ background: shadeFor(s, i) }} />
-                      {s.m}{s.isCurrent ? ' (MTD)' : ''}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </NarrativeSection>
-
-      {/* ────────────── 06 RECURRING REVENUE & ARR ────────────── */}
-      <NarrativeSection
-        number={6}
-        question="Recurring Revenue & ARR"
-        subtitle="ARR is a proxy"
-        right={
-          <span className="rounded-full bg-dash-surface-alt px-3 py-1 font-ui text-[10px] uppercase tracking-wider text-dash-text-secondary">
-            Implied ARR is a proxy
-          </span>
-        }
-      >
-        <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
-            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Joining Fees vs Recurring Revenue
-            </div>
-            <div className="h-[240px]">
-              <ResponsiveContainer>
-                <BarChart data={monthlyRows} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#EFEDE8" vertical={false} />
-                  <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
-                  <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                  <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                  <Bar dataKey="joining" fill="#1A1A1A" name="Joining (one-time)" />
-                  <Bar dataKey="membership" fill="#E61317" name="Recurring (Membership)" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="mt-3 flex gap-4 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2" style={{ background: '#1A1A1A' }} />Joining (one-time)</span>
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2" style={{ background: '#E61317' }} />Recurring</span>
-            </div>
-          </div>
-          <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
-            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-              Recurring as % of Total
-            </div>
-            <div className="h-[240px]">
-              <ResponsiveContainer>
-                <LineChart data={monthlyRows} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#EFEDE8" vertical={false} />
-                  <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
-                  <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `${Math.round(v * 100)}%`} domain={[0, 1]} />
-                  <Tooltip formatter={(v: unknown) => `${Math.round((Number(v) || 0) * 100)}%`} />
-                  <Line type="monotone" dataKey="recurringPct" stroke="#1A1A1A" strokeWidth={2.5} dot={{ r: 4, fill: '#1A1A1A' }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <p className="mt-3 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">Higher = more predictable</p>
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
-          <MetricTile
-            label="Recurring Revenue (MTD)"
-            value={fmtCurrency(mtd.membership, { compact: true })}
-            target={`${MONTH_LABELS[today.getMonth()]} to date · Membership`}
-            status={mtd.membership > 0 ? 'green' : 'grey'}
-            delta={null}
-            chart={<TileChart data={monthlyRows.map(r => ({ date: r.m, value: r.membership }))} variant="line" formatValue={(n) => fmtCurrency(n, { compact: true })} />}
-          />
-          <MetricTile
-            label="Implied ARR (Proxy)"
-            value={fmtCurrency(mtd.membership * 12, { compact: true })}
-            target="MTD membership × 12 · see caveat"
-            status="amber"
-            delta={null}
-          />
-          <MetricTile
-            label="Recurring Share (MTD)"
-            value={mtd.net > 0 ? `${Math.round((mtd.membership / mtd.net) * 100)}%` : '—'}
-            target="Trending toward 50%+"
-            status={mtd.net > 0 ? (mtd.membership / mtd.net >= 0.5 ? 'green' : 'amber') : 'grey'}
-            delta={null}
-            chart={<TileChart data={monthlyRows.map(r => ({ date: r.m, value: r.recurringPct * 100 }))} variant="line" formatValue={(n) => `${Math.round(n)}%`} />}
-          />
-        </div>
-      </NarrativeSection>
-
-      {/* ────────────── 07 NON-CORE REVENUE ────────────── */}
-      <NarrativeSection number={7} question="Non-Core Revenue" subtitle="Stacks · supplements · peptides · advanced tests">
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
-          <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-            Net Revenue from Non-Core Products
-          </div>
-          <div className="h-[260px]">
-            <ResponsiveContainer>
-              <BarChart data={monthlyRows} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="#EFEDE8" vertical={false} />
-                <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
-                <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                {(['tmrw_stacks', 'supplements', 'peptides', 'advanced_tests'] as const).map(k => (
-                  <Bar key={k} dataKey={k} stackId="nc" fill={PRODUCT_COLORS[k]} name={PRODUCT_LABELS[k]} />
+            <div className="flex items-center gap-3">
+              {/* Net / Gross toggle */}
+              <div className="relative flex rounded-lg border border-dash-border bg-dash-surface p-0.5">
+                {(['net', 'gross'] as const).map(v => (
+                  <button
+                    key={v}
+                    onClick={() => setView(v)}
+                    className={`relative z-10 rounded-md px-3 py-1.5 font-ui text-[11px] font-medium uppercase tracking-[0.08em] transition-colors ${
+                      view === v ? 'text-white' : 'text-dash-text-secondary hover:text-dash-text'
+                    }`}
+                  >
+                    {view === v && (
+                      <motion.span
+                        layoutId="rev-toggle"
+                        className="absolute inset-0 -z-10 rounded-md bg-dash-black"
+                        transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                      />
+                    )}
+                    {v}
+                  </button>
                 ))}
-              </BarChart>
-            </ResponsiveContainer>
+              </div>
+              <DateRangePicker value={picker} onChange={setPicker} />
+            </div>
           </div>
-          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
-            {(['tmrw_stacks', 'supplements', 'peptides', 'advanced_tests'] as const).map(k => (
-              <span key={k} className="flex items-center gap-1.5">
-                <span className="inline-block h-2 w-2" style={{ background: PRODUCT_COLORS[k] }} />{PRODUCT_LABELS[k]}
-              </span>
-            ))}
-          </div>
-          <p className="mt-2 font-sans text-[11px] italic text-dash-text-muted">
-            Excludes Membership + Joining Fees. Net (post-discount) figures.
-          </p>
-        </div>
-      </NarrativeSection>
+        </Reveal>
+      </header>
 
-      {/* ────────────── 08 ACTUAL VS FORECAST ────────────── */}
-      <NarrativeSection
-        number={8}
-        question="Actual vs Forecast"
-        subtitle="Where are we heading?"
-        right={
-          <span className="rounded-full bg-status-amber/10 px-3 py-1 font-ui text-[10px] uppercase tracking-wider text-status-amber">
-            Forecast CSV Pending
-          </span>
-        }
+      {/* ─── 01 · The headline ─────────────────────────────────────── */}
+      <PulseSection
+        number={1}
+        title="What did we make?"
+        subtitle={`${view === 'net' ? 'Net' : 'Gross (RRP)'} revenue this period, and the shape of it`}
       >
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
-          <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
-            Actual ({monthlyRows.length > 0 ? `${monthlyRows[0].m}–${monthlyRows[monthlyRows.length - 1].m}` : '—'}) · Forecast pending
-          </div>
-          <div className="h-[300px]">
-            <ResponsiveContainer>
-              <ComposedChart data={actualVsForecast} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="#EFEDE8" vertical={false} />
-                <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
-                <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                <Line type="monotone" dataKey="actual" stroke="#1A1A1A" strokeWidth={2.5} dot={{ r: 3, fill: '#1A1A1A' }} connectNulls={false} name="Actual" />
-                <Line type="monotone" dataKey="forecast" stroke="#E61317" strokeWidth={2} strokeDasharray="5 4" dot={{ r: 4, fill: '#E61317' }} connectNulls={false} name="Forecast" />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="mt-3 font-sans text-[11px] italic text-dash-text-muted">
-            Forecast line activates when <code>forecast.csv</code> is uploaded (columns: month, forecast_revenue).
-          </p>
-        </div>
-      </NarrativeSection>
+        <Stagger className="grid grid-cols-2 gap-4 lg:grid-cols-4" gap={0.06}>
+          <StaggerItem className="h-full">
+            <KpiTile
+              label={`${view} revenue`}
+              value={rev.total}
+              format={v => fmtMoney(v, { compact: true })}
+              delta={deltaPct(rev.total, revPrev.total)}
+              spark={sparkValues(daily, 'total')}
+              sublabel={`${fmtMoney(rev.total / Math.max(1, rev.activeDays))} per trading day`}
+            />
+          </StaggerItem>
+          <StaggerItem className="h-full">
+            <KpiTile
+              label="Recurring share"
+              value={rev.recurringShare}
+              format={v => fmtPct(v)}
+              delta={revPrev.total > 0 ? rev.recurringShare - revPrev.recurringShare : null}
+              sublabel={`${fmtMoney(rev.recurring, { compact: true })} membership of ${fmtMoney(rev.total, { compact: true })} total`}
+            />
+          </StaggerItem>
+          <StaggerItem className="h-full">
+            <KpiTile
+              label="Net : gross margin"
+              value={margin ?? 0}
+              format={v => fmtPct(v)}
+              sublabel={
+                margin !== null
+                  ? `${fmtMoney(gross.total - net.total, { compact: true })} between RRP and net this period`
+                  : 'Needs both net and gross sheets uploaded'
+              }
+            />
+          </StaggerItem>
+          <StaggerItem className="h-full">
+            <KpiTile
+              label="Revenue / member"
+              value={ops.casebook > 0 ? rev.total / ops.casebook : 0}
+              format={v => fmtMoney(v)}
+              sublabel={`across ${fmtNum(ops.casebook)} casebook members`}
+            />
+          </StaggerItem>
+        </Stagger>
+      </PulseSection>
 
-      {/* ────────────── 09 REFUNDS & FAILURES ────────────── */}
-      <NarrativeSection number={9} question="Refunds & Failures" subtitle="Where revenue is leaking">
-        <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
-          <LockedCard title="Failure Rate" reason="Stripe Invoices export has no failed-charge status. Needs Charges export." />
-          <LockedCard title="Failure Codes (YTD)" reason="Drill-down enabled once Stripe Charges data lands." />
-        </div>
-      </NarrativeSection>
-
-      {/* ────────────── 10 UNIT ECONOMICS ────────────── */}
-      <NarrativeSection
-        number={10}
-        question="Unit Economics"
-        subtitle="LTV · CAC · payback"
-        right={
-          <span className="rounded-full bg-dash-surface-alt px-3 py-1 font-ui text-[10px] uppercase tracking-wider text-dash-text-secondary">
-            Requires Marketing Spend Integration
-          </span>
-        }
+      {/* ─── 02 · Streams over time ────────────────────────────────── */}
+      <PulseSection
+        number={2}
+        title="Which streams carry it?"
+        subtitle="Daily revenue stacked by product line — watch the layers trade places"
       >
-        <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
-          <LockedTile label="Blended CAC" reason="Pending CAC integration." />
-          <LockedTile label="CM / Member" reason="Pending COGS feed." />
-          <LockedTile label="LTV : CAC" reason="Pending member-level cohort data." />
-          <LockedTile label="CAC Payback" reason="Pending CAC + cohort data." />
-        </div>
-      </NarrativeSection>
+        <div className="grid gap-4 lg:grid-cols-5">
+          <Reveal className="lg:col-span-3">
+            <LiftCard className="h-full p-5">
+              <CardTitle title={`${view} revenue by stream`} />
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chart as object[]} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                    <CartesianGrid {...gridStyle} vertical={false} />
+                    <XAxis dataKey="label" tick={axisTickStyle} tickLine={false} axisLine={false} minTickGap={36} />
+                    <YAxis tick={axisTickStyle} tickLine={false} axisLine={false} width={52} tickFormatter={(v: number) => fmtMoney(v, { compact: true })} />
+                    <Tooltip
+                      contentStyle={tooltipStyle}
+                      formatter={(v, name) => [fmtMoney(Number(v ?? 0)), String(name)]}
+                    />
+                    <Legend wrapperStyle={legendStyle} />
+                    {REVENUE_STREAMS.map(s => (
+                      <Area
+                        key={s.key}
+                        type="monotone"
+                        dataKey={s.key}
+                        name={s.label}
+                        stackId="rev"
+                        stroke={STREAM_COLORS[s.key]}
+                        fill={STREAM_COLORS[s.key]}
+                        fillOpacity={0.55}
+                        strokeWidth={1}
+                        dot={false}
+                      />
+                    ))}
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </LiftCard>
+          </Reveal>
 
-      {/* ────────────── 11 MONTHLY SUMMARY TABLE ────────────── */}
-      <NarrativeSection
-        number={11}
-        question="Monthly Summary"
-        subtitle="All key metrics · one view"
-        right={
-          <button
-            onClick={() => setShowTable(s => !s)}
-            className="rounded-md border border-dash-border bg-dash-surface px-3 py-1.5 font-ui text-[11px] uppercase tracking-wider text-dash-text-secondary hover:bg-dash-surface-hover"
-          >
-            {showTable ? 'Hide table' : 'Show table'}
-          </button>
-        }
-      >
-        {showTable && (
-          <div className="overflow-x-auto rounded-lg border border-dash-border bg-dash-surface">
-            <table className="w-full font-mono text-[12px]">
-              <thead>
-                <tr className="bg-dash-header text-white">
-                  {['Month', 'Gross (RRP)', 'Net', 'Capture %', 'Refunds', '# Txn', 'Fail %', 'AOV', 'MoM %'].map((h, i) => (
-                    <th key={h} className={cn('px-3 py-3 font-ui text-[10px] uppercase tracking-wider font-medium', i === 0 ? 'text-left' : 'text-center')}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {monthlyRows.map((row, i) => {
-                  const prev = i > 0 ? monthlyRows[i - 1] : null
-                  const mom = prev && prev.net > 0 ? ((row.net - prev.net) / prev.net) * 100 : null
+          <Reveal delay={0.1} className="lg:col-span-2">
+            <LiftCard className="h-full p-5">
+              <CardTitle title="Stream league table" hint="Share of period revenue, largest first" />
+              <div className="space-y-4">
+                {sortedStreams.map((s, i) => {
+                  const prevS = revPrev.byStream.find(x => x.key === s.key)
+                  const d = prevS && prevS.value > 0 ? deltaPct(s.value, prevS.value) : null
                   return (
-                    <tr key={row.key} className="border-b border-dash-border-subtle last:border-b-0">
-                      <td className="px-3 py-3 text-left text-dash-text">{row.m} {row.year}</td>
-                      <td className="px-3 py-3 text-center text-dash-text-secondary">{row.gross > 0 ? fmtCurrency(row.gross) : '—'}</td>
-                      <td className="px-3 py-3 text-center text-dash-text">{fmtCurrency(row.net)}</td>
-                      <td className="px-3 py-3 text-center text-dash-text-secondary">{row.captureRate === null ? '—' : `${Math.round(row.captureRate * 100)}%`}</td>
-                      <td className="px-3 py-3 text-center text-dash-text-muted">—</td>
-                      <td className="px-3 py-3 text-center text-dash-text-secondary">{row.txns}</td>
-                      <td className="px-3 py-3 text-center text-dash-text-muted">—</td>
-                      <td className="px-3 py-3 text-center text-dash-text">{row.aov > 0 ? fmtCurrency(row.aov) : '—'}</td>
-                      <td className={cn('px-3 py-3 text-center', mom === null ? 'text-dash-text-muted' : mom < 0 ? 'text-status-red' : 'text-status-green')}>
-                        {mom === null ? '—' : `${mom > 0 ? '+' : ''}${mom.toFixed(0)}%`}
-                      </td>
-                    </tr>
+                    <div key={s.key}>
+                      <div className="flex items-baseline justify-between">
+                        <span className="flex items-center gap-2 font-ui text-[11px] uppercase tracking-[0.06em] text-dash-text">
+                          <span className="h-2.5 w-2.5 rounded-sm" style={{ background: STREAM_COLORS[s.key] }} />
+                          {s.label}
+                        </span>
+                        <span className="font-mono text-[12px] tabular-nums text-dash-text">
+                          <CountUp value={s.value} format={v => fmtMoney(v, { compact: true })} className="font-bold" />
+                          <span className="ml-2 text-dash-text-muted">{s.share.toFixed(0)}%</span>
+                          {d !== null && (
+                            <span className={`ml-2 ${d >= 0 ? 'text-status-green' : 'text-status-red'}`}>
+                              {d >= 0 ? '▲' : '▼'}{Math.abs(d).toFixed(0)}%
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-dash-surface-alt">
+                        <motion.div
+                          className="h-full rounded-full"
+                          style={{ background: STREAM_COLORS[s.key] }}
+                          initial={{ width: 0 }}
+                          whileInView={{ width: `${maxStream > 0 ? (s.value / maxStream) * 100 : 0}%` }}
+                          viewport={{ once: true }}
+                          transition={{ duration: 0.9, delay: i * 0.07, ease: [0.16, 1, 0.3, 1] }}
+                        />
+                      </div>
+                    </div>
                   )
                 })}
-              </tbody>
-            </table>
-            <p className="px-4 py-3 font-sans text-[11px] italic text-dash-text-muted">
-              Refunds and Fail % columns locked — pending Stripe Charges export. # Txn / AOV from Stripe invoices.
-            </p>
-          </div>
-        )}
-      </NarrativeSection>
-
-      {/* ────────────── 12 PARKED ────────────── */}
-      <NarrativeSection number={12} question="Parked" subtitle="What we can't show yet — and why">
-        <div className="overflow-x-auto rounded-lg border border-dash-border bg-dash-surface/40">
-          <table className="w-full font-sans text-[13px]">
-            <thead>
-              <tr className="border-b border-dash-border text-dash-text-muted">
-                <th className="px-4 py-3 text-left font-ui text-[10px] uppercase tracking-wider font-medium">Metric</th>
-                <th className="px-4 py-3 text-left font-ui text-[10px] uppercase tracking-wider font-medium">Original slot</th>
-                <th className="px-4 py-3 text-left font-ui text-[10px] uppercase tracking-wider font-medium">Why parked · what it needs</th>
-              </tr>
-            </thead>
-            <tbody className="text-dash-text-secondary">
-              {[
-                ['MRR', 'Revenue Headlines', 'No clean subscription-state table. "Active subscriptions" is a proxy (unique invoice prefixes), not MRR. Needs subscription lifecycle events.'],
-                ['MRR Waterfall', '§03', 'Needs Starting / New / Expansion / Contraction / Churn movements from subscription state changes, not just charge data.'],
-                ['Cohort Revenue (M0–M5)', '§04', 'Achievable from CSV (invoice prefix → customer → signup month) but is a meaningful build. Parked as v2.'],
-                ['Gross at List / Capture Rate', '§02, §03, §04', 'Requires list-price book to derive gross. Discount discipline view unlocks at the same time.'],
-                ['Refunds & Failure Rate', '§09, §11', 'Stripe Charges export needed (current ingest is Invoices). Failure code drill-down enabled at the same time.'],
-                ['CAC / LTV / Payback', '§10', 'Needs marketing spend integration + member-level cohort data.'],
-              ].map((row, i) => (
-                <tr key={i} className="border-b border-dash-border-subtle last:border-b-0">
-                  <td className="px-4 py-3 font-mono text-dash-text">{row[0]}</td>
-                  <td className="px-4 py-3 font-ui text-[11px] uppercase tracking-wider text-dash-text-muted">{row[1]}</td>
-                  <td className="px-4 py-3">{row[2]}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </NarrativeSection>
-
-      {/* ────────────── 13 CFO POV ────────────── */}
-      <NarrativeSection
-        number={13}
-        question="CFO POV"
-        subtitle="What keeps me up — read before the board meeting"
-      >
-        <div className="rounded-lg bg-dash-header p-6 text-white md:p-8">
-          <div className="font-ui text-[10px] uppercase tracking-[0.15em] text-white/60">The one sentence</div>
-          <p className="mt-3 font-serif text-lg leading-relaxed md:text-xl">
-            The growth chart is impressive, but the business is being carried by joining fees and steep
-            discounting — both of which mask whether the recurring product is actually viable.
-          </p>
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
-          {[
-            { n: '01', title: 'We are not a recurring business yet — and the dashboard makes us look like one.', body: 'Joining fees dominate monthly revenue. If they vanish for one month, recurring covers only a small fraction of cost base. We are funding the business by acquiring customers, not retaining them.', evidence: '§06 recurring-share line bouncing, never climbing steadily.' },
-            { n: '02', title: 'Steep-discount transactions are not a pricing strategy — they\'re a leak.', body: 'Once list-price data lands, expect a long tail of transactions captured at <20% of list value. Forces a pricing/comp policy decision.', evidence: '§04 discount band distribution (pending list-price book).' },
-            { n: '03', title: 'We have no visibility on failed payments.', body: 'The current Invoices export does not surface declined charges. At meaningful scale this is recoverable revenue lost to broken dunning logic.', evidence: '§09 locked until Stripe Charges export is wired.' },
-            { n: '04', title: 'Product-mix concentration is invisible.', body: 'Without Core/Pods/Add-ons taxonomy on Stripe products, we can\'t see whether spikes are coming from one product line or many. Single-customer effects look like trends.', evidence: '§03 By Product locked pending taxonomy.' },
-            { n: '05', title: 'Add-on revenue could be a wedge — or a sample-size-of-one.', body: 'Once we can classify add-ons, the question becomes whether spikes are distributed across many members (a real product insight) or concentrated in one (a noisy outlier).', evidence: '§07 non-core deep dive locked.' },
-            { n: '06', title: 'We have no idea what a customer is worth.', body: 'LTV:CAC and CAC Payback require marketing spend + cohort retention data we don\'t have. Until then, any LTV number is a guess multiplied by another guess.', evidence: '§10 Unit Economics greyed out — by design, until data exists.' },
-          ].map((insight) => (
-            <div key={insight.n} className="rounded-lg border border-dash-border bg-dash-surface p-5">
-              <div className="flex items-baseline gap-3">
-                <span className="font-display text-3xl leading-none text-dash-red">{insight.n}</span>
-                <h3 className="font-serif text-base font-medium leading-snug text-dash-text md:text-lg">{insight.title}</h3>
               </div>
-              <p className="mt-3 font-sans text-[13px] leading-relaxed text-dash-text">{insight.body}</p>
-              <p className="mt-4 border-t border-dash-border-subtle pt-2 font-ui text-[10px] uppercase tracking-wider text-dash-text-muted">
-                Evidence · {insight.evidence}
-              </p>
-            </div>
-          ))}
+            </LiftCard>
+          </Reveal>
         </div>
+      </PulseSection>
 
-        <div className="mt-4 rounded-lg border border-status-amber/30 bg-status-amber/5 p-6">
-          <div className="font-ui text-[10px] uppercase tracking-[0.15em] text-status-amber">The structural question</div>
-          <p className="mt-3 font-serif text-base leading-relaxed text-dash-text md:text-lg">
-            If we held acquisition flat for 90 days — no new joining fees, no new members — what does the P&amp;L look like?
-          </p>
-          <p className="mt-4 font-sans text-[13px] leading-relaxed text-dash-text">
-            This is the test that separates &ldquo;fast-growing startup&rdquo; from &ldquo;subsidised consumption&rdquo;. To answer it the data layer needs three things:
-          </p>
-          <ol className="mt-3 list-decimal space-y-2 pl-6 font-sans text-[13px] leading-relaxed text-dash-text">
-            <li><b>Cohort retention by signup month</b> — of the early joiners, how many are still paying today?</li>
-            <li><b>Per-member monthly spend across all products</b> — Core + Pods + Add-ons aggregated to a single member view.</li>
-            <li><b>Cost-of-acquisition feed from marketing</b> — without it, we can&apos;t tell whether each new member is creating or destroying value.</li>
-          </ol>
+      {/* ─── 03 · Quality of revenue ───────────────────────────────── */}
+      <PulseSection
+        number={3}
+        title="How durable is it?"
+        subtitle="Stripe invoices split into new business vs renewals — the compounding test"
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          <Reveal>
+            <LiftCard accent className="h-full p-5">
+              <CardTitle title="Invoices collected" />
+              <p className="font-mono text-3xl font-bold tabular-nums text-dash-text">
+                <CountUp value={stripeAgg.paid} format={v => fmtMoney(v, { compact: true })} />
+              </p>
+              <p className="mt-1 text-[11px] text-dash-text-muted">
+                {fmtNum(stripeAgg.invoices)} paid invoices · avg {fmtMoney(stripeAgg.avgInvoice)}
+              </p>
+            </LiftCard>
+          </Reveal>
+          <Reveal delay={0.08}>
+            <LiftCard accent className="h-full p-5">
+              <CardTitle title="New vs renewal mix" hint="By Stripe billing reason" />
+              <div className="mt-1 flex h-3.5 w-full overflow-hidden rounded-full bg-dash-surface-alt">
+                {stripeAgg.paid > 0 && (
+                  <>
+                    <motion.div
+                      className="h-full bg-tmrw-syringe"
+                      initial={{ width: 0 }}
+                      whileInView={{ width: `${(stripeAgg.newBusiness / stripeAgg.paid) * 100}%` }}
+                      viewport={{ once: true }}
+                      transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
+                    />
+                    <motion.div
+                      className="h-full bg-dash-black"
+                      initial={{ width: 0 }}
+                      whileInView={{ width: `${(stripeAgg.renewals / stripeAgg.paid) * 100}%` }}
+                      viewport={{ once: true }}
+                      transition={{ duration: 0.9, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
+                    />
+                  </>
+                )}
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <MiniStat label="New" value={fmtMoney(stripeAgg.newBusiness, { compact: true })} />
+                <MiniStat label="Renewals" value={fmtMoney(stripeAgg.renewals, { compact: true })} />
+                <MiniStat label="Other" value={fmtMoney(stripeAgg.other, { compact: true })} />
+              </div>
+            </LiftCard>
+          </Reveal>
+          <Reveal delay={0.16}>
+            <LiftCard accent className="h-full p-5">
+              <CardTitle title="Renewal share" hint="Higher = more of the period was already earned" />
+              <p className="font-mono text-3xl font-bold tabular-nums text-dash-text">
+                <CountUp value={stripeAgg.renewalShare} format={v => fmtPct(v)} />
+              </p>
+              <p className="mt-1 text-[11px] text-dash-text-muted">
+                was {fmtPct(stripePrev.renewalShare)} previous period
+              </p>
+            </LiftCard>
+          </Reveal>
         </div>
-      </NarrativeSection>
+      </PulseSection>
     </div>
   )
 }
