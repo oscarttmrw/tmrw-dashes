@@ -1,5 +1,5 @@
-import { AppShell } from '@/components/layout/app-shell'
+import { ObservatoryShell } from '@/components/observatory/shell'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  return <AppShell>{children}</AppShell>
+  return <ObservatoryShell>{children}</ObservatoryShell>
 }

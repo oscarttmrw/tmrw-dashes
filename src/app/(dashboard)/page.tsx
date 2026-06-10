@@ -18,6 +18,8 @@ import {
   type PulseSources,
 } from '@/lib/pulse/metrics'
 import { buildInsights } from '@/lib/pulse/insights'
+import { buildBrief } from '@/lib/pulse/brief'
+import { holtForecast, trimZeroEdges } from '@/lib/pulse/stats'
 import { fmtMoney, fmtNum, fmtDateShort, fmtDays } from '@/components/pulse/format'
 import { HeroKpi, MiniStat } from '@/components/pulse/kpi'
 import { HealthRing, SubScoreBar } from '@/components/pulse/health-ring'
@@ -57,6 +59,24 @@ export default function PulseHomePage() {
   const revenueChart = useMemo(
     () => revenueDaily.map(r => ({ ...r, label: fmtDateShort(String(r.date)) })),
     [revenueDaily]
+  )
+
+  /* Forecast + analyst brief */
+  const forecast30 = useMemo(() => {
+    const vals = trimZeroEdges(
+      revenueDaily.map(r => ({ date: String(r.date), value: Number(r.total) || 0 }))
+    ).map(p => p.value)
+    const f = holtForecast(vals, 30)
+    if (!f.ok) return null
+    return {
+      total: f.points.reduce((s, v) => s + v, 0),
+      half: Math.sqrt(f.half.reduce((s, h) => s + (h / 1.96) ** 2, 0)) * 1.96,
+    }
+  }, [revenueDaily])
+
+  const brief = useMemo(
+    () => buildBrief({ now, prev, forecast30, insights }),
+    [now, prev, forecast30, insights]
   )
 
   const today = new Date().toLocaleDateString('en-US', {
@@ -140,6 +160,26 @@ export default function PulseHomePage() {
           </StaggerItem>
         </Stagger>
       </header>
+
+      {/* ─── The Analyst's Brief ──────────────────────────────────── */}
+      <Reveal>
+        <div className="relative rounded-xl border border-dash-border bg-dash-surface p-6 md:p-8">
+          <span className="absolute inset-y-6 left-0 w-[3px] rounded-r-full bg-tmrw-syringe md:inset-y-8" />
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="font-ui text-[11px] font-medium uppercase tracking-[0.18em] text-dash-text-secondary">
+              The Analyst&apos;s Brief
+            </h2>
+            <span className="font-mono text-[10px] text-dash-text-muted">auto-written from this period&apos;s data</span>
+          </div>
+          <Stagger className="mt-4 max-w-3xl space-y-3" gap={0.12}>
+            {brief.map((p, i) => (
+              <StaggerItem key={i}>
+                <p className="font-serif text-[15px] leading-relaxed text-dash-text md:text-[16px]">{p}</p>
+              </StaggerItem>
+            ))}
+          </Stagger>
+        </div>
+      </Reveal>
 
       {/* ─── 01 · How healthy is the business? ────────────────────── */}
       <PulseSection

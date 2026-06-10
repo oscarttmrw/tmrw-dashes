@@ -15,6 +15,7 @@ import {
   Database,
   ClockIcon,
   UserPlus,
+  FlaskConical,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -35,6 +36,7 @@ export const navigation: NavItem[] = [
   { label: 'Revenue', href: '/financial', icon: DollarSign, section: 'operations' },
   { label: 'Growth', href: '/marketing', icon: Megaphone, section: 'operations' },
   { label: 'Members', href: '/members', icon: Users, section: 'operations' },
+  { label: 'Lab', href: '/lab', icon: FlaskConical, section: 'operations' },
   { label: 'Delivery', href: '/clinical', icon: Stethoscope, section: 'operations', tag: 'DEMO' },
   { label: 'Retention', href: '/retention', icon: RefreshCw, section: 'operations', tag: 'DEMO' },
   { label: 'Support', href: '/support', icon: HeadphonesIcon, section: 'operations', tag: 'DEMO' },

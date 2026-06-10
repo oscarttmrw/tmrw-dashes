@@ -251,6 +251,28 @@
 }
 
 /* ================================================================
+   OBSERVATORY — ticker marquee
+   ================================================================ */
+
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.ticker-track {
+  animation: ticker-scroll 60s linear infinite;
+}
+
+.ticker-mask {
+  mask-image: linear-gradient(to right, transparent, black 4%, black 96%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 4%, black 96%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; }
+}
+
+/* ================================================================
    MOBILE RESPONSIVENESS
    ================================================================ */
 
