@@ -56,6 +56,8 @@ export interface DashboardData {
   operational_data: CanonicalRow[]
   plan_targets: CanonicalRow[]
   financial_revenue: CanonicalRow[]
+  stripe_line_items: CanonicalRow[]
+  product_category_map: CanonicalRow[]
 
   lastRefresh: Record<string, string | null>
   // Legacy alias for code that still references `lastRefreshed`.
@@ -89,6 +91,7 @@ const emptyLastRefresh: Record<string, string | null> = {
   ghl_opportunities: null,
   operational_data: null,
   financial_revenue: null,
+  stripe_line_items: null,
 }
 
 const defaultData: DashboardData = {
@@ -116,6 +119,8 @@ const defaultData: DashboardData = {
   operational_data: [],
   plan_targets: [],
   financial_revenue: [],
+  stripe_line_items: [],
+  product_category_map: [],
   lastRefresh: { ...emptyLastRefresh },
   lastRefreshed: { ...emptyLastRefresh },
 }
@@ -199,6 +204,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         operational_data: asRows(body.operational_data),
         plan_targets: asRows(body.plan_targets),
         financial_revenue: asRows(body.financial_revenue),
+        stripe_line_items: asRows(body.stripe_line_items),
+        product_category_map: asRows(body.product_category_map),
         lastRefresh,
         lastRefreshed: lastRefresh,
       }))

@@ -21,6 +21,7 @@ import {
   processFinancialRevenueNetToCanonical,
   processFinancialRevenueGrossToCanonical,
 } from '@/lib/processors/financial-revenue-processor'
+import { processStripeLineItemsToCanonical } from '@/lib/processors/stripe-line-items-processor'
 import type { ProcessorResult } from '@/lib/processors/_canonical-helpers'
 
 type SourceKey =
@@ -35,6 +36,7 @@ type SourceKey =
   | 'social_followers'
   | 'social_views'
   | 'pelagonia'
+  | 'stripe_line_items'
   | 'financial_revenue_net'
   | 'financial_revenue_gross'
 
@@ -50,6 +52,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   social_followers: 'social_followers',
   social_views: 'social_views',
   pelagonia: 'pelagonia_data',
+  stripe_line_items: 'stripe_line_items',
   financial_revenue_net: 'financial_revenue',
   financial_revenue_gross: 'financial_revenue',
 }
@@ -66,6 +69,7 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   social_followers: 'date',
   social_views: 'date',
   pelagonia: 'pelagonia_created_at',
+  stripe_line_items: 'transaction_date',
   financial_revenue_net: 'date',
   financial_revenue_gross: 'date',
 }
@@ -82,6 +86,7 @@ const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => P
   pelagonia: processPelagoniaToCanonical,
   tableau: processTableauToCanonical,
   zendesk: processZendeskToCanonical,
+  stripe_line_items: processStripeLineItemsToCanonical,
   financial_revenue_net: processFinancialRevenueNetToCanonical,
   financial_revenue_gross: processFinancialRevenueGrossToCanonical,
 }
@@ -115,6 +120,9 @@ async function applyWriteStrategy(
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'pelagonia_created_at')
     case 'zendesk':
       return upsertStrategy(supabase, table, batchId, rows, 'zendesk_ticket_id')
+    case 'stripe_line_items':
+      // Snowflake export is cumulative-to-date; replace the whole table.
+      return fullReplaceStrategy(supabase, table, batchId, rows)
     case 'financial_revenue_net':
     case 'financial_revenue_gross': {
       // Snapshot-replace only this revenue_type's rows so uploading the Net

@@ -472,6 +472,35 @@ const financialRevenueCanonical = [
   'total',
 ];
 
+export const stripeLineItemsSchema: CsvSchema = {
+  source: 'stripe_line_items',
+  // Snowflake "Stripe Integrated" export — one row per invoice line. Required
+  // columns are the line identifiers + amounts; net/gross are derived per line.
+  requiredColumns: [
+    'TRANSACTION_DATE',
+    'PRODUCT_NAME',
+    'GROSS_LINE_AMOUNT',
+    'NET_LINE_AMOUNT',
+  ],
+  optionalColumns: [
+    'DISCOUNT_LINE_AMOUNT',
+    'CHARGED_LINE_AMOUNT',
+    'ALLOCATED_STRIPE_FEE',
+    'COUPON_NAME',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'transaction_date',
+    'product_name',
+    'gross_line_amount',
+    'discount_line_amount',
+    'charged_line_amount',
+    'allocated_stripe_fee',
+    'net_line_amount',
+    'coupon_name',
+  ],
+};
+
 export const financialRevenueNetSchema: CsvSchema = {
   source: 'financial_revenue_net',
   requiredColumns: financialRevenueColumns,
@@ -503,6 +532,7 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   social_followers: socialFollowersSchema,
   social_views: socialViewsSchema,
   pelagonia: pelagoniaSchema,
+  stripe_line_items: stripeLineItemsSchema,
   financial_revenue_net: financialRevenueNetSchema,
   financial_revenue_gross: financialRevenueGrossSchema,
 };
@@ -659,6 +689,16 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
       'Drop the file into the upload zone below.',
     ],
     poweredMetrics: getMetricsPoweredBy('pelagonia'),
+  },
+  stripe_line_items: {
+    name: 'Stripe Line Items (Revenue)',
+    exportSteps: [
+      'Open the Snowflake "Stripe Integrated" export (invoice line items).',
+      'Confirm columns: TRANSACTION_DATE, PRODUCT_NAME, GROSS_LINE_AMOUNT, DISCOUNT_LINE_AMOUNT, CHARGED_LINE_AMOUNT, ALLOCATED_STRIPE_FEE, NET_LINE_AMOUNT, COUPON_NAME.',
+      'Export the full cumulative-to-date extract as CSV (or .xlsx).',
+      'Drop the file into the upload zone below — it full-replaces the revenue line items each time.',
+    ],
+    poweredMetrics: [],
   },
   financial_revenue_net: {
     name: 'Financial Revenue — Net',

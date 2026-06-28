@@ -11,6 +11,7 @@ export type DataSourceName =
   | 'social_followers'
   | 'social_views'
   | 'pelagonia'
+  | 'stripe_line_items'
   | 'financial_revenue_net'
   | 'financial_revenue_gross'
   | 'manual';

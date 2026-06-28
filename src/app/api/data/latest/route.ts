@@ -14,6 +14,7 @@ type SourceKey =
   | 'pelagonia'
   | 'tableau'
   | 'zendesk'
+  | 'stripe_line_items'
   | 'financial_revenue'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
@@ -28,6 +29,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   pelagonia: 'pelagonia_data',
   tableau: 'tableau_data',
   zendesk: 'zendesk_data',
+  stripe_line_items: 'stripe_line_items',
   financial_revenue: 'financial_revenue',
 }
 
@@ -43,6 +45,7 @@ const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
   pelagonia: 'pelagonia_created_at',
   tableau: 'event_date',
   zendesk: 'zendesk_created_at',
+  stripe_line_items: 'transaction_date',
   financial_revenue: 'date',
 }
 
@@ -67,6 +70,7 @@ export async function GET() {
     'pelagonia',
     'tableau',
     'zendesk',
+    'stripe_line_items',
     'financial_revenue',
   ]
 
@@ -101,6 +105,12 @@ export async function GET() {
     .select('*')
     .order('month', { ascending: false })
 
+  // product_category_map is a small reference table — fetch all rows so the
+  // dashboard can categorise stripe_line_items (and flag unmapped products).
+  const productCategoryMapRes = await supabase
+    .from('product_category_map')
+    .select('*')
+
   const out: Record<string, unknown> = {}
   const errors: { source: string; message: string }[] = []
   const lastRefresh: Record<string, string | null> = {}
@@ -122,6 +132,13 @@ export async function GET() {
     out.plan_targets = []
   } else {
     out.plan_targets = planTargetsRes.data ?? []
+  }
+
+  if (productCategoryMapRes.error) {
+    errors.push({ source: 'product_category_map', message: productCategoryMapRes.error.message })
+    out.product_category_map = []
+  } else {
+    out.product_category_map = productCategoryMapRes.data ?? []
   }
 
   out.lastRefresh = lastRefresh
