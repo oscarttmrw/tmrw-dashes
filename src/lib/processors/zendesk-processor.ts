@@ -1,4 +1,4 @@
-import { txt, type ProcessorResult } from './_canonical-helpers'
+import { txt, int, type ProcessorResult } from './_canonical-helpers'
 import { parseAusDateTime } from './_date-helpers'
 
 const STATUS_ENUM = new Set(['open', 'pending', 'hold', 'solved', 'closed', 'new'])
@@ -9,6 +9,23 @@ function normalizeEnum(v: unknown, allowed: Set<string>): string | null {
   if (t === null) return null
   const lc = t.toLowerCase()
   return allowed.has(lc) ? lc : lc // keep value even if outside enum so we don't silently drop signal
+}
+
+/**
+ * Normalise Zendesk's "Via" / channel labels into stable buckets so per-channel
+ * metrics group cleanly. Unknown channels pass through lowercased.
+ */
+function normalizeChannel(v: unknown): string | null {
+  const t = txt(v)
+  if (t === null) return null
+  const lc = t.toLowerCase()
+  if (lc.includes('mail')) return 'email'
+  if (lc.includes('chat') || lc.includes('messag')) return 'chat'
+  if (lc.includes('voice') || lc.includes('phone') || lc.includes('call')) return 'phone'
+  if (lc.includes('web') || lc.includes('form') || lc.includes('help center') || lc.includes('portal')) return 'web'
+  if (lc.includes('social') || lc.includes('facebook') || lc.includes('twitter') || lc.includes('instagram') || lc.includes('whatsapp')) return 'social'
+  if (lc.includes('api')) return 'api'
+  return lc
 }
 
 /**
@@ -53,9 +70,26 @@ function parseSatisfaction(v: unknown): number | null {
   return null
 }
 
+// Pick the first present value from a list of candidate header keys.
+function pick(lc: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const k of keys) {
+    if (lc[k] !== undefined && lc[k] !== null && String(lc[k]).trim() !== '') return lc[k]
+  }
+  return null
+}
+
+/** Derive a coarse ticket reason from the tag list (first tag) when no
+ *  dedicated "about" column is present. */
+function firstTag(tags: string | null): string | null {
+  if (!tags) return null
+  const first = tags.split(/[,\s|]+/).map(t => t.trim()).filter(Boolean)[0]
+  return first ?? null
+}
+
 /**
- * Canonical Zendesk processor. Uses parseAusDateTime for created_at, lowercases
- * status / priority, and handles the two minute-field encodings Zendesk exports.
+ * Canonical Zendesk processor. Populates the typed support schema: channel,
+ * solved/updated timestamps, reply / inbound-message / reopen counts, tags and
+ * ticket reason, alongside the original reply/resolution times and CSAT.
  */
 export function processZendeskCSV(data: Record<string, unknown>[]): ProcessorResult {
   const validRows: Record<string, unknown>[] = []
@@ -65,33 +99,53 @@ export function processZendeskCSV(data: Record<string, unknown>[]): ProcessorRes
     const lc = Object.fromEntries(
       Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
     )
-    const ticketId = txt(lc['id'])
+    const ticketId = txt(pick(lc, 'id', 'ticket id', 'zendesk ticket id'))
     if (!ticketId) {
       errors.push({ rowIndex: i, reason: `Row ${i}: missing ticket ID` })
       return
     }
+
+    const tags = txt(lc['tags'])
+
     validRows.push({
       zendesk_ticket_id: ticketId,
-      zendesk_created_at: parseAusDateTime(lc['created at']),
+      zendesk_created_at: parseAusDateTime(pick(lc, 'created at', 'created')),
+      solved_at: parseAusDateTime(pick(lc, 'solved at', 'solved')),
+      updated_at: parseAusDateTime(pick(lc, 'updated at', 'updated')),
       status: normalizeEnum(lc['status'], STATUS_ENUM),
       priority: normalizeEnum(lc['priority'], PRIORITY_ENUM),
+      channel: normalizeChannel(pick(lc, 'via', 'channel', 'source')),
+      ticket_type: txt(pick(lc, 'ticket type', 'type')),
+      ticket_reason: txt(pick(lc, 'about', 'reason', 'category')) ?? firstTag(tags),
+      tags,
       assignee: txt(lc['assignee']),
-      group_name: txt(lc['group']),
+      group_name: txt(pick(lc, 'group', 'group name')),
       subject: txt(lc['subject']),
-      first_reply_time_minutes: parseMinutes(
-        lc['first reply time in minutes']
-        ?? lc['first reply time (in minutes)']
-        ?? lc['first reply time (min)']
-        ?? lc['first reply time']
-      ),
-      full_resolution_time_minutes: parseMinutes(
-        lc['full resolution time in minutes within business hours']
-        ?? lc['full resolution time in minutes']
-        ?? lc['full resolution time (in minutes)']
-        ?? lc['full resolution time (min)']
-        ?? lc['full resolution time']
-      ),
-      satisfaction_score: parseSatisfaction(lc['satisfaction score'] ?? lc['satisfaction']),
+      first_reply_time_minutes: parseMinutes(pick(
+        lc,
+        'first reply time in minutes',
+        'first reply time (in minutes)',
+        'first reply time (min)',
+        'first reply time',
+      )),
+      full_resolution_time_minutes: parseMinutes(pick(
+        lc,
+        'full resolution time in minutes within business hours',
+        'full resolution time in minutes',
+        'full resolution time (in minutes)',
+        'full resolution time (min)',
+        'full resolution time',
+      )),
+      requester_wait_time_minutes: parseMinutes(pick(
+        lc,
+        'requester wait time in minutes within business hours',
+        'requester wait time in minutes',
+        'requester wait time',
+      )),
+      replies: int(pick(lc, 'replies', 'agent replies', 'public replies')),
+      inbound_messages: int(pick(lc, 'inbound messages', 'inbound message count', 'customer messages', 'messages')),
+      reopens: int(pick(lc, 'reopens', 'reopen count', 'number of reopens')),
+      satisfaction_score: parseSatisfaction(pick(lc, 'satisfaction score', 'satisfaction')),
     })
   })
 
