@@ -20,6 +20,7 @@ import { TrendIndicator } from '@/components/dashboard/trend-indicator'
 import { TileChart } from '@/components/dashboard/tile-chart'
 import { DateRangePicker } from '@/components/dashboard/date-range-picker'
 import { useDashboardData } from '@/lib/context/data-context'
+import { deriveRevenueRows } from '@/lib/utils/revenue'
 import { useDateFilter } from '@/lib/context/filter-context'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
@@ -184,7 +185,11 @@ const MONTH_LABELS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'S
 type Row = Record<string, unknown>
 
 // Product columns on financial_revenue, in stack order (recurring first).
-const PRODUCT_KEYS = ['membership', 'joining_fees', 'tmrw_stacks', 'supplements', 'peptides', 'advanced_tests'] as const
+const PRODUCT_KEYS = ['membership', 'joining_fees', 'tmrw_stacks', 'supplements', 'peptides', 'advanced_tests', 'appointments'] as const
+
+// Recurring-revenue columns (subscription, supplements, peptides, stacks), per
+// the product→category mapping. Used for the true recurring vs non-recurring split.
+const RECURRING_KEYS = ['membership', 'supplements', 'peptides', 'tmrw_stacks'] as const
 
 const PRODUCT_LABELS: Record<string, string> = {
   membership: 'Membership',
@@ -193,6 +198,7 @@ const PRODUCT_LABELS: Record<string, string> = {
   supplements: 'Supplements',
   peptides: 'Peptides',
   advanced_tests: 'Advanced Tests',
+  appointments: 'Appointments',
 }
 
 const PRODUCT_COLORS: Record<string, string> = {
@@ -202,6 +208,7 @@ const PRODUCT_COLORS: Record<string, string> = {
   supplements: '#3676C9',
   peptides: '#16A34A',
   advanced_tests: '#7C3AED',
+  appointments: '#0E7490',
 }
 
 function monthKey(dateVal: unknown): string | null {
@@ -234,14 +241,24 @@ const OVERLAY_GREYS = ['#D8D5CE', '#B8B5AE', '#9A9690', '#737373', '#4A4A4A']
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 export default function FinancialPage() {
-  const { financial_revenue, stripe, plan_targets, loading, error, refresh } = useDashboardData()
+  const { financial_revenue, stripe_line_items, product_category_map, stripe, plan_targets, loading, error, refresh } = useDashboardData()
   const [showTable, setShowTable] = useState(false)
 
-  /* ── Split financial_revenue by type ──
-   * net  = revenue actually collected (post-discount)
+  /* ── Revenue rows ──
+   * Prefer the new Stripe line-item source (one row per invoice line, from
+   * Snowflake) adapted into the financial_revenue net/gross shape so every
+   * chart below is unchanged. Falls back to the legacy financial_revenue table
+   * when no line items have been uploaded yet. */
+  const derivedRevenue = useMemo(
+    () => deriveRevenueRows(stripe_line_items, product_category_map),
+    [stripe_line_items, product_category_map]
+  )
+  const revenueRows = stripe_line_items.length > 0 ? derivedRevenue.rows : financial_revenue
+
+  /* net  = revenue actually collected (post-discount)
    * gross = list price (RRP). capture rate = net ÷ gross. */
-  const netRows = useMemo(() => financial_revenue.filter(r => String(r.revenue_type) === 'net'), [financial_revenue])
-  const grossRows = useMemo(() => financial_revenue.filter(r => String(r.revenue_type) === 'gross'), [financial_revenue])
+  const netRows = useMemo(() => revenueRows.filter(r => String(r.revenue_type) === 'net'), [revenueRows])
+  const grossRows = useMemo(() => revenueRows.filter(r => String(r.revenue_type) === 'gross'), [revenueRows])
 
   // Row total = sum of product columns (robust even if the stored `total` is 0).
   const rowTotal = useCallback((r: Row) => PRODUCT_KEYS.reduce((s, k) => s + num(r[k]), 0), [])
@@ -268,7 +285,7 @@ export default function FinancialPage() {
   // actually present, not calendar days.
   const dataAsOf = useMemo(() => {
     let maxTs = 0
-    for (const r of financial_revenue) {
+    for (const r of revenueRows) {
       const t = new Date(String(r.date ?? '')).getTime()
       if (!isNaN(t)) maxTs = Math.max(maxTs, t)
     }
@@ -279,7 +296,7 @@ export default function FinancialPage() {
       }
     }
     return maxTs > 0 ? new Date(maxTs) : today
-  }, [financial_revenue, stripe, today])
+  }, [revenueRows, stripe, today])
 
   const monthStart = startOfMonth(today)
   const monthEnd = endOfMonth(today)
@@ -302,7 +319,7 @@ export default function FinancialPage() {
   /* ── Monthly aggregation (net + gross + per-product + stripe txns) ── */
   const monthlyRows = useMemo(() => {
     type Agg = Record<string, number>
-    const blank = (): Agg => ({ total: 0, membership: 0, joining_fees: 0, tmrw_stacks: 0, supplements: 0, peptides: 0, advanced_tests: 0 })
+    const blank = (): Agg => ({ total: 0, membership: 0, joining_fees: 0, tmrw_stacks: 0, supplements: 0, peptides: 0, advanced_tests: 0, appointments: 0 })
     const net = new Map<string, Agg>()
     const gross = new Map<string, Agg>()
     const accumulate = (map: Map<string, Agg>, rows: Row[]) => {
@@ -339,15 +356,18 @@ export default function FinancialPage() {
         gross: g.total,
         membership: n.membership,
         joining: n.joining_fees,
+        joining_fees: n.joining_fees,
         tmrw_stacks: n.tmrw_stacks,
         supplements: n.supplements,
         peptides: n.peptides,
         advanced_tests: n.advanced_tests,
+        appointments: n.appointments,
+        recurring: RECURRING_KEYS.reduce((s, k) => s + n[k], 0),
         plan: planRow ? num(planRow.gross_revenue_target) : null,
         captureRate: g.total > 0 ? n.total / g.total : null,
         txns,
         aov: txns > 0 ? n.total / txns : 0,
-        recurringPct: n.total > 0 ? n.membership / n.total : 0,
+        recurringPct: n.total > 0 ? RECURRING_KEYS.reduce((s, k) => s + n[k], 0) / n.total : 0,
       }
     })
   }, [netRows, grossRows, stripe, plan_targets, rowTotal])
@@ -358,11 +378,16 @@ export default function FinancialPage() {
       const t = new Date(String(v ?? '')).getTime()
       return !isNaN(t) && t >= monthStart.getTime() && t <= monthEnd.getTime()
     }
-    let net = 0, gross = 0, membership = 0, joining = 0, txns = 0
-    for (const r of netRows) if (inMonth(r.date)) { net += rowTotal(r); membership += num(r.membership); joining += num(r.joining_fees) }
+    let net = 0, gross = 0, membership = 0, recurring = 0, joining = 0, txns = 0
+    for (const r of netRows) if (inMonth(r.date)) {
+      net += rowTotal(r)
+      membership += num(r.membership)
+      recurring += RECURRING_KEYS.reduce((s, k) => s + num(r[k]), 0)
+      joining += num(r.joining_fees)
+    }
     for (const r of grossRows) if (inMonth(r.date)) gross += rowTotal(r)
     for (const r of stripe) if (inMonth(r.created)) txns += 1
-    return { net, gross, membership, joining, txns }
+    return { net, gross, membership, recurring, joining, txns }
   }, [netRows, grossRows, stripe, monthStart, monthEnd, rowTotal])
 
   // Run-rate projection on net revenue (what we actually collect).
@@ -831,7 +856,7 @@ export default function FinancialPage() {
                   <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
                   <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
                   <Bar dataKey="joining" fill="#1A1A1A" name="Joining (one-time)" />
-                  <Bar dataKey="membership" fill="#E61317" name="Recurring (Membership)" />
+                  <Bar dataKey="recurring" fill="#E61317" name="Recurring (subs + supplements + peptides + stacks)" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -862,24 +887,24 @@ export default function FinancialPage() {
         <div className="mt-4 grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
           <MetricTile
             label="Recurring Revenue (MTD)"
-            value={fmtCurrency(mtd.membership, { compact: true })}
-            target={`${MONTH_LABELS[today.getMonth()]} to date · Membership`}
-            status={mtd.membership > 0 ? 'green' : 'grey'}
+            value={fmtCurrency(mtd.recurring, { compact: true })}
+            target={`${MONTH_LABELS[today.getMonth()]} to date · subs + supplements + peptides + stacks`}
+            status={mtd.recurring > 0 ? 'green' : 'grey'}
             delta={null}
-            chart={<TileChart data={monthlyRows.map(r => ({ date: r.m, value: r.membership }))} variant="line" formatValue={(n) => fmtCurrency(n, { compact: true })} />}
+            chart={<TileChart data={monthlyRows.map(r => ({ date: r.m, value: r.recurring }))} variant="line" formatValue={(n) => fmtCurrency(n, { compact: true })} />}
           />
           <MetricTile
             label="Implied ARR (Proxy)"
-            value={fmtCurrency(mtd.membership * 12, { compact: true })}
-            target="MTD membership × 12 · see caveat"
+            value={fmtCurrency(mtd.recurring * 12, { compact: true })}
+            target="MTD recurring × 12 · see caveat"
             status="amber"
             delta={null}
           />
           <MetricTile
             label="Recurring Share (MTD)"
-            value={mtd.net > 0 ? `${Math.round((mtd.membership / mtd.net) * 100)}%` : '—'}
+            value={mtd.net > 0 ? `${Math.round((mtd.recurring / mtd.net) * 100)}%` : '—'}
             target="Trending toward 50%+"
-            status={mtd.net > 0 ? (mtd.membership / mtd.net >= 0.5 ? 'green' : 'amber') : 'grey'}
+            status={mtd.net > 0 ? (mtd.recurring / mtd.net >= 0.5 ? 'green' : 'amber') : 'grey'}
             delta={null}
             chart={<TileChart data={monthlyRows.map(r => ({ date: r.m, value: r.recurringPct * 100 }))} variant="line" formatValue={(n) => `${Math.round(n)}%`} />}
           />
@@ -899,14 +924,14 @@ export default function FinancialPage() {
                 <XAxis dataKey="m" tick={{ fontSize: 11, fill: '#737373' }} />
                 <YAxis tick={{ fontSize: 10, fill: '#737373' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
                 <Tooltip formatter={(v: unknown) => fmtCurrency(Number(v) || 0, { compact: true })} />
-                {(['tmrw_stacks', 'supplements', 'peptides', 'advanced_tests'] as const).map(k => (
+                {(['tmrw_stacks', 'supplements', 'peptides', 'advanced_tests', 'appointments'] as const).map(k => (
                   <Bar key={k} dataKey={k} stackId="nc" fill={PRODUCT_COLORS[k]} name={PRODUCT_LABELS[k]} />
                 ))}
               </BarChart>
             </ResponsiveContainer>
           </div>
           <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
-            {(['tmrw_stacks', 'supplements', 'peptides', 'advanced_tests'] as const).map(k => (
+            {(['tmrw_stacks', 'supplements', 'peptides', 'advanced_tests', 'appointments'] as const).map(k => (
               <span key={k} className="flex items-center gap-1.5">
                 <span className="inline-block h-2 w-2" style={{ background: PRODUCT_COLORS[k] }} />{PRODUCT_LABELS[k]}
               </span>
