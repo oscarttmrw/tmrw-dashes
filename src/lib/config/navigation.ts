@@ -35,7 +35,7 @@ export const navigation: NavItem[] = [
   { label: 'Marketing', href: '/marketing', icon: Megaphone, section: 'operations' },
   { label: 'Members', href: '/members', icon: Users, section: 'operations' },
   { label: 'Delivery', href: '/clinical', icon: Stethoscope, section: 'operations' },
-  { label: 'Support', href: '/support', icon: HeadphonesIcon, section: 'operations', tag: 'DEMO' },
+  { label: 'Support', href: '/support', icon: HeadphonesIcon, section: 'operations' },
 
   { label: 'Strategy', href: '/strategy', icon: Target, section: 'management', disabled: true, disabledReason: 'Coming in Phase 2.' },
   { label: 'EOS / L10', href: '/eos', icon: ListChecks, section: 'management', disabled: true, disabledReason: 'Coming in Phase 2.' },

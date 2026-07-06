@@ -532,6 +532,16 @@ export default function FinancialPage() {
           <p className="font-sans text-sm text-dash-text-muted">Loading latest data…</p>
         </div>
       )}
+      {stripe_line_items.length > 0 && derivedRevenue.unmappedProducts.length > 0 && (
+        <div className="rounded-lg border border-status-amber/30 bg-status-amber/5 px-4 py-3">
+          <p className="font-ui text-[11px] uppercase tracking-[0.08em] text-status-amber">
+            {derivedRevenue.unmappedProducts.length} unmapped product{derivedRevenue.unmappedProducts.length === 1 ? '' : 's'}
+          </p>
+          <p className="mt-1 font-sans text-[12px] text-dash-text-secondary">
+            These Stripe products have no category mapping, so their revenue is in totals but not any category breakdown. Add them to <span className="font-mono">product_category_map</span>: {derivedRevenue.unmappedProducts.slice(0, 12).join(', ')}{derivedRevenue.unmappedProducts.length > 12 ? '…' : ''}
+          </p>
+        </div>
+      )}
 
       {/* ────────────── HEADER STRIP — north-star tiles ────────────── */}
       <section className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
