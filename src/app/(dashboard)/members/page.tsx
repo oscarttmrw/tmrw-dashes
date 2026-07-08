@@ -47,7 +47,17 @@ function daysInMonth(d: Date): number {
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 export default function MembersPage() {
-  const { hubspot_contacts, operational_data, loading, error, refresh } = useDashboardData()
+  const { hubspot_contacts, operational_data, zendesk, loading, error, refresh } = useDashboardData()
+
+  // Aggregate CSAT from Zendesk satisfaction scores (% satisfied of rated) +
+  // rated-ticket count. Null until CSAT is actually captured.
+  const csat = useMemo(() => {
+    const rated = zendesk
+      .map(r => (r.satisfaction_score === null || r.satisfaction_score === undefined ? null : Number(r.satisfaction_score)))
+      .filter((n): n is number => n !== null && !isNaN(n))
+    if (rated.length === 0) return null
+    return { pct: Math.round((rated.filter(s => s >= 4).length / rated.length) * 100), n: rated.length }
+  }, [zendesk])
   const { value: pickerValue, setValue: setPickerValue } = useDateFilter()
 
   const realNow = useMemo(() => new Date(), [])
@@ -393,7 +403,16 @@ export default function MembersPage() {
         <SectionHeading number={8} title="Voice of Customer — NPS & CSAT" />
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
           <LockedState reason="NPS — awaiting survey responses (0–10). Locked until a survey source is connected." />
-          <LockedState reason="CSAT — awaiting satisfaction ratings. Locked until a survey / Zendesk rating source is connected." />
+          {csat === null ? (
+            <LockedState reason="CSAT — awaiting satisfaction ratings in the Zendesk feed." />
+          ) : (
+            <MetricCard
+              label="CSAT"
+              value={`${csat.pct}%`}
+              target={`Satisfied of ${fmtNum(csat.n)} rated tickets · Zendesk`}
+              status={csat.pct >= 90 ? 'green' : csat.pct >= 75 ? 'amber' : 'red'}
+            />
+          )}
         </div>
       </section>
     </div>

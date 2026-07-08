@@ -181,11 +181,22 @@ export default function DashboardPage() {
     plan_targets,
     social_followers,
     financial_revenue,
+    zendesk,
     lastRefresh,
     loading,
     error,
     refresh,
   } = useDashboardData()
+
+  // Aggregate CSAT from Zendesk satisfaction scores (% satisfied of rated).
+  // Null until CSAT is actually captured, so the tile stays honest.
+  const csat = useMemo(() => {
+    const rated = zendesk
+      .map(r => (r.satisfaction_score === null || r.satisfaction_score === undefined ? null : Number(r.satisfaction_score)))
+      .filter((n): n is number => n !== null && !isNaN(n))
+    if (rated.length === 0) return null
+    return Math.round((rated.filter(s => s >= 4).length / rated.length) * 100)
+  }, [zendesk])
 
   // Tool-wide date range picker — shared across Dashboard / Marketing /
   // Financial via FilterProvider so changing it on one page carries across.
@@ -847,10 +858,20 @@ export default function DashboardPage() {
             status="green"
             delta={null}
           />
-          <LockedTile
-            label="CSAT"
-            reason="Requires support tool integration"
-          />
+          {csat === null ? (
+            <LockedTile
+              label="CSAT"
+              reason="Awaiting CSAT capture in the Zendesk feed"
+            />
+          ) : (
+            <MetricTile
+              label="CSAT"
+              value={`${csat}%`}
+              target="Satisfied of rated tickets · Zendesk"
+              status={csat >= 90 ? 'green' : csat >= 75 ? 'amber' : 'red'}
+              delta={null}
+            />
+          )}
         </div>
       </NarrativeSection>
 
