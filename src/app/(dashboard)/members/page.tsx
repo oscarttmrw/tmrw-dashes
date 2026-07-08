@@ -155,6 +155,37 @@ export default function MembersPage() {
     return { mtd, sameDayLast, projected, deltaVsLast }
   }, [ops, anchor, anchorMonthKey, prevMonthKey, anchorDay])
 
+  /* ── Registration source comparison (validation for #4b) ──
+   * Current source = operational_data.customers_registered.
+   * Candidate source = count of HubSpot contacts by Create Date month.
+   * Shown side-by-side so the two can be validated before switching. */
+  const regComparison = useMemo(() => {
+    const opsByMonth = new Map<string, number>()
+    for (const r of ops) opsByMonth.set(monthKeyOf(r.d), (opsByMonth.get(monthKeyOf(r.d)) ?? 0) + r.reg)
+    const hsByMonth = new Map<string, number>()
+    for (const r of hubspot_contacts) {
+      const d = parseDate(r.create_date)
+      if (!d) continue
+      hsByMonth.set(monthKeyOf(d), (hsByMonth.get(monthKeyOf(d)) ?? 0) + 1)
+    }
+    const keys = Array.from(new Set(Array.from(opsByMonth.keys()).concat(Array.from(hsByMonth.keys())))).sort().slice(-6)
+    const data = keys.map(k => {
+      const opsVal = opsByMonth.get(k) ?? 0
+      const hsVal = hsByMonth.get(k) ?? 0
+      return {
+        month: monthLabel(k),
+        'Operational feed': opsVal,
+        'HubSpot Create Date': hsVal,
+        delta: hsVal - opsVal,
+        deltaPct: opsVal > 0 ? Math.round(((hsVal - opsVal) / opsVal) * 100) : null,
+      }
+    })
+    const opsTotal = data.reduce((s, r) => s + r['Operational feed'], 0)
+    const hsTotal = data.reduce((s, r) => s + r['HubSpot Create Date'], 0)
+    const hasBoth = opsTotal > 0 && hsTotal > 0
+    return { data, opsTotal, hsTotal, hasBoth }
+  }, [ops, hubspot_contacts])
+
   /* ── §03 Casebook composition (customer type + membership status) ── */
   const customerTypeData = useMemo(() => {
     const counts = new Map<string, number>()
@@ -299,6 +330,49 @@ export default function MembersPage() {
             <p className="py-10 text-center font-sans text-sm text-dash-text-muted">No registration data yet.</p>
           )}
         </div>
+
+        {/* Registration source comparison — validation for switching to HubSpot Create Date (#4b) */}
+        {regComparison.data.length > 0 && (
+          <div className="mt-3 rounded-lg border border-dash-border bg-dash-surface p-4">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <p className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                Registration source comparison · current feed vs HubSpot Create Date
+              </p>
+              <span className="rounded-full bg-status-amber/10 px-3 py-1 font-ui text-[10px] uppercase tracking-wider text-status-amber">
+                For validation — source not switched
+              </span>
+            </div>
+            <p className="mb-3 font-sans text-[11px] text-dash-text-secondary">
+              Last 6 months:
+              {' '}<b>{fmtNum(regComparison.opsTotal)}</b> from the operational feed vs{' '}
+              <b>{fmtNum(regComparison.hsTotal)}</b> HubSpot contacts by Create Date
+              {regComparison.opsTotal > 0 && (
+                <> ({regComparison.hsTotal >= regComparison.opsTotal ? '+' : ''}{Math.round(((regComparison.hsTotal - regComparison.opsTotal) / regComparison.opsTotal) * 100)}% difference)</>
+              )}. If these track closely, HubSpot Create Date is safe to adopt as the source of truth.
+            </p>
+            <div className="h-[240px]">
+              <ResponsiveContainer>
+                <BarChart data={regComparison.data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid {...gridProps} vertical={false} />
+                  <XAxis dataKey="month" tick={axisTickStyle} />
+                  <YAxis tick={axisTickStyle} allowDecimals={false} />
+                  <Tooltip contentStyle={tooltipStyle} />
+                  <Bar dataKey="Operational feed" fill="#3676C9" />
+                  <Bar dataKey="HubSpot Create Date" fill="#7A1F22" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2" style={{ background: '#3676C9' }} />Operational feed (current)</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2" style={{ background: '#7A1F22' }} />HubSpot Create Date (candidate)</span>
+            </div>
+            {!regComparison.hasBoth && (
+              <p className="mt-2 font-sans text-[11px] italic text-dash-text-muted">
+                Both sources need data present to compare — upload operational data and HubSpot contacts to populate.
+              </p>
+            )}
+          </div>
+        )}
       </section>
 
       {/* ── 02 Acquisition Mix ── */}
