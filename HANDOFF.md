@@ -9,9 +9,14 @@
 
 ## 0. First — confirm the Supabase MCP connection
 
-The repo has `.mcp.json` configuring a **read-only** Supabase MCP server for
+The repo has `.mcp.json` configuring a **write-enabled** Supabase MCP server for
 project `jacrioszqpkehizbiqbg`. It authenticates via the `SUPABASE_ACCESS_TOKEN`
 environment variable (set in the Claude Code environment settings, not in the repo).
+
+⚠️ Write access is ON — this session can run DDL/DML against **production**.
+Apply migrations exactly as written, one at a time, and verify after each. Do
+not improvise schema changes. Suggest the user rotates the PAT once the
+migrations are done.
 
 Check that Supabase tools are available (e.g. a "list tables" / "execute sql"
 tool). If they are **not**:
@@ -33,12 +38,12 @@ The migration files are in `supabase/migrations/`:
 - `009_zendesk_schema.sql` — rebuilds `zendesk_data` typed (empty table, safe drop).
 - `010_hubspot_milestones.sql` — adds HubSpot milestone + re-test columns.
 
-**The MCP server is READ-ONLY, so it cannot apply these.** Two options:
-- **Recommended (prod-safe):** the user runs each file's SQL in the Supabase
-  SQL Editor, in order. Claude then verifies (section 2).
-- **If the user wants Claude to apply them directly:** edit `.mcp.json` to
-  remove `--read-only`, use a PAT with write scope, restart the session, then
-  apply each migration via the MCP execute-SQL / apply-migration tool in order.
+The MCP server is **write-enabled**, so Claude can apply these directly. Apply
+each file's SQL via the MCP execute-SQL / apply-migration tool, **in order
+(006 → 010), one at a time**, and run the section-2 verification after each.
+Confirm with the user before the first apply, since this writes to production.
+(The user can still choose to run them in the Supabase SQL Editor instead — the
+SQL is identical.)
 
 ---
 
