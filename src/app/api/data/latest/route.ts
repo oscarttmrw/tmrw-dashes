@@ -14,6 +14,7 @@ type SourceKey =
   | 'pelagonia'
   | 'tableau'
   | 'zendesk'
+  | 'twilio_messages'
   | 'stripe_line_items'
   | 'financial_revenue'
 
@@ -29,6 +30,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   pelagonia: 'pelagonia_data',
   tableau: 'tableau_data',
   zendesk: 'zendesk_data',
+  twilio_messages: 'twilio_messages',
   stripe_line_items: 'stripe_line_items',
   financial_revenue: 'financial_revenue',
 }
@@ -45,6 +47,7 @@ const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
   pelagonia: 'pelagonia_created_at',
   tableau: 'event_date',
   zendesk: 'zendesk_created_at',
+  twilio_messages: 'sent_at',
   stripe_line_items: 'transaction_date',
   financial_revenue: 'date',
 }
@@ -70,6 +73,7 @@ export async function GET() {
     'pelagonia',
     'tableau',
     'zendesk',
+    'twilio_messages',
     'stripe_line_items',
     'financial_revenue',
   ]

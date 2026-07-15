@@ -9,7 +9,7 @@ import { DataSourceBadge } from '@/components/dashboard/data-source-badge'
 import { TmrwLineChart, type ChartSeries } from '@/components/dashboard/tmrw-line-chart'
 import {
   ResponsiveContainer, ComposedChart, BarChart, Bar, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
 import { axisTickStyle, gridProps, tooltipStyle, TMRW_COLORS } from '@/lib/utils/chart-styles'
 import { useDashboardData } from '@/lib/context/data-context'
@@ -84,7 +84,7 @@ interface T {
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 export default function SupportPage() {
-  const { zendesk, operational_data, loading, error, refresh } = useDashboardData()
+  const { zendesk, twilio_messages, operational_data, loading, error, refresh } = useDashboardData()
 
   const tickets = useMemo<T[]>(() =>
     zendesk.map(r => ({
@@ -171,14 +171,24 @@ export default function SupportPage() {
     return { overlay, stacked, mtd, sameDayLast, delta }
   }, [tickets, channels, realNow, monthKey, prevMonthKey, dayOfMonth])
 
-  /* ── §02 Inbound messages by channel ── */
+  /* ── §02 Inbound messages by channel (Twilio — separate from tickets) ── */
   const inboundByChannel = useMemo(() => {
-    const hasData = tickets.some(t => t.inbound !== null)
-    if (!hasData) return null
-    const map = new Map<string, number>()
-    for (const t of tickets) if (t.inbound !== null) map.set(t.channel, (map.get(t.channel) ?? 0) + t.inbound)
-    return channels.map(c => ({ channel: channelMeta(c).label, messages: map.get(c) ?? 0, key: c }))
-  }, [tickets, channels])
+    if (twilio_messages.length === 0) return null
+    const map = new Map<string, { inbound: number; outbound: number }>()
+    for (const m of twilio_messages) {
+      const ch = typeof m.channel === 'string' && m.channel.trim() ? m.channel.trim().toLowerCase() : 'unknown'
+      const dir = typeof m.direction === 'string' ? m.direction.toLowerCase() : ''
+      const e = map.get(ch) ?? { inbound: 0, outbound: 0 }
+      if (dir === 'inbound') e.inbound += 1
+      else if (dir === 'outbound') e.outbound += 1
+      map.set(ch, e)
+    }
+    const rows = Array.from(map.entries())
+      .map(([ch, v]) => ({ channel: ch.charAt(0).toUpperCase() + ch.slice(1), Inbound: v.inbound, Outbound: v.outbound, key: ch }))
+      .sort((a, b) => (b.Inbound + b.Outbound) - (a.Inbound + a.Outbound))
+    const totalInbound = rows.reduce((s, r) => s + r.Inbound, 0)
+    return { rows, totalInbound }
+  }, [twilio_messages])
 
   /* ── §03 Contact rate — tickets per 1,000 active members, monthly ── */
   const contactRate = useMemo(() => {
@@ -383,28 +393,35 @@ export default function SupportPage() {
         )}
       </section>
 
-      {/* ── 02 Inbound Messages by Channel ── */}
+      {/* ── 02 Inbound Messages by Channel (Twilio) ── */}
       <section>
-        <SectionHeading number={2} title="Inbound Messages by Channel" />
+        <SectionHeading number={2} title="Messages by Channel — Twilio" />
         {inboundByChannel ? (
           <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
-            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">Inbound customer messages — separate from ticket count</div>
+            <div className="mb-1 flex items-center justify-between">
+              <div className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">Twilio message volume by channel · separate from ticket count</div>
+              <DataSourceBadge source="twilio" />
+            </div>
+            <p className="mb-3 font-sans text-[11px] text-dash-text-secondary">{fmtNum(inboundByChannel.totalInbound)} inbound messages across all channels.</p>
             <div className="h-[240px]">
               <ResponsiveContainer>
-                <BarChart data={inboundByChannel} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <BarChart data={inboundByChannel.rows} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <CartesianGrid {...gridProps} vertical={false} />
                   <XAxis dataKey="channel" tick={axisTickStyle} />
                   <YAxis tick={axisTickStyle} allowDecimals={false} />
                   <Tooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="messages" name="Inbound messages">
-                    {inboundByChannel.map(d => <Cell key={d.key} fill={channelMeta(d.key).color} />)}
-                  </Bar>
+                  <Bar dataKey="Inbound" fill={RED} />
+                  <Bar dataKey="Outbound" fill="#9C988F" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 font-ui text-[10px] uppercase tracking-wide text-dash-text-muted">
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2" style={{ background: RED }} />Inbound</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2" style={{ background: '#9C988F' }} />Outbound</span>
+            </div>
           </div>
         ) : (
-          <LockedState reason="No inbound-message counts in the current export. Add an 'Inbound messages' column to the Zendesk export to unlock." />
+          <LockedState reason="Inbound messages come from a separate Twilio export. Upload it on Admin → Data Upload to unlock." />
         )}
       </section>
 

@@ -516,6 +516,40 @@ const financialRevenueCanonical = [
   'total',
 ];
 
+export const twilioMessagesSchema: CsvSchema = {
+  source: 'twilio_messages',
+  // Twilio message extract — powers inbound-messages-by-channel. Body is
+  // stripped (PII). SentDate + Direction are the load-bearing fields.
+  requiredColumns: [
+    'SentDate',
+    'Direction',
+  ],
+  optionalColumns: [
+    'Channel',
+    'Status',
+    'ApiVersion',
+    'NumSegments',
+    'ErrorCode',
+    'Price',
+    'PriceUnit',
+    'Tags',
+  ],
+  strippedColumns: [
+    'Body',
+  ],
+  canonicalColumns: [
+    'channel',
+    'status',
+    'sent_at',
+    'direction',
+    'num_segments',
+    'error_code',
+    'price',
+    'price_unit',
+    'tags',
+  ],
+};
+
 export const stripeLineItemsSchema: CsvSchema = {
   source: 'stripe_line_items',
   // Snowflake "Stripe Integrated" export — one row per invoice line. Required
@@ -576,6 +610,7 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   social_followers: socialFollowersSchema,
   social_views: socialViewsSchema,
   pelagonia: pelagoniaSchema,
+  twilio_messages: twilioMessagesSchema,
   stripe_line_items: stripeLineItemsSchema,
   financial_revenue_net: financialRevenueNetSchema,
   financial_revenue_gross: financialRevenueGrossSchema,
@@ -733,6 +768,15 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
       'Drop the file into the upload zone below.',
     ],
     poweredMetrics: getMetricsPoweredBy('pelagonia'),
+  },
+  twilio_messages: {
+    name: 'Twilio Messages',
+    exportSteps: [
+      'Export the Twilio message log for the period (Console → Messaging → Logs, or the programmable-messaging export).',
+      'Confirm columns: Channel, Status, SentDate, Direction, NumSegments, ErrorCode, Price, PriceUnit, Tags (Body is ignored / not stored).',
+      'Save as CSV and drop it into the upload zone below — it replaces messages in the uploaded date range.',
+    ],
+    poweredMetrics: [],
   },
   stripe_line_items: {
     name: 'Stripe Line Items (Revenue)',

@@ -84,29 +84,34 @@ export default function MembersPage() {
       .filter((r): r is { d: Date; reg: number; casebook: number; churn: number } => r.d !== null)
   , [operational_data])
 
-  // Total casebook — per Dan, counted from HubSpot: each contact that is an
-  // actual member (a customer lifecycle stage, or a membership start date, or a
-  // customer type set) counts once. Falls back to the latest reported
-  // operational_data figure when no HubSpot contacts are loaded.
-  // NOTE (confirm with Dan): this counts all member contacts cumulatively. If
-  // "casebook" should mean only currently-active (un-churned) members, switch
-  // the predicate to also require no churn_date.
+  // Total casebook — per Dan (#4a), counted from HubSpot as ACTIVE CUSTOMERS
+  // only: a contact that is a customer (customer lifecycle stage, or a
+  // membership start date, or a customer type set) AND is not churned (no past
+  // churn date, and membership status isn't a churned/cancelled value). Falls
+  // back to the latest reported operational_data figure when no HubSpot
+  // contacts are loaded.
   const totalCasebook = useMemo(() => {
-    const isMember = (r: Record<string, unknown>) => {
+    const churnedStatuses = new Set(['churned', 'cancelled', 'canceled', 'inactive', 'lapsed', 'expired'])
+    const isActiveCustomer = (r: Record<string, unknown>) => {
       const stage = typeof r.lifecycle_stage === 'string' ? r.lifecycle_stage.toLowerCase() : ''
-      return (
+      const isCustomer =
         stage.includes('customer') ||
         (typeof r.membership_start_date === 'string' && r.membership_start_date.trim() !== '') ||
         (typeof r.customer_type === 'string' && r.customer_type.trim() !== '')
-      )
+      if (!isCustomer) return false
+      const churn = parseDate(r.churn_date)
+      const churnedByDate = churn !== null && churn <= realNow
+      const status = typeof r.membership_status === 'string' ? r.membership_status.toLowerCase().trim() : ''
+      const churnedByStatus = churnedStatuses.has(status)
+      return !churnedByDate && !churnedByStatus
     }
-    const fromHubspot = hubspot_contacts.reduce((n, r) => n + (isMember(r) ? 1 : 0), 0)
+    const fromHubspot = hubspot_contacts.reduce((n, r) => n + (isActiveCustomer(r) ? 1 : 0), 0)
     if (hubspot_contacts.length > 0) return fromHubspot
 
     let latest: { d: Date; casebook: number } | null = null
     for (const r of ops) if (!latest || r.d > latest.d) latest = r
     return latest?.casebook ?? 0
-  }, [hubspot_contacts, ops])
+  }, [hubspot_contacts, ops, realNow])
 
   /* ── §01 New members — cumulative per-month overlay ── */
   const { overlayData, overlayMonths } = useMemo(() => {

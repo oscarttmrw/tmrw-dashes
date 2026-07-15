@@ -58,6 +58,7 @@ export interface DashboardData {
   financial_revenue: CanonicalRow[]
   stripe_line_items: CanonicalRow[]
   product_category_map: CanonicalRow[]
+  twilio_messages: CanonicalRow[]
 
   lastRefresh: Record<string, string | null>
   // Legacy alias for code that still references `lastRefreshed`.
@@ -121,6 +122,7 @@ const defaultData: DashboardData = {
   financial_revenue: [],
   stripe_line_items: [],
   product_category_map: [],
+  twilio_messages: [],
   lastRefresh: { ...emptyLastRefresh },
   lastRefreshed: { ...emptyLastRefresh },
 }
@@ -206,6 +208,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         financial_revenue: asRows(body.financial_revenue),
         stripe_line_items: asRows(body.stripe_line_items),
         product_category_map: asRows(body.product_category_map),
+        twilio_messages: asRows(body.twilio_messages),
         lastRefresh,
         lastRefreshed: lastRefresh,
       }))

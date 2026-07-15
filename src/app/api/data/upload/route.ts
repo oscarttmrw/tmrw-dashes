@@ -22,6 +22,7 @@ import {
   processFinancialRevenueGrossToCanonical,
 } from '@/lib/processors/financial-revenue-processor'
 import { processStripeLineItemsToCanonical } from '@/lib/processors/stripe-line-items-processor'
+import { processTwilioToCanonical } from '@/lib/processors/twilio-processor'
 import type { ProcessorResult } from '@/lib/processors/_canonical-helpers'
 
 type SourceKey =
@@ -36,6 +37,7 @@ type SourceKey =
   | 'social_followers'
   | 'social_views'
   | 'pelagonia'
+  | 'twilio_messages'
   | 'stripe_line_items'
   | 'financial_revenue_net'
   | 'financial_revenue_gross'
@@ -52,6 +54,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   social_followers: 'social_followers',
   social_views: 'social_views',
   pelagonia: 'pelagonia_data',
+  twilio_messages: 'twilio_messages',
   stripe_line_items: 'stripe_line_items',
   financial_revenue_net: 'financial_revenue',
   financial_revenue_gross: 'financial_revenue',
@@ -69,6 +72,7 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   social_followers: 'date',
   social_views: 'date',
   pelagonia: 'pelagonia_created_at',
+  twilio_messages: 'sent_at',
   stripe_line_items: 'transaction_date',
   financial_revenue_net: 'date',
   financial_revenue_gross: 'date',
@@ -86,6 +90,7 @@ const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => P
   pelagonia: processPelagoniaToCanonical,
   tableau: processTableauToCanonical,
   zendesk: processZendeskToCanonical,
+  twilio_messages: processTwilioToCanonical,
   stripe_line_items: processStripeLineItemsToCanonical,
   financial_revenue_net: processFinancialRevenueNetToCanonical,
   financial_revenue_gross: processFinancialRevenueGrossToCanonical,
@@ -123,6 +128,9 @@ async function applyWriteStrategy(
     case 'stripe_line_items':
       // Snowflake export is cumulative-to-date; replace the whole table.
       return fullReplaceStrategy(supabase, table, batchId, rows)
+    case 'twilio_messages':
+      // No message SID in the extract, so replace by the uploaded date range.
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'sent_at')
     case 'financial_revenue_net':
     case 'financial_revenue_gross': {
       // Snapshot-replace only this revenue_type's rows so uploading the Net
