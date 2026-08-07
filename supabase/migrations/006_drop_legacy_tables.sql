@@ -1,0 +1,66 @@
+-- =============================================================================
+-- 006 — Drop two legacy tables that nothing reads or writes any more.
+-- =============================================================================
+--
+-- ⚠️  THIS IS THE ONLY MIGRATION IN THIS FOLDER THAT DESTROYS DATA.
+--     It is deliberately separate from 005 (which is a pure no-op) so that
+--     dropping these tables is an explicit, reviewable decision rather than a
+--     side effect of documenting the schema. Run 005 first; run this one only
+--     once you are happy with the evidence below.
+--
+-- WHAT IS BEING DROPPED, AND WHY IT IS SAFE
+--
+--   hubspot_data  — created by migration 001 as a `row_data jsonb` blob table.
+--                   Superseded by `hubspot_contacts`, which stores typed
+--                   columns and strips PII on the way in.
+--
+--   meta_data     — created by migration 002 as a `row_data jsonb` blob table.
+--                   Superseded by `meta_ads`, which stores typed daily
+--                   campaign metrics.
+--
+-- Evidence that both are dead: neither string appears anywhere in src/.
+-- Specifically, neither table is present in:
+--
+--   * SOURCE_TABLE in src/app/api/data/upload/route.ts   (the write path)
+--   * SOURCE_TABLE in src/app/api/data/latest/route.ts   (the read path —
+--     this is the only route the dashboard loads its data from)
+--   * src/lib/context/data-context.tsx                   (the in-app store)
+--   * src/lib/config/data-sources.ts                     (the source registry)
+--
+-- You can re-confirm at any time before running this, from the repo root:
+--
+--   grep -rn "hubspot_data\|meta_data" src/
+--
+-- That should return nothing. If it returns anything, STOP and do not run this.
+--
+-- BEFORE YOU RUN IT — check what you would be deleting
+--
+--   select 'hubspot_data' as table_name, count(*) as rows from hubspot_data
+--   union all
+--   select 'meta_data', count(*) from meta_data;
+--
+-- Both are expected to hold only rows from the old blob-format uploads, which
+-- the dashboard can no longer read in any case. If either holds something you
+-- want to keep, export it to CSV from the Supabase table editor first — a
+-- dropped table cannot be recovered without a database restore.
+--
+-- Note: `cascade` is used because both tables carry a foreign key to
+-- upload_log. It removes only the dependent constraints on THESE two tables.
+-- It does not touch upload_log itself or any other table's data.
+-- =============================================================================
+
+drop table if exists hubspot_data cascade;
+drop table if exists meta_data cascade;
+
+-- The historical upload_log rows for these two sources are intentionally LEFT
+-- IN PLACE. They are the audit trail of who uploaded what and when, and the
+-- Upload History page reads them. They are metadata only and contain no
+-- business data, so there is no reason to delete them.
+--
+-- If you would rather the Upload History page stop showing these retired
+-- sources, mark them instead of deleting them:
+--
+--   update upload_log
+--      set data_period_label = coalesce(data_period_label, '') || ' [retired source]'
+--    where source in ('hubspot', 'meta')
+--      and data_period_label not like '%[retired source]%';

@@ -46,6 +46,10 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff|woff2)$|login|auth/callback|auth/update-password).*)',
+    // `api/data/ingest` is excluded because it is called by automated jobs that
+    // have no browser session — the cookie check here would redirect them to
+    // /login. It is NOT unauthenticated: that route enforces a bearer token
+    // (INGEST_TOKEN) itself and fails closed if the token is unset.
+    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff|woff2)$|login|auth/callback|auth/update-password|api/data/ingest).*)',
   ],
 }

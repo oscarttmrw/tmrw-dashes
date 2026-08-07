@@ -1,3 +1,24 @@
+-- =============================================================================
+-- ⚠️  SUPERSEDED — HISTORICAL RECORD ONLY. DO NOT RUN THIS FILE.
+-- =============================================================================
+--
+-- DANGER: line 2 below is `drop table if exists upload_log cascade`. Because
+-- every data table carries a foreign key to upload_log, that single statement
+-- would CASCADE and destroy the entire dashboard database. Running this file
+-- against production is unrecoverable without a restore.
+--
+-- This file also no longer describes reality. Four of the tables it creates
+-- (tableau_data, stripe_data, zendesk_data, and hubspot_data) were later
+-- rebuilt with typed columns or retired entirely, so the `row_data jsonb`
+-- definitions below are wrong.
+--
+-- The current schema lives in 005_document_existing_schema.sql. For a fresh
+-- database, run that file alone. See supabase/README.md.
+--
+-- Nothing below has been modified — it is kept exactly as applied, as the
+-- historical record of how the database was first created.
+-- =============================================================================
+
 -- Drop old flat table if it exists
 drop table if exists upload_log cascade;
 
