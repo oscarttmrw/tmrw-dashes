@@ -201,14 +201,22 @@ count different things.
 
 ## Verification
 
-Three `tsx` scripts run the **real** processors and analytics over an actual export and assert the
-numbers. 81 checks, all passing against the 6 Aug 2026 files.
+Four `tsx` scripts run the **real** processors, analytics and page components over an actual export
+and assert the results. 81 numeric checks + 32 render checks, all passing against the 6 Aug 2026 files.
 
 ```bash
 npm run verify:revenue   -- --dir <folder>   # or --no-assert for a newer export
 npm run verify:support   -- --dir <folder>
 npm run verify:marketing -- --dir <folder>
+npm run verify:render    -- --dir <folder>   # server-renders the pages with real rows
 ```
+
+`verify:render` matters because of a gap the other checks leave: `tsc` proves the types line up and
+`next build` prerenders every page, but **only ever with empty data** — so a crash that appears once
+rows are present slips through both. It renders each page twice, once with the real export and once
+empty, and asserts the locked/`not instr.` states actually appear rather than silently becoming
+zeros. It needs `tsconfig.smoke.json`, which redirects `@/lib/context/data-context` to
+`scripts/__mocks__/data-context.tsx`.
 
 Key figures they lock in:
 

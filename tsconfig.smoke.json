@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "target": "es2020",
+    "baseUrl": ".",
+    "paths": {
+      "@/lib/context/data-context": ["./scripts/__mocks__/data-context.tsx"],
+      "@/*": ["./src/*"]
+    }
+  }
+}
