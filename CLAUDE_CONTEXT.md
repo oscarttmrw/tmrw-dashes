@@ -2,13 +2,17 @@
 
 > Give this file to the next Claude Code session at the start of the conversation.
 > Working directory: `/home/user/tmrw-dashes`
-> Active branch: `claude/implement-mvp-spec-tpdhK`
+> Rewritten against `src/` as of the Dan-data implementation (Aug 2026). **`src/` is the only
+> source of truth** — if this file and the code disagree, the code is right and this file is stale.
 
 ---
 
 ## What This Project Is
 
-A Next.js 14 internal operating dashboard for **TMRW Health** (a longevity/preventative health company). It replaces manual spreadsheet reporting with a live, data-connected dashboard. Data enters via CSV upload (manual for now; Snowflake daily pipeline is the future target). The dashboard is invite-only, protected by Supabase Auth.
+A Next.js 14 internal operating dashboard for **TMRW Health** (a longevity / preventative health
+company). It replaces manual spreadsheet reporting with a live, data-connected dashboard. Data
+enters via CSV/XLSX upload through `/admin/upload`; a Snowflake daily pipeline is the future target.
+Invite-only, protected by Supabase Auth.
 
 ---
 
@@ -17,357 +21,318 @@ A Next.js 14 internal operating dashboard for **TMRW Health** (a longevity/preve
 | Layer | Choice |
 |---|---|
 | Framework | Next.js 14 App Router, `src/` directory |
-| Styling | Tailwind CSS v3, custom design tokens in `src/app/globals.css` |
+| Styling | Tailwind CSS, design tokens in `src/app/globals.css` |
 | Auth | Supabase SSR (`@supabase/ssr`) — PKCE flow |
-| Database | Supabase (Postgres) |
+| Database | Supabase (Postgres), typed columns per source |
 | Hosting | Vercel |
 | Charts | Recharts |
-| CSV parsing | PapaParse (client + server), XLSX (xlsx package) |
+| Parsing | PapaParse (CSV), `xlsx` (workbooks) |
+| Verification | `tsx` scripts under `scripts/` |
 
 ---
 
-## Repository Structure
+## Data Sources (16 upload keys)
+
+Registered in `src/lib/config/data-sources.ts` (`dataSourceSchemas`, line ~560).
+
+| Source key | Table | Write strategy | Date column | Notes |
+|---|---|---|---|---|
+| `tableau` | `tableau_data` | fullReplace | — | |
+| `hubspot_contacts` | `hubspot_contacts` | fullReplace | — | ~434-col export, ~31 mapped |
+| `ghl_opportunities` | `ghl_opportunities` | upsert `opportunity_id` | `created_on` | |
+| `operational_data` | `operational_data` | upsert `date` | `date` | xlsx, `Sheet2`, Excel serials |
+| `stripe` | `stripe_data` | upsert `stripe_invoice_id` | `created` | Invoice-level (legacy) |
+| **`stripe_revenue`** | `stripe_revenue_lines` | dateRangeReplace `transaction_date` | `transaction_date` | **Line-item level — primary revenue feed** |
+| **`product_category_map`** | `product_category_map` | fullReplace | — | Workbook Mapping tab; routes by sheet name |
+| `zendesk` | `zendesk_data` | upsert `zendesk_ticket_id` | — | Explore report export (legacy) |
+| **`zendesk_tickets`** | `zendesk_tickets` | dateRangeReplace `created_at` | `created_at` | **Warehouse extract — powers /support** |
+| `meta_ads` | `meta_ads` | dateRangeReplace `date` | `date` | Accepts **both** the day-level sheet and the per-ad warehouse extract |
+| **`marketing_daily`** | `marketing_daily` | upsert `date` | `date` | Integrated Slack + PostHog metrics |
+| `social_followers` | `social_followers` | upsert `date,platform` | `date` | Date stamped at upload |
+| `social_views` | `social_views` | upsert `date,platform` | `date` | |
+| `pelagonia` | `pelagonia_data` | dateRangeReplace | `pelagonia_created_at` | |
+| `financial_revenue_net` | `financial_revenue` | delete-by-`revenue_type` + insert | `date` | Manual workbook sheet |
+| `financial_revenue_gross` | `financial_revenue` | same | `date` | Manual workbook sheet |
+
+Column validation is **case-insensitive** on both client and server. A required column may be a
+single name or an array of accepted variants (`validateRequiredColumns`, data-sources.ts ~line 610).
+Auto-detection returns `null` unless **exactly one** schema fully validates, so schemas must stay
+mutually distinguishable — `stripe` vs `stripe_revenue` and `zendesk` vs `zendesk_tickets` are
+deliberately disjoint on their required columns.
+
+### Adding a data source — 9 steps the code enforces
+
+Miss any one and data silently never arrives:
+
+1. `src/lib/types/data-sources.ts` — add to `DataSourceName`.
+2. `src/lib/config/data-sources.ts` — the `CsvSchema` + register in `dataSourceSchemas`; a
+   `DataSourceConfig` (label, `exportSteps`, `poweredMetrics`) in `dataSourceConfigs`.
+3. `src/lib/processors/<name>-processor.ts` — return `ProcessorResult`, export a
+   `process…ToCanonical` alias, lc-normalise headers first.
+4. A Supabase migration — typed columns, `batch_id uuid references upload_log(id) on delete cascade`,
+   any unique constraint the write strategy needs, RLS + the `"service role full access"` policy.
+5. `src/app/api/data/upload/route.ts` — `SourceKey`, `SOURCE_TABLE`, `SOURCE_DATE_COLUMN`,
+   `SOURCE_PROCESSOR`, **and a `case` in `applyWriteStrategy`** (the switch has no `default`, so a
+   missing case writes nothing and still reports success).
+6. `src/app/api/data/latest/route.ts` — `SourceKey`, `SOURCE_TABLE`, `SOURCE_ORDER_COLUMN`, `sources`.
+7. `src/lib/context/data-context.tsx` — `DashboardData`, `emptyLastRefresh`, `defaultData`, and the
+   `asRows(body.<key>)` line in `refresh()`.
+8. `src/app/(dashboard)/admin/upload/page.tsx` — `SourceKey`, `VALID_SOURCES`, `DATE_COL` (**raw
+   header name**, not canonical), `REFRESH_KEY`, and `SHEET_NAME_TO_SOURCE` if it routes by sheet.
+9. `src/components/dashboard/data-source-badge.tsx` — add the key so the badge isn't neutral.
+
+---
+
+## Analytics modules (`src/lib/analytics/`)
+
+Pure functions over `CanonicalRow[]`. Pages import these rather than computing inline, so a page and
+its printable report can't drift.
+
+- **`revenue-metrics.ts`** — the revenue ladder, category rollups, recurring split, unmapped
+  products, reconciliation against the manual workbook.
+- **`support-metrics.ts`** — ticket volume, channel mix, response-time stats, queues, backlog.
+- **`marketing-metrics.ts`** — Meta spend metrics, call funnel with source provenance, campaign
+  breakdown, monthly detail.
+
+### The revenue ladder (mirrors Dan's CH Summary workbook)
 
 ```
-src/
-├── app/
-│   ├── layout.tsx                    # Bare root layout — NO AppShell
-│   ├── login/page.tsx                # Auth page (no AppShell)
-│   ├── auth/
-│   │   ├── callback/route.ts         # Handles OAuth code + token_hash invite/recovery
-│   │   └── update-password/page.tsx  # Set password on invite (onboarded gate)
-│   ├── (dashboard)/                  # Route group — all pages wrapped in AppShell
-│   │   ├── layout.tsx                # Renders <AppShell>
-│   │   ├── page.tsx                  # Scorecard (home)
-│   │   ├── financial/page.tsx
-│   │   ├── members/page.tsx          # Acquisition
-│   │   ├── clinical/page.tsx         # Delivery
-│   │   ├── retention/page.tsx
-│   │   ├── support/page.tsx
-│   │   ├── marketing/page.tsx
-│   │   ├── eos/page.tsx
-│   │   ├── board-pack/page.tsx
-│   │   ├── strategy/page.tsx
-│   │   ├── team/page.tsx
-│   │   └── admin/
-│   │       ├── page.tsx              # Admin hub
-│   │       ├── upload/page.tsx       # CSV upload with confirmation modal
-│   │       ├── upload-history/page.tsx # Upload audit log table
-│   │       ├── registry/page.tsx     # Data source registry (static + live upload data)
-│   │       ├── settings/page.tsx     # Demo/Actual mode toggle + invite link
-│   │       ├── invite/page.tsx       # Invite user by email
-│   │       └── manual/page.tsx       # Manual metric entry
-│   └── api/
-│       ├── admin/invite/route.ts     # POST — Supabase admin invite
-│       ├── data/
-│       │   ├── upload/route.ts       # POST multipart/form-data — parse + persist CSV
-│       │   ├── latest/route.ts       # GET — latest complete batch per source
-│       │   └── history/route.ts      # GET — upload_log rows (audit trail)
-│       └── priorities/route.ts       # GET/POST — EOS weekly priorities
-│
-├── middleware.ts                     # CRITICAL: lives at src/middleware.ts (not project root)
-│
-├── components/
-│   ├── layout/
-│   │   ├── app-shell.tsx
-│   │   ├── sidebar.tsx
-│   │   ├── top-bar.tsx
-│   │   └── ...
-│   ├── dashboard/
-│   │   ├── metric-card.tsx
-│   │   ├── data-source-badge.tsx     # Coloured badge per source key
-│   │   ├── section-heading.tsx
-│   │   └── ...
-│   └── ui/                           # shadcn/ui primitives (badge, button, dialog, etc.)
-│
-├── lib/
-│   ├── context/data-context.tsx      # Central data store (DataProvider, useDashboardData)
-│   ├── config/
-│   │   ├── navigation.ts             # Nav items (add new pages here)
-│   │   └── data-sources.ts           # CSV schemas + export steps + powered metrics per source
-│   ├── processors/                   # One processor per source — parse CSV → typed data
-│   │   ├── tableau-processor.ts
-│   │   ├── hubspot-processor.ts
-│   │   ├── stripe-processor.ts
-│   │   ├── zendesk-processor.ts
-│   │   ├── meta-processor.ts
-│   │   └── pelagonia-processor.ts
-│   ├── types/
-│   │   ├── index.ts                  # Re-exports Member, Transaction, Ticket, Clinician, Alert, Rock
-│   │   ├── member.ts
-│   │   ├── transaction.ts
-│   │   ├── ticket.ts
-│   │   ├── meta.ts                   # MetaAdRow
-│   │   ├── pelagonia.ts              # PelagoniaRow
-│   │   └── data-sources.ts           # DataSourceName union, CsvSchema, DataSourceConfig
-│   ├── supabase/
-│   │   ├── client.ts                 # Browser client (createBrowserClient)
-│   │   ├── server.ts                 # Server component client (createServerClient + cookies)
-│   │   └── service.ts                # Service role client (bypasses RLS)
-│   ├── upload-strategies.ts          # fullReplaceStrategy, dateRangeReplaceStrategy, upsertStrategy
-│   └── utils/
-│       └── metric-source.ts          # metricSourceMap + getMetricsPoweredBy(sourceKey)
-│
-└── data/mock/                        # Mock data for demo mode
+gross      list price before discounts (RRP)
+discount   coupons / comped value
+charged    gross − discount   ← the workbook calls this "Net", and it is what
+                                the dashboard's Net tile shows
+fee        allocated Stripe processing fee
+net        charged − fee (the export's NET_LINE_AMOUNT)
+exGstNet   charged / 1.1, matching the workbook's "Tax = Net / 11"
 ```
+
+**Category and recurring/one-off are resolved at read time**, joining `product_category_map`, not
+stamped at upload. Re-uploading the Mapping tab therefore re-categorises all history with no
+backfill, and a product that falls out of the map surfaces as `Unmapped` rather than being frozen
+into whatever the map said on ingest day.
+
+One-off = Joining Fee Revenue, Attach products - Off-the-shelf supplements, Attach products -
+Advanced tests. Everything else recurring. Overridable per product via an optional `Revenue Class`
+column on the Mapping tab.
+
+**Recurring % is measured against TOTAL gross**, so recurring + one-off + unmapped sums to 100% and
+the figure can never be flattered by an unmapped product. `recurringPctOfClassified` is available as
+a secondary and is shown only where something is unmapped.
+
+### Timezone: this is load-bearing
+
+Warehouse extracts land in **UTC**; the business reports in **Australia/Sydney**. Bucketing UTC
+timestamps by their UTC date under-counts — 1–5 Aug 2026 reads 260 tickets in Sydney and 253 in UTC,
+and July reads 1,098 vs 1,095. Always route timestamped values through `sydneyDayKey` from
+`src/lib/utils/period.ts`. Date-only columns (`transaction_date`, `date`) are compared as day
+strings and need no conversion.
+
+---
+
+## Period toolkit (`src/lib/utils/period.ts`)
+
+The comparison primitives every page shares. `previousPeriod()` in the date picker only shifts by
+range length, which is wrong for partial months — Aug 1–12 would compare against Jul 20–31.
+
+```ts
+sydneyDayKey / sydneyMonthKey    // YYYY-MM-DD / YYYY-MM in Sydney
+weekToDate(ref)                  // Monday 00:00 → ref
+fullWeek(ref)                    // the Mon–Sun week containing ref
+previousWeekSameSpan(range)      // same weekdays, −7d (NOT the preceding 7 days)
+samePeriodLastMonth(range)       // Aug 1–12 → Jul 1–12, day clamped
+samePeriodLastYear(range)
+fullMonth(ref) / trailingMonths(n, ref)
+eachDay(range) / dayCount(range) / atDayStart / atDayEnd
+inRange / inRangeSydney / localDayKey
+deltaPct(current, previous)      // shared; null when there's no baseline
+```
+
+`DateRange` is defined here (not in the picker) so server-safe utils can use it; the picker
+re-exports it for back-compat.
+
+`src/lib/utils/stats.ts` — `median`, `percentile`, `mean`, `finiteValues`. **Computes over present
+values only**: Zendesk records a first-response time on 628 of 3,309 tickets, so zero-filling would
+report a near-zero median on almost every window.
+
+---
+
+## Dashboard pages
+
+Two patterns coexist. **Use pattern A for anything new.**
+
+**A — narrative / live.** `page.tsx` (Home), `financial`, `marketing`, `support`, `support/report`.
+`'use client'`; `useDashboardData()`; `useState<DateRangePickerValue>`; `<Breadcrumb>` +
+`<DateRangePicker>` header; `<NarrativeSection>` blocks; shared `MetricTile` / `LockedTile` /
+`LockedCard` / `Column` from `@/components/dashboard/metric-tile`; every metric in a `useMemo` for
+each window; sparklines via `bucketByDay` → `TileChart`.
+
+**B — classic / demo.** `members`, `clinical`, `retention`. `<SectionHeading>` + shared `MetricCard`
++ `ChartPeriodToggle` over **hardcoded module-level arrays**. These pages still carry a `DEMO` nav
+tag and are the remaining rebuild candidates.
+
+### Section maps
+
+- **`/financial`** — 01 Plan vs Actual, 02 Revenue Headlines *(manual workbook)*, **03 The Revenue
+  Ladder, 04 Recurring vs One-Off, 05 Attach Products, 06 Does It Tie Out?** *(Stripe line items)*,
+  07–17 the pre-existing manual-workbook sections.
+- **`/support`** — 01 Volume, 02 Channel, 03 Response Time, 04 Queue, 05 What We Still Can't See.
+  `/support/report` is the four-page printable version, same analytics module, PDF via
+  `html2canvas` + `jsPDF`.
+- **`/marketing`** — **01 This Week, 02 Which Way Is It Moving?, 03 The Monthly Detail**, then 04–09
+  the pre-existing sections.
+
+### Shared components (`src/components/dashboard/`)
+
+`MetricTile` (with `delta`, `secondaryDelta`, `footnote`), `LockedTile`, `LockedCard`, `Column`,
+`NarrativeSection`, `TmrwBarChart` (grouped / stacked / percent-stacked / highlighted bars),
+`TmrwLineChart`, `TmrwAreaChart` (always stacked), `TileChart` + bucketing helpers, `Sparkline`,
+`TrendIndicator` (takes a **number** percent), `StatusDot`, `DataSourceBadge`, `AlertCard`,
+`DateRangePicker`.
+
+### House rule: missing data must read as missing
+
+A `null` metric renders a locked tile naming the column that would fill it, or `not instr.` in
+italics — never a `0`. Cart starts is the canonical example: a zero would claim nobody started a
+checkout when the truth is it isn't instrumented. Where a figure falls back to a second-choice
+source (calls booked: Slack → Meta pixel → GHL), the tile states which source it used, because those
+count different things.
+
+---
+
+## Verification
+
+Three `tsx` scripts run the **real** processors and analytics over an actual export and assert the
+numbers. 81 checks, all passing against the 6 Aug 2026 files.
+
+```bash
+npm run verify:revenue   -- --dir <folder>   # or --no-assert for a newer export
+npm run verify:support   -- --dir <folder>
+npm run verify:marketing -- --dir <folder>
+```
+
+Key figures they lock in:
+
+| Check | Expected |
+|---|---|
+| Stripe gross, 8-col export | A$670,206.86 over 3,636 lines |
+| Unmapped, name matching | 19 names / 88 lines / A$13,533.61 = 2.02% |
+| Unmapped, **product-id** matching | 4 names / 16 lines / A$1,973.12 = **0.44%** |
+| Recurring % of total, Jun / Jul 2026 | 93.47% / 89.29% |
+| Zendesk 1–5 Aug vs 1–5 Jul (Sydney) | 260 vs 100, +160% |
+| Zendesk monthly Feb–Jul | 62 / 190 / 496 / 751 / 452 / 1,098 |
+| WhatsApp resolution, Aug vs Jul window | median 16.6h vs 76.8h; p90 46.2h vs 149.3h |
+| SMS resolution | median 33.5h vs 94.1h; p90 50.7h |
+| Meta Jun 2026 | A$30,058 · 521,799 impr · 1,019 leads · CPL A$29.50 · CTR 2.84% |
+| Meta Jul 2026 | A$35,166 · 470,662 impr · 779 leads · CPL A$45.14 · CTR 2.00% |
+
+Also asserted: `samePeriodLastMonth` resolves 1–5 Aug to 1–5 Jul; `previousWeekSameSpan` from a
+Monday lands on the previous Monday; and un-instrumented metrics stay `null` rather than becoming 0.
+
+`npm run build` must pass clean. The `/api/data/history` prerender warning is pre-existing and benign.
 
 ---
 
 ## Supabase Schema
 
-All three migrations must be applied (user has run all three):
+| Migration | Adds |
+|---|---|
+| `001_create_tables.sql` | `upload_log`, `tableau_data`, `hubspot_data`, `stripe_data`, `zendesk_data`, `priorities_log` (all `row_data jsonb`) |
+| `002_add_meta_pelagonia.sql` | `meta_data`, `pelagonia_data` (jsonb) |
+| `003_audit_columns.sql` | `upload_log`: `uploaded_by`, `data_period_from/to`, `data_period_label`, `file_name` |
+| `004_financial_revenue.sql` | `financial_revenue` (first typed table) |
+| `005_stripe_revenue.sql` | `stripe_revenue_lines`, `product_category_map` |
+| `006_zendesk_tickets.sql` | `zendesk_tickets` |
+| `007_meta_campaign_marketing_daily.sql` | campaign columns on `meta_ads` (nullable); `marketing_daily` |
 
-### `001_create_tables.sql`
-```sql
-upload_log (id uuid PK, source text, record_count int, status text, error text, uploaded_at timestamptz)
-tableau_data  (id, batch_id → upload_log.id, row_data jsonb, inserted_at)
-hubspot_data  (same structure)
-stripe_data   (same structure)
-zendesk_data  (same structure)
-priorities_log (id, week_of date, data jsonb, uploaded_at)
-```
+**Known gap:** the canonical tables `hubspot_contacts`, `ghl_opportunities`, `operational_data`,
+`meta_ads`, `social_followers`, `social_views` and `plan_targets` have **no DDL in this repo** — they
+were created directly in Supabase. `meta_data` (002) is orphaned; the code uses `meta_ads`. The
+`row_data jsonb` tables from 001/002 predate the flat typed columns the processors now write. Worth
+writing a catch-up migration.
 
-### `002_add_meta_pelagonia.sql`
-```sql
-meta_data      (id, batch_id → upload_log.id, row_data jsonb, inserted_at)
-pelagonia_data (same structure)
-```
-
-### `003_audit_columns.sql`
-```sql
-ALTER TABLE upload_log ADD COLUMN IF NOT EXISTS
-  uploaded_by text, data_period_from date, data_period_to date,
-  data_period_label text, file_name text;
-```
-
-All tables have RLS enabled with a "service role full access" policy. The service role key is used in all API routes.
-
----
-
-## Data Sources
-
-Six CSV-upload sources, each with a processor, schema, and write strategy:
-
-| Source key | Table | Write strategy | Date col for detection |
-|---|---|---|---|
-| `tableau` | `tableau_data` | fullReplace | `Created At` (from processed data) |
-| `hubspot` | `hubspot_data` | fullReplace | `created at` |
-| `stripe` | `stripe_data` | dateRangeReplace on `created` | `created` |
-| `zendesk` | `zendesk_data` | upsert on `ID` | `created at` |
-| `meta` | `meta_data` | dateRangeReplace on `Reporting Starts` | `Reporting Starts` / `Reporting Ends` |
-| `pelagonia` | `pelagonia_data` | fullReplace | `created at` |
-
-Column validation is **case-insensitive** on both client and server (normalise to `.toLowerCase().trim()` before comparing).
-
----
-
-## Data Flow Architecture
-
-### Upload flow (as of latest session)
-1. User drops / selects file on an upload card
-2. **Client-side only**: file is parsed locally (PapaParse / XLSX) to validate columns, detect date range, and build in-memory typed data
-3. Modal opens — shows file name, row count, auto-detected date range (editable), period label (editable), uploaded-by (pre-filled from `supabase.auth.getUser()`)
-4. On **Confirm**: client POSTs the raw file via `FormData` to `/api/data/upload` with audit fields
-5. API parses the file server-side, validates, writes to Supabase, marks `upload_log` complete
-6. On API success: client calls `updateSource(sourceKey, parsedData)` to update in-memory state + localStorage
-7. On API failure: error shown in card, in-memory state NOT updated
-
-### `updateSource` (data-context.tsx)
-- **Only** updates in-memory `useState` + `localStorage`. Does NOT call any API. This was a deliberate fix — the old version had a silent fire-and-forget fetch which caused data to appear saved when it wasn't.
-
-### On page load
-- `DataProvider` fetches `/api/data/latest` which returns the newest complete batch per source from Supabase
-- Falls back to `localStorage` if server is unavailable
-- Default mode is `'actual'` (not demo)
-
----
-
-## Auth Architecture
-
-### Key files
-- **`src/middleware.ts`** — MUST be at `src/middleware.ts`, NOT project root (project uses `src/` directory structure)
-- **`src/lib/supabase/server.ts`** — server component / API route client
-- **`src/lib/supabase/client.ts`** — browser client (`createBrowserClient`)
-- **`src/lib/supabase/service.ts`** — service role client for API routes (bypasses RLS)
-
-### Middleware matcher
-Protects everything except: `_next/static`, `_next/image`, static assets, `/login`, `/auth/callback`, `/auth/update-password`.
-
-### Invite flow
-1. Admin POSTs to `/api/admin/invite` with `{ email }` — no password required (trusted users only)
-2. Supabase sends invite email with `token_hash`
-3. User clicks link → hits `/auth/callback` which calls `verifyOtp({ token_hash, type: 'invite' })` → redirects to `/auth/update-password`
-4. On that page, user sets password → `updateUser({ password, data: { onboarded: true } })` → redirect to `/`
-5. Middleware gate: if `user.user_metadata.onboarded === false`, redirect to `/auth/update-password`. Uses strict `=== false` (not `!== true`) so legacy users (undefined metadata) pass through.
-
-### Redirects
-- After login: `window.location.href = '/'` (full navigation — NOT `router.push` — to ensure cookies are picked up)
-- After update-password: `window.location.href = '/'` (same reason)
-
-### Supabase email template
-The invite email template MUST be set to:
-```
-You've been invited to create a login for TMRW's Dashboards!
-Accept the invite here: {{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=invite
-```
-(The default `{{ .ConfirmationURL }}` does NOT route through `/auth/callback` correctly.)
+All tables: RLS enabled with `"service role full access" for all using (true) with check (true)`.
+API routes use the service-role client.
 
 ---
 
 ## Data Context (`src/lib/context/data-context.tsx`)
 
-```ts
-interface DashboardData {
-  members: Member[]
-  transactions: Transaction[]
-  tickets: Ticket[]
-  clinicians: Clinician[]
-  metaAds: MetaAdRow[]
-  pelagoniaOpportunities: PelagoniaRow[]
-  manualMetrics: ManualMetrics
-  rocks: Rock[]
-  alerts: Alert[]
-  isUsingMockData: boolean
-  dataMode: 'demo' | 'actual'
-  lastRefreshed: Record<string, string | null>  // per source ISO timestamp
-}
+`DashboardData` has two halves:
 
-// Context also exposes:
-derivedCAC: number | null   // totalMetaSpend / customerCount
-hasActualData: boolean
-isLoading: boolean
-resetToDemo(): void         // switches to demo/mock data
-switchToActual(): void      // restores from localStorage/API
-updateSource(key, Partial<DashboardData>): void   // in-memory + localStorage ONLY
-```
+- **Legacy demo-shaped arrays** — `members`, `transactions`, `tickets`, `clinicians`, `metaAds`,
+  `pelagoniaOpportunities`, `manualMetrics`, `rocks`, `alerts`. Populated **only in demo mode**;
+  empty in `actual`. Pattern-B pages still read these.
+- **Canonical arrays** (`CanonicalRow[]` = `Record<string, unknown>[]`) — `meta_ads`,
+  `marketing_daily`, `social_followers`, `social_views`, `stripe`, `stripe_revenue`,
+  `product_category_map`, `hubspot`, `pelagonia`, `tableau`, `zendesk`, `zendesk_tickets`,
+  `hubspot_contacts`, `ghl_opportunities`, `operational_data`, `plan_targets`, `financial_revenue`.
 
-Demo mode: triggered from `/admin/settings`. Shows a sticky amber banner. Demo data lives in `src/data/mock/`.
+Also exposes `loading`, `error`, `refresh()`, `resetToDemo()`, `switchToActual()`, `hasActualData`,
+`derivedCAC`, `lastRefresh` (+ `lastRefreshed` alias).
+
+`refresh()` does a single `fetch('/api/data/latest')` on mount and assigns each body key through
+`asRows()`. There is **no** `updateSource` and **no** localStorage caching — earlier docs described
+both; neither exists.
 
 ---
 
-## Design System
+## Auth
 
-All tokens defined in `src/app/globals.css` as CSS custom properties. Key tokens:
+- **`src/middleware.ts`** — MUST live at `src/middleware.ts`, not project root (`src/` layout).
+- Clients: `lib/supabase/client.ts` (browser), `server.ts` (server components / routes),
+  `service.ts` → exported as `createServiceClient`, always imported as
+  `import { createServiceClient as createClient }`.
+- Invite flow: `/api/admin/invite` → Supabase invite email with `token_hash` → `/auth/callback`
+  (`verifyOtp`) → `/auth/update-password` → sets `onboarded: true`.
+- Middleware gate uses strict `user.user_metadata.onboarded === false` so legacy users pass.
+- Redirects after login / password set use `window.location.href = '/'` (full navigation, so cookies
+  are picked up), never `router.push`.
+- Supabase invite template must be:
+  `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=invite`
 
-```
---color-dash-bg            # Page background
---color-dash-surface       # Card background
---color-dash-surface-alt   # Table headers, secondary surfaces
---color-dash-border        # Default border
---color-dash-border-strong # Hover/active border
---color-dash-text          # Primary text
---color-dash-text-secondary
---color-dash-text-muted
---color-dash-text-inverse  # Text on red bg
---color-dash-red           # #8B0000 — primary action colour
---color-dash-red-light     # #8B000015 — drag-over backgrounds etc.
---color-status-green / -light
---color-status-amber / -light
---color-status-red / -light
---color-src-hubspot / src-stripe / src-zendesk / src-manual / src-tableau
-```
-
-All dashboard pages use `'use client'`. No server components in the `(dashboard)` group currently.
+Env: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+(server only — must **not** be `NEXT_PUBLIC_`).
 
 ---
 
-## Navigation (`src/lib/config/navigation.ts`)
+## Gotchas
 
-Add new pages here. Structure:
-```ts
-{ label: string, href: string, icon: LucideIcon, section: 'home' | 'operations' | 'management' | 'admin' }
-```
-
-Current admin links: Data Upload, Upload History, Data Registry, Settings.
-
----
-
-## Known Patterns & Gotchas
-
-### TypeScript
-- Recharts `data=` props must be cast to `object[]` to avoid TS union type errors
-- `CookieOptions` must be imported from `@supabase/ssr` when typing the `setAll` callback in server/middleware clients
-- `createServiceClient` is the export name from `service.ts` — always import as `import { createServiceClient as createClient }`
-
-### Charts
-- All Recharts bar/line chart `data` props: `data={myArray as object[]}`
-- Chart wrapper components live in `src/components/dashboard/tmrw-area-chart.tsx` and `tmrw-line-chart.tsx`
-
-### Supabase prerender errors
-- Never call `createClient()` at component body level on pages that might prerender
-- Call it inside event handlers or `useEffect` only
-
-### Upload page modal
-- Modal renders inside `UploadCard` with `fixed inset-0 z-50` — works because no ancestor has CSS transform
-- `currentUserEmail` is fetched at page level via `supabase.auth.getUser()` and passed as prop
-
-### Data source badge (`src/components/dashboard/data-source-badge.tsx`)
-- Accepts `source: 'hubspot' | 'stripe' | 'zendesk' | 'manual' | 'tableau' | 'meta' | 'pelagonia'`
-- Add new sources here when adding new data integrations
+- **`tsc` has no explicit `target`**, so it defaults to ES5: spreading a `Map`/`Set` iterator is a
+  compile error. Use `Array.from(...)`, matching the existing pages.
+- Recharts `data` props need `as object[]` or `as Record<string, unknown>[]`.
+- The upload page re-serialises every sheet through `Papa.unparse` before POSTing, so **Excel date
+  cells reach processors as serial strings** like `"45992"`. Use `parseSpreadsheetDate` from
+  `_date-helpers.ts` — its plain-number-string branch must run before the native `Date` fallback,
+  because `new Date("45992")` reads 45992 as a year.
+- Australian `DD/MM/YYYY` dates must go through `parseAusDate`; V8 leans toward US `MM/DD/YYYY`.
+- Never call `createClient()` at component body level on a page that might prerender — only inside
+  event handlers or `useEffect`.
+- `formatTrend` in `utils/format.ts` returns a *string*; `TrendIndicator` wants a *number*. Use
+  `deltaPct`.
 
 ---
 
-## Supabase Environment Variables
+## What's Not Done
 
-```
-NEXT_PUBLIC_SUPABASE_URL=<project url>
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
-SUPABASE_SERVICE_ROLE_KEY=<service role key>   # server/API only
-```
-
-Set in Vercel dashboard AND `.env.local` for local dev. The service role key must NOT be prefixed `NEXT_PUBLIC_`.
-
-Supabase URL config:
-- Site URL: `https://your-vercel-domain.vercel.app`
-- Redirect URLs: `https://your-vercel-domain.vercel.app/auth/callback`
-
----
-
-## What's Working (as of handoff)
-
-- ✅ Full auth flow: invite → set password → login → protected dashboard
-- ✅ 6 data sources uploadable: Tableau, HubSpot, Stripe, Zendesk, Meta, Pelagonia
-- ✅ Upload confirmation modal with audit metadata capture
-- ✅ Data persists to Supabase per-source tables via appropriate write strategy
-- ✅ `/admin/upload-history` — full audit log with filters
-- ✅ `/admin/registry` — live last-upload data from upload_log
-- ✅ Drag-and-drop on upload cards with global drag detection
-- ✅ Case-insensitive column validation (client + server)
-- ✅ Demo/actual mode toggle in settings
-- ✅ Derived CAC (Meta spend ÷ customer count)
-- ✅ All Vercel builds pass cleanly
-
----
-
-## What's Not Done / Possible Next Steps
-
-These are informed guesses based on what exists — not confirmed by the user:
-
-1. **Dashboard pages showing real data** — Most dashboard pages (financial, marketing, members, etc.) likely still show empty states or partial data. The processors and context are wired; the page-level metric calculations and chart components may need connecting to the new sources (Meta, Pelagonia).
-
-2. **Marketing page** — currently shows `1.52 kB` which suggests minimal implementation. Meta and Pelagonia data should power this page.
-
-3. **Acquisition page** (`/members`) — should show CAC, Meta funnel metrics, Pelagonia pipeline metrics alongside member data.
-
-4. **Clinicians data** — `clinicians: Clinician[]` exists in context but the Tableau processor is the only thing that can populate it. May need a dedicated source or HubSpot enrichment.
-
-5. **Snowflake daily pipeline** — The target architecture. `NEXT_PUBLIC_SNOWFLAKE_EXPORT_URL` env var already has a dormant auto-fetch in `data-context.tsx` at lines 302–347. Activating it requires pointing the env var at a real export endpoint.
-
-6. **Registry page cleanup** — static `lastSync` fields on non-uploadable sources (Oracle, GA4, etc.) are still hardcoded. The `metricsUnlocked` counts are also static and may be inaccurate.
-
-7. **Mobile nav** — the mobile sidebar (`mobile-nav.tsx`) may not include the new Upload History nav item if it has its own static list.
-
-8. **Error surfacing at the page level** — upload errors show in the card; there's no global error toast/notification system.
-
-9. **`/admin/manual` page** — manual metric entry exists but may need expansion as more metrics are tracked.
+1. **`/members`, `/clinical`, `/retention`** are still hardcoded demo arrays (`DEMO` nav tag). Same
+   treatment as `/support` would make them live.
+2. **Catch-up migration** for the tables created directly in Supabase (see the schema gap above).
+3. **Unmapped Stripe products** — 19 names / ~2% of gross under name matching. Two fixes, both
+   easy: add them to the Mapping tab, and/or switch to the 57-column Line Items export where
+   `PRODUCT_ID` cuts it to 0.44%. The Financial page's §06 panel lists exactly what to add.
+4. **`marketing_daily` has no data yet.** The schema, upload card and page are ready; Dan needs to
+   produce the sheet. `exportSteps` on the source spells out the exact header row.
+5. **Zendesk extract is missing four columns** that would unlock CSAT, per-agent load, tags and
+   reopens — each is one extra column on the existing extract, no new integration. `/support` §05
+   names them.
+6. **Snowflake pipeline** — `NEXT_PUBLIC_SNOWFLAKE_EXPORT_URL` has a dormant auto-fetch in
+   `data-context.tsx`.
+7. **HubSpot/GHL extract** is known-janky per Dan; calls-booked currently prefers Slack, then Meta,
+   then GHL.
+8. No global error toast; upload errors surface in the card only.
 
 ---
 
 ## Git
 
-Branch: `claude/implement-mvp-spec-tpdhK`
-Remote: `oscarttmrw/tmrw-dashes` on GitHub
-
-All commits push to the branch above. Do NOT push to main without explicit instruction.
-
-Latest commit: `ea2b694` — Audit trail, confirmation modal, upload history, and registry live data
+Remote: `oscarttmrw/tmrw-dashes`. Do not push to `main` without explicit instruction.
