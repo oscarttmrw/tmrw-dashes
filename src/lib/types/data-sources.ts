@@ -4,6 +4,8 @@ export type DataSourceName =
   | 'ghl_opportunities'
   | 'operational_data'
   | 'stripe'
+  | 'stripe_revenue'
+  | 'product_category_map'
   | 'zendesk'
   | 'tableau'
   | 'meta_ads'

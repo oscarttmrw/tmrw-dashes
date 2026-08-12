@@ -13,6 +13,8 @@ type SourceKey =
   | 'social_followers'
   | 'social_views'
   | 'stripe'
+  | 'stripe_revenue'
+  | 'product_category_map'
   | 'hubspot_contacts'
   | 'ghl_opportunities'
   | 'operational_data'
@@ -32,6 +34,8 @@ const SHEET_NAME_TO_SOURCE: Record<string, SourceKey> = {
   'social followers': 'social_followers',
   'social media views': 'social_views',
   'social views': 'social_views',
+  'mapping': 'product_category_map',
+  'line items': 'stripe_revenue',
   'net revenue': 'financial_revenue_net',
   'gross revenue (rrp)': 'financial_revenue_gross',
   'gross revenue': 'financial_revenue_gross',
@@ -42,6 +46,8 @@ const VALID_SOURCES: SourceKey[] = [
   'social_followers',
   'social_views',
   'stripe',
+  'stripe_revenue',
+  'product_category_map',
   'hubspot_contacts',
   'ghl_opportunities',
   'operational_data',
@@ -58,6 +64,7 @@ const DATE_COL: Partial<Record<SourceKey, string>> = {
   meta_ads: 'date',
   social_views: 'date',
   stripe: 'created',
+  stripe_revenue: 'transaction_date',
   hubspot_contacts: 'create date',
   ghl_opportunities: 'created on',
   operational_data: 'date',
@@ -73,6 +80,8 @@ const REFRESH_KEY: Record<SourceKey, string> = {
   social_followers: 'social_followers',
   social_views: 'social_views',
   stripe: 'stripe',
+  stripe_revenue: 'stripe_revenue',
+  product_category_map: 'product_category_map',
   hubspot_contacts: 'hubspot_contacts',
   ghl_opportunities: 'ghl_opportunities',
   operational_data: 'operational_data',

@@ -7,6 +7,8 @@ type SourceKey =
   | 'social_followers'
   | 'social_views'
   | 'stripe'
+  | 'stripe_revenue'
+  | 'product_category_map'
   | 'hubspot_contacts'
   | 'ghl_opportunities'
   | 'operational_data'
@@ -20,6 +22,8 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   social_followers: 'social_followers',
   social_views: 'social_views',
   stripe: 'stripe_data',
+  stripe_revenue: 'stripe_revenue_lines',
+  product_category_map: 'product_category_map',
   hubspot_contacts: 'hubspot_contacts',
   ghl_opportunities: 'ghl_opportunities',
   operational_data: 'operational_data',
@@ -34,6 +38,9 @@ const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
   social_followers: 'date',
   social_views: 'date',
   stripe: 'created',
+  stripe_revenue: 'transaction_date',
+  // No date dimension — order by insert time so the newest snapshot wins.
+  product_category_map: 'inserted_at',
   hubspot_contacts: 'create_date',
   ghl_opportunities: 'created_on',
   operational_data: 'date',
@@ -57,6 +64,8 @@ export async function GET() {
     'social_followers',
     'social_views',
     'stripe',
+    'stripe_revenue',
+    'product_category_map',
     'hubspot_contacts',
     'ghl_opportunities',
     'operational_data',

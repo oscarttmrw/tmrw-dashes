@@ -47,6 +47,8 @@ export interface DashboardData {
   social_followers: CanonicalRow[]
   social_views: CanonicalRow[]
   stripe: CanonicalRow[]
+  stripe_revenue: CanonicalRow[]
+  product_category_map: CanonicalRow[]
   hubspot: CanonicalRow[]
   pelagonia: CanonicalRow[]
   tableau: CanonicalRow[]
@@ -81,6 +83,8 @@ const emptyLastRefresh: Record<string, string | null> = {
   social_followers: null,
   social_views: null,
   stripe: null,
+  stripe_revenue: null,
+  product_category_map: null,
   hubspot: null,
   pelagonia: null,
   tableau: null,
@@ -107,6 +111,8 @@ const defaultData: DashboardData = {
   social_followers: [],
   social_views: [],
   stripe: [],
+  stripe_revenue: [],
+  product_category_map: [],
   hubspot: [],
   pelagonia: [],
   tableau: [],
@@ -190,6 +196,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         social_followers: asRows(body.social_followers),
         social_views: asRows(body.social_views),
         stripe: asRows(body.stripe),
+        stripe_revenue: asRows(body.stripe_revenue),
+        product_category_map: asRows(body.product_category_map),
         hubspot: asRows(body.hubspot),
         pelagonia: asRows(body.pelagonia),
         tableau: asRows(body.tableau),

@@ -68,6 +68,61 @@ export function parseAusDate(value: unknown): string | null {
   return null
 }
 
+const MONTH_ABBR: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+}
+
+/**
+ * Convert an Excel date serial (days since 1899-12-30) to "YYYY-MM-DD".
+ * Guarded to a sane range so stray numbers aren't read as dates.
+ */
+export function fromExcelSerial(serial: number): string | null {
+  if (!isFinite(serial) || serial < 20_000 || serial > 80_000) return null
+  const d = new Date(Math.floor(serial - 25_569) * 86_400_000)
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+}
+
+/**
+ * Parse a date cell that came out of a spreadsheet, into "YYYY-MM-DD".
+ *
+ * Handles, in order: a numeric Excel serial; the displayed "30-Dec-2025" /
+ * "30-Dec-25" form; a plain-number *string* serial; then ISO / native-parseable.
+ *
+ * The plain-number-string branch must run before the native fallback: the upload
+ * page re-serialises every sheet through Papa.unparse, so Excel date cells reach
+ * processors as serial strings like "45992", and `new Date("45992")` reads 45992
+ * as a year. Returns null for anything that isn't a real date — which is how
+ * subtotal labels, blanks and grand-total rows get skipped.
+ */
+export function parseSpreadsheetDate(v: unknown): string | null {
+  if (v === null || v === undefined) return null
+
+  if (typeof v === 'number') return fromExcelSerial(v)
+
+  const s = String(v).trim()
+  if (s === '') return null
+
+  const m = s.match(/^(\d{1,2})-([A-Za-z]{3})[A-Za-z]*-(\d{2,4})$/)
+  if (m) {
+    const day = parseInt(m[1], 10)
+    const mon = MONTH_ABBR[m[2].toLowerCase()]
+    let year = parseInt(m[3], 10)
+    if (year < 100) year += 2000
+    if (mon && day >= 1 && day <= 31) {
+      return `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    }
+    return null
+  }
+
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    return fromExcelSerial(Number(s))
+  }
+
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+}
+
 /**
  * Parse an Australian datetime (DD/M/YYYY HH:MM[:SS]) or ISO timestamp into a
  * full ISO-8601 string. The Australian datetime is interpreted as UTC — Meta

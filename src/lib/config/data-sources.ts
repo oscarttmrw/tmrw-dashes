@@ -460,6 +460,101 @@ export const financialRevenueGrossSchema: CsvSchema = {
   canonicalColumns: financialRevenueCanonical,
 };
 
+// Stripe revenue at line-item granularity. Distinct from the `stripe` invoice
+// schema above — that one requires ID / AMOUNT_PAID / SUBSCRIPTION_ID, none of
+// which appear here, so header detection can't confuse the two.
+//
+// Required columns are the intersection of the 8-column "integrated" CSV and the
+// 57-column "Line Items" export, so either shape validates and the processor
+// reads whichever optional columns are present.
+export const stripeRevenueSchema: CsvSchema = {
+  source: 'stripe_revenue',
+  requiredColumns: [
+    ['TRANSACTION_DATE', 'Transaction Date'],
+    ['PRODUCT_NAME', 'Product Name'],
+    ['GROSS_LINE_AMOUNT', 'Gross Line Amount'],
+  ],
+  optionalColumns: [
+    'DISCOUNT_LINE_AMOUNT',
+    'CHARGED_LINE_AMOUNT',
+    'ALLOCATED_STRIPE_FEE',
+    'NET_LINE_AMOUNT',
+    'COUPON_NAME',
+    // Line Items export only.
+    'PRODUCT_ID',
+    'REVENUE_PRODUCT_LINE_ID',
+    'TRANSACTION_ID',
+    'RECORD_TYPE',
+    'IS_REFUND',
+    'IS_SUBSCRIPTION_CHARGE',
+    'BILLING_REASON',
+    'INVOICE_STATUS',
+    'QUANTITY',
+    'CURRENCY',
+    'SUBSCRIPTION_ID',
+    'SUBSCRIPTION_STATUS',
+    'CURRENT_JOURNEY_PHASE',
+  ],
+  strippedColumns: [
+    // MEMBER_EMAIL is kept (needed for member-level revenue later) but the
+    // Line Items export also carries these, which the dashboard never uses.
+    'CUSTOMER_ID',
+    'INVOICE_ID',
+    'BILLING_COUNTRY',
+    'BILLING_STATE',
+    'PAYMENT_METHOD_TYPE',
+  ],
+  canonicalColumns: [
+    'transaction_date',
+    'product_id',
+    'product_name',
+    'gross_amount',
+    'discount_amount',
+    'charged_amount',
+    'stripe_fee',
+    'net_after_fee',
+    'coupon_name',
+    'line_id',
+    'transaction_id',
+    'record_type',
+    'is_refund',
+    'is_subscription_charge',
+    'billing_reason',
+    'quantity',
+    'currency',
+    'member_email',
+    'subscription_id',
+    'subscription_status',
+  ],
+};
+
+// The workbook's Mapping tab. Routes by sheet name ('mapping') as well as by
+// header signature.
+export const productCategoryMapSchema: CsvSchema = {
+  source: 'product_category_map',
+  requiredColumns: [
+    ['Product ID', 'PRODUCT_ID'],
+    ['MAPPING', 'MAPPING_CATEGORY', 'Mapping Category'],
+    ['Product Name', 'PRODUCT_NAME'],
+  ],
+  optionalColumns: [
+    // Optional override for the recurring/one-off split, so the classification
+    // can change in the sheet without a code change.
+    'Revenue Class',
+    'Currency',
+    'Price ID',
+    'Price Nickname',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'product_id',
+    'product_name_key',
+    'product_name',
+    'category',
+    'revenue_class',
+  ],
+};
+
 /**
  * All schemas indexed by source name for easy lookup.
  */
@@ -468,6 +563,8 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   ghl_opportunities: ghlOpportunitiesSchema,
   operational_data: operationalDataSchema,
   stripe: stripeSchema,
+  stripe_revenue: stripeRevenueSchema,
+  product_category_map: productCategoryMapSchema,
   zendesk: zendeskSchema,
   tableau: tableauSchema,
   meta_ads: metaAdsSchema,
@@ -620,6 +717,28 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
       'Drop the file into the upload zone below.',
     ],
     poweredMetrics: getMetricsPoweredBy('pelagonia'),
+  },
+  stripe_revenue: {
+    name: 'Stripe Revenue (line items)',
+    exportSteps: [
+      'Run the Stripe revenue line-item extract from the warehouse.',
+      'Either export shape works. Minimum columns: TRANSACTION_DATE, PRODUCT_NAME, GROSS_LINE_AMOUNT.',
+      'Recommended (the full "Line Items" export): also include PRODUCT_ID, DISCOUNT_LINE_AMOUNT, CHARGED_LINE_AMOUNT, ALLOCATED_STRIPE_FEE, NET_LINE_AMOUNT, COUPON_NAME, RECORD_TYPE, IS_REFUND, IS_SUBSCRIPTION_CHARGE, BILLING_REASON, MEMBER_EMAIL, SUBSCRIPTION_ID, SUBSCRIPTION_STATUS.',
+      'PRODUCT_ID is what makes category mapping exact — without it products are matched on name, and any renamed or new product falls into the Unmapped bucket until the Mapping tab catches up.',
+      'Upload the Mapping tab (below) whenever a new product appears, so nothing sits unmapped.',
+    ],
+    poweredMetrics: [],
+  },
+  product_category_map: {
+    name: 'Product Category Map',
+    exportSteps: [
+      'Open the Stripe revenue workbook and go to the Mapping tab (the last one).',
+      'Required columns: Product ID, MAPPING, Product Name.',
+      'Optional: Revenue Class — set to "recurring" or "one_off" to override the default for a product. Default treats Joining Fee Revenue, Attach products - Off-the-shelf supplements and Attach products - Advanced tests as one-off; everything else recurring.',
+      'Make sure every MAPPING cell holds literal category text, not a formula referencing another row — upload rejects those rows and names them.',
+      'Drop the .xlsx in; the Mapping sheet routes by name. Re-uploading re-categorises all revenue history immediately.',
+    ],
+    poweredMetrics: [],
   },
   financial_revenue_net: {
     name: 'Financial Revenue — Net',

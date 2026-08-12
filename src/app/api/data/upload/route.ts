@@ -10,6 +10,8 @@ import { processMetaAdsToCanonical } from '@/lib/processors/meta-processor'
 import { processSocialFollowersToCanonical } from '@/lib/processors/social-followers-processor'
 import { processSocialViewsToCanonical } from '@/lib/processors/social-views-processor'
 import { processStripeToCanonical } from '@/lib/processors/stripe-processor'
+import { processStripeRevenueToCanonical } from '@/lib/processors/stripe-revenue-processor'
+import { processProductCategoryMapToCanonical } from '@/lib/processors/product-category-map-processor'
 import { processHubspotContactsToCanonical } from '@/lib/processors/hubspot-contacts-processor'
 import { processGhlToCanonical } from '@/lib/processors/ghl-processor'
 import { processOperationalDataToCanonical } from '@/lib/processors/operational-data-processor'
@@ -28,6 +30,8 @@ type SourceKey =
   | 'ghl_opportunities'
   | 'operational_data'
   | 'stripe'
+  | 'stripe_revenue'
+  | 'product_category_map'
   | 'zendesk'
   | 'meta_ads'
   | 'social_followers'
@@ -42,6 +46,8 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   ghl_opportunities: 'ghl_opportunities',
   operational_data: 'operational_data',
   stripe: 'stripe_data',
+  stripe_revenue: 'stripe_revenue_lines',
+  product_category_map: 'product_category_map',
   zendesk: 'zendesk_data',
   meta_ads: 'meta_ads',
   social_followers: 'social_followers',
@@ -57,6 +63,9 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   ghl_opportunities: 'created_on',
   operational_data: 'date',
   stripe: 'created',
+  stripe_revenue: 'transaction_date',
+  // The map has no date dimension — it is a snapshot of the current product list.
+  product_category_map: null,
   zendesk: null,
   meta_ads: 'date',
   social_followers: 'date',
@@ -71,6 +80,8 @@ const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => P
   social_followers: processSocialFollowersToCanonical,
   social_views: processSocialViewsToCanonical,
   stripe: processStripeToCanonical,
+  stripe_revenue: processStripeRevenueToCanonical,
+  product_category_map: processProductCategoryMapToCanonical,
   hubspot_contacts: processHubspotContactsToCanonical,
   ghl_opportunities: processGhlToCanonical,
   operational_data: processOperationalDataToCanonical,
@@ -91,6 +102,9 @@ async function applyWriteStrategy(
   switch (source) {
     case 'tableau':
     case 'hubspot_contacts':
+    // Full-replaced so removing a product from the Mapping tab removes it here
+    // too, rather than leaving a stale category behind.
+    case 'product_category_map':
       return fullReplaceStrategy(supabase, table, batchId, rows)
     case 'ghl_opportunities':
       return upsertStrategy(supabase, table, batchId, rows, 'opportunity_id')
@@ -98,6 +112,11 @@ async function applyWriteStrategy(
       return upsertStrategy(supabase, table, batchId, rows, 'date')
     case 'stripe':
       return upsertStrategy(supabase, table, batchId, rows, 'stripe_invoice_id')
+    // dateRangeReplace rather than upsert: the 8-column export carries no line
+    // ID, so there is no stable key to conflict on. Replacing the uploaded date
+    // window keeps a re-upload of the same period idempotent.
+    case 'stripe_revenue':
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'transaction_date')
     case 'meta_ads':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'date')
     case 'social_followers':
