@@ -18,7 +18,19 @@ import { StatusDot } from '@/components/dashboard/status-dot'
 import { MetricTile, LockedTile, LockedCard } from '@/components/dashboard/metric-tile'
 import { NarrativeSection } from '@/components/dashboard/narrative-section'
 import { TileChart } from '@/components/dashboard/tile-chart'
+import { TmrwBarChart } from '@/components/dashboard/tmrw-bar-chart'
 import { useDashboardData } from '@/lib/context/data-context'
+import { deltaPct } from '@/lib/utils/period'
+import {
+  ATTACH_CATEGORIES,
+  buildCategoryLookup,
+  categoryLabel,
+  emptyLadder,
+  reconcileAgainstManual,
+  rollupByCategory,
+  rollupByMonth,
+  unmappedProducts,
+} from '@/lib/analytics/revenue-metrics'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
 import { Star, ChevronDown } from 'lucide-react'
@@ -84,6 +96,45 @@ const PRODUCT_COLORS: Record<string, string> = {
   advanced_tests: '#7C3AED',
 }
 
+// Attach-category stack colours, in ATTACH_CATEGORIES order. Reuses the existing
+// per-product hues so the same product family keeps the same colour across the
+// manual-workbook charts and the Stripe line-item charts.
+const ATTACH_COLORS = ['#E5A04A', '#16A34A', '#7C3AED', '#3676C9', '#0891B2']
+
+/**
+ * Month-on-month delta for a ladder figure. Returns null when there's no prior
+ * month to compare against, so the tile renders no arrow rather than a fake 0%.
+ */
+function monthDelta(current: number, previous: number, prevLabel?: string) {
+  if (!prevLabel) return null
+  const value = deltaPct(current, previous)
+  if (value === null) return null
+  return { value, period: `vs ${prevLabel}` }
+}
+
+/* ─── Table cells (shared by the new revenue tables) ─────────────────── */
+
+function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
+  return (
+    <th
+      className={cn(
+        'pb-2 font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted',
+        align === 'right' ? 'pl-3 text-right' : 'pr-3 text-left'
+      )}
+    >
+      {children}
+    </th>
+  )
+}
+
+function Td({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <td className={cn('py-2 pl-3 text-right font-mono text-[12px] text-dash-text', className)}>
+      {children}
+    </td>
+  )
+}
+
 function monthKey(dateVal: unknown): string | null {
   const t = new Date(String(dateVal ?? '')).getTime()
   if (isNaN(t)) return null
@@ -114,8 +165,93 @@ const OVERLAY_GREYS = ['#D8D5CE', '#B8B5AE', '#9A9690', '#737373', '#4A4A4A']
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 export default function FinancialPage() {
-  const { financial_revenue, stripe, plan_targets, loading, error, refresh } = useDashboardData()
+  const {
+    financial_revenue,
+    stripe,
+    stripe_revenue,
+    product_category_map,
+    plan_targets,
+    loading,
+    error,
+    refresh,
+  } = useDashboardData()
   const [showTable, setShowTable] = useState(false)
+
+  /* ── Stripe line-item revenue (primary feed) ──
+   * Categories are joined here, at read time, so re-uploading the workbook's
+   * Mapping tab re-categorises history immediately and anything that falls out
+   * of the map shows up as Unmapped rather than silently deflating a total. */
+  const categoryLookup = useMemo(() => buildCategoryLookup(product_category_map), [product_category_map])
+  const hasLineItems = stripe_revenue.length > 0
+
+  const lineMonthly = useMemo(
+    () => rollupByMonth(stripe_revenue, categoryLookup),
+    [stripe_revenue, categoryLookup]
+  )
+
+  // Latest month present in the feed — the ladder headlines that rather than the
+  // calendar month, so a mid-month upload gap doesn't read as a revenue collapse.
+  const latestLineMonth = lineMonthly.length > 0 ? lineMonthly[lineMonthly.length - 1] : null
+  const prevLineMonth = lineMonthly.length > 1 ? lineMonthly[lineMonthly.length - 2] : null
+
+  const lineLadder = latestLineMonth?.ladder ?? emptyLadder()
+  const prevLineLadder = prevLineMonth?.ladder ?? emptyLadder()
+
+  const latestMonthLines = useMemo(() => {
+    if (!latestLineMonth) return []
+    return stripe_revenue.filter(r => String(r.transaction_date).slice(0, 7) === latestLineMonth.month)
+  }, [stripe_revenue, latestLineMonth])
+
+  const categoryRollup = useMemo(
+    () => rollupByCategory(latestMonthLines, categoryLookup),
+    [latestMonthLines, categoryLookup]
+  )
+
+  // Unmapped is computed over the WHOLE feed, not just the latest month: a
+  // product that stopped being mapped six months ago still distorts history.
+  const unmapped = useMemo(
+    () => unmappedProducts(stripe_revenue, categoryLookup),
+    [stripe_revenue, categoryLookup]
+  )
+  const unmappedTotals = useMemo(() => {
+    const gross = unmapped.reduce((s, p) => s + p.gross, 0)
+    const lines = unmapped.reduce((s, p) => s + p.lineCount, 0)
+    const allGross = stripe_revenue.reduce((s, r) => s + num(r.gross_amount), 0)
+    return { gross, lines, names: unmapped.length, share: allGross !== 0 ? gross / allGross : null }
+  }, [unmapped, stripe_revenue])
+
+  // Recurring / one-off / unmapped as a three-way split that always sums to
+  // 100%, so recurring % can never be flattered by an unmapped product.
+  const recurringChartData = useMemo(
+    () => lineMonthly.map(m => ({
+      m: m.label,
+      recurring: m.recurring,
+      oneOff: m.oneOff,
+      unmapped: m.unmapped,
+      recurringPct: m.recurringPct,
+    })),
+    [lineMonthly]
+  )
+
+  // Attach products only — Dan's "breakdown of attach products".
+  const attachChartData = useMemo(
+    () => lineMonthly.map(m => {
+      const row: Record<string, unknown> = { m: m.label }
+      for (const c of ATTACH_CATEGORIES) row[c] = m.byCategory[c] ?? 0
+      return row
+    }),
+    [lineMonthly]
+  )
+  const attachRollup = categoryRollup.filter(c => c.category.startsWith('Attach products'))
+  const attachTotalGross = attachRollup.reduce((s, c) => s + c.ladder.gross, 0)
+
+  const reconciliation = useMemo(
+    () => reconcileAgainstManual(lineMonthly, financial_revenue),
+    [lineMonthly, financial_revenue]
+  )
+  // Only months both sides cover are meaningful to judge.
+  const comparableRecon = reconciliation.filter(r => r.manualGross !== 0 || r.manualNet !== 0)
+  const reconAllGood = comparableRecon.length > 0 && comparableRecon.every(r => r.reconciled)
 
   /* ── Split financial_revenue by type ──
    * net  = revenue actually collected (post-discount)
@@ -506,8 +642,455 @@ export default function FinancialPage() {
         </div>
       </NarrativeSection>
 
-      {/* ────────────── 03 REVENUE BY MONTH ────────────── */}
-      <NarrativeSection number={3} question="Revenue by Month" subtitle="Gross (RRP) · Net">
+      {/* ────────────── 03 REVENUE LADDER (Stripe line items) ────────────── */}
+      <NarrativeSection
+        number={3}
+        question="The Revenue Ladder"
+        subtitle={
+          latestLineMonth
+            ? `Stripe line items · ${latestLineMonth.label} · list price down to ex-GST`
+            : 'Stripe line items · list price down to ex-GST'
+        }
+      >
+        {!hasLineItems ? (
+          <LockedCard
+            title="Revenue Ladder"
+            reason="No Stripe line-item data yet. Upload the Stripe revenue extract (Admin → Data Upload → Stripe Revenue) to unlock gross, net, recurring and the attach-product breakdown."
+          />
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-3 xl:grid-cols-6">
+              <MetricTile
+                prominent
+                label="Gross (RRP)"
+                value={fmtCurrency(lineLadder.gross, { compact: true })}
+                target="List price before discounts"
+                status={lineLadder.gross > 0 ? 'green' : 'grey'}
+                delta={monthDelta(lineLadder.gross, prevLineLadder.gross, prevLineMonth?.label)}
+              />
+              <MetricTile
+                label="Discounts"
+                value={fmtCurrency(lineLadder.discount, { compact: true })}
+                target="Coupons + comped value"
+                status="grey"
+                direction="lower-better"
+                delta={monthDelta(lineLadder.discount, prevLineLadder.discount, prevLineMonth?.label)}
+              />
+              <MetricTile
+                prominent
+                label="Net (charged)"
+                value={fmtCurrency(lineLadder.charged, { compact: true })}
+                target="Gross − discounts"
+                status={lineLadder.charged > 0 ? 'green' : 'grey'}
+                delta={monthDelta(lineLadder.charged, prevLineLadder.charged, prevLineMonth?.label)}
+                footnote="Matches the CH Summary workbook's Net row"
+              />
+              <MetricTile
+                label="Stripe Fees"
+                value={fmtCurrency(lineLadder.fee, { compact: true })}
+                target={lineLadder.charged > 0 ? `${((lineLadder.fee / lineLadder.charged) * 100).toFixed(2)}% of charged` : '—'}
+                status="grey"
+                direction="lower-better"
+                delta={null}
+              />
+              <MetricTile
+                label="Ex-GST Net"
+                value={fmtCurrency(lineLadder.exGstNet, { compact: true })}
+                target={`GST ${fmtCurrency(lineLadder.gst, { compact: true })} · charged ÷ 1.1`}
+                status={lineLadder.exGstNet > 0 ? 'green' : 'grey'}
+                delta={null}
+              />
+              <MetricTile
+                label="Capture Rate"
+                value={lineLadder.captureRate === null ? '—' : `${(lineLadder.captureRate * 100).toFixed(1)}%`}
+                target="Charged ÷ gross"
+                status={
+                  lineLadder.captureRate === null ? 'grey'
+                    : lineLadder.captureRate >= 0.8 ? 'green'
+                    : lineLadder.captureRate >= 0.5 ? 'amber'
+                    : 'red'
+                }
+                delta={
+                  prevLineLadder.captureRate !== null && lineLadder.captureRate !== null
+                    ? { value: deltaPct(lineLadder.captureRate, prevLineLadder.captureRate), period: `vs ${prevLineMonth?.label ?? 'prior month'}` }
+                    : null
+                }
+              />
+            </div>
+
+            <div className="mt-4 rounded-lg border border-dash-border bg-dash-surface p-4">
+              <div className="mb-3 flex items-baseline justify-between gap-3">
+                <span className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  Gross → Net by month
+                </span>
+                <span className="font-sans text-[11px] text-dash-text-muted">
+                  {lineLadder.refundCount > 0
+                    ? `${lineLadder.refundCount} refund line${lineLadder.refundCount === 1 ? '' : 's'} in ${latestLineMonth?.label} (${fmtCurrency(lineLadder.refundValue, { compact: true })})`
+                    : 'No refunds in the latest month'}
+                </span>
+              </div>
+              <TmrwBarChart
+                data={lineMonthly.map(m => ({
+                  m: m.label,
+                  charged: m.ladder.charged,
+                  discount: m.ladder.discount,
+                })) as Record<string, unknown>[]}
+                index="m"
+                stacked
+                series={[
+                  { dataKey: 'charged', name: 'Net (charged)', color: '#E61317' },
+                  { dataKey: 'discount', name: 'Discounts', color: '#D6D2CA' },
+                ]}
+                height={240}
+                yAxisWidth={52}
+                valueFormatter={(v) => fmtCurrency(v, { compact: true })}
+              />
+              <p className="mt-2 font-sans text-[11px] text-dash-text-muted">
+                The two bands stack to gross at list price, so the grey band is exactly what discounting gave away.
+              </p>
+            </div>
+          </>
+        )}
+      </NarrativeSection>
+
+      {/* ────────────── 04 RECURRING VS ONE-OFF ────────────── */}
+      <NarrativeSection
+        number={4}
+        question="Recurring vs One-Off"
+        subtitle="Subscription + peptides + stacks + appointments · vs joining fees, supplements, advanced tests"
+      >
+        {!hasLineItems ? (
+          <LockedCard title="Recurring Revenue" reason="Needs the Stripe line-item extract." />
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
+              <MetricTile
+                prominent
+                label="Recurring"
+                value={fmtCurrency(latestLineMonth?.recurring ?? 0, { compact: true })}
+                target={latestLineMonth?.recurringPct === null || latestLineMonth === null
+                  ? 'No data'
+                  : `${latestLineMonth.recurringPct!.toFixed(1)}% of gross`}
+                status={(latestLineMonth?.recurringPct ?? 0) >= 80 ? 'green' : (latestLineMonth?.recurringPct ?? 0) >= 50 ? 'amber' : 'red'}
+                delta={monthDelta(latestLineMonth?.recurring ?? 0, prevLineMonth?.recurring ?? 0, prevLineMonth?.label)}
+              />
+              <MetricTile
+                label="One-Off"
+                value={fmtCurrency(latestLineMonth?.oneOff ?? 0, { compact: true })}
+                target="Joining fees · supplements · advanced tests"
+                status="grey"
+                delta={monthDelta(latestLineMonth?.oneOff ?? 0, prevLineMonth?.oneOff ?? 0, prevLineMonth?.label)}
+              />
+              <MetricTile
+                label="Recurring %"
+                value={latestLineMonth?.recurringPct == null ? '—' : `${latestLineMonth.recurringPct.toFixed(1)}%`}
+                target="Share of total gross"
+                status={(latestLineMonth?.recurringPct ?? 0) >= 80 ? 'green' : 'amber'}
+                delta={
+                  latestLineMonth?.recurringPct != null && prevLineMonth?.recurringPct != null
+                    ? { value: deltaPct(latestLineMonth.recurringPct, prevLineMonth.recurringPct), period: `vs ${prevLineMonth.label}` }
+                    : null
+                }
+                footnote={
+                  (latestLineMonth?.unmapped ?? 0) > 0 && latestLineMonth?.recurringPctOfClassified != null
+                    ? `${latestLineMonth.recurringPctOfClassified.toFixed(1)}% of categorised revenue only`
+                    : undefined
+                }
+              />
+              {(latestLineMonth?.unmapped ?? 0) > 0 ? (
+                <MetricTile
+                  label="Unmapped"
+                  value={fmtCurrency(latestLineMonth?.unmapped ?? 0, { compact: true })}
+                  target="Not yet in the Mapping tab"
+                  status="red"
+                  direction="lower-better"
+                  delta={null}
+                  footnote="Can't be classified recurring or one-off until mapped"
+                />
+              ) : (
+                <MetricTile
+                  label="Unmapped"
+                  value={fmtCurrency(0)}
+                  target="Every product categorised"
+                  status="green"
+                  delta={null}
+                />
+              )}
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+                <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  Gross split by month
+                </div>
+                <TmrwBarChart
+                  data={recurringChartData as Record<string, unknown>[]}
+                  index="m"
+                  stacked
+                  series={[
+                    { dataKey: 'recurring', name: 'Recurring', color: '#E61317' },
+                    { dataKey: 'oneOff', name: 'One-off', color: '#F5A623' },
+                    { dataKey: 'unmapped', name: 'Unmapped', color: '#9CA3AF' },
+                  ]}
+                  height={240}
+                  yAxisWidth={52}
+                  valueFormatter={(v) => fmtCurrency(v, { compact: true })}
+                />
+              </div>
+              <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+                <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  Recurring share of gross
+                </div>
+                <div className="h-[240px]">
+                  <ResponsiveContainer>
+                    <LineChart data={recurringChartData as object[]} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke="#EFEDE8" vertical={false} />
+                      <XAxis dataKey="m" tick={{ fontSize: 10, fill: '#737373' }} />
+                      <YAxis
+                        tick={{ fontSize: 10, fill: '#737373' }}
+                        domain={[0, 100]}
+                        tickFormatter={v => `${v}%`}
+                      />
+                      <Tooltip formatter={(v: unknown) => `${Number(v).toFixed(1)}%`} />
+                      <Line
+                        type="monotone"
+                        dataKey="recurringPct"
+                        stroke="#E61317"
+                        strokeWidth={2}
+                        dot={{ r: 3, fill: '#E61317' }}
+                        name="Recurring %"
+                        connectNulls
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </NarrativeSection>
+
+      {/* ────────────── 05 ATTACH PRODUCTS ────────────── */}
+      <NarrativeSection
+        number={5}
+        question="Attach Products"
+        subtitle={
+          latestLineMonth
+            ? `Supplements · peptides · advanced tests · stacks · appointments · ${latestLineMonth.label}`
+            : 'Supplements · peptides · advanced tests · stacks · appointments'
+        }
+      >
+        {!hasLineItems ? (
+          <LockedCard title="Attach Products" reason="Needs the Stripe line-item extract." />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+              <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                Attach gross by month
+              </div>
+              <TmrwBarChart
+                data={attachChartData}
+                index="m"
+                stacked
+                series={ATTACH_CATEGORIES.map((c, i) => ({
+                  dataKey: c,
+                  name: categoryLabel(c),
+                  color: ATTACH_COLORS[i % ATTACH_COLORS.length],
+                }))}
+                height={260}
+                yAxisWidth={52}
+                valueFormatter={(v) => fmtCurrency(v, { compact: true })}
+              />
+            </div>
+            <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+              <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                {latestLineMonth?.label} by category
+              </div>
+              {categoryRollup.length === 0 ? (
+                <p className="font-sans text-sm text-dash-text-muted">No lines in this month.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-left">
+                    <thead>
+                      <tr className="border-b border-dash-border">
+                        <Th>Category</Th>
+                        <Th align="right">Gross</Th>
+                        <Th align="right">Discount</Th>
+                        <Th align="right">Net</Th>
+                        <Th align="right">% of gross</Th>
+                        <Th align="right">Class</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categoryRollup.map(c => (
+                        <tr key={c.category} className="border-b border-dash-border/60 last:border-0">
+                          <td className="py-2 pr-3 font-sans text-[12px] text-dash-text">{c.label}</td>
+                          <Td>{fmtCurrency(c.ladder.gross)}</Td>
+                          <Td>{fmtCurrency(c.ladder.discount)}</Td>
+                          <Td>{fmtCurrency(c.ladder.charged)}</Td>
+                          <Td>{c.shareOfGross === null ? '—' : `${(c.shareOfGross * 100).toFixed(1)}%`}</Td>
+                          <Td>{c.revenueClass === 'one_off' ? 'One-off' : 'Recurring'}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p className="mt-3 font-sans text-[11px] text-dash-text-muted">
+                Attach products totalled {fmtCurrency(attachTotalGross, { compact: true })} gross in {latestLineMonth?.label}
+                {lineLadder.gross > 0 && ` — ${((attachTotalGross / lineLadder.gross) * 100).toFixed(1)}% of the month`}.
+              </p>
+            </div>
+          </div>
+        )}
+      </NarrativeSection>
+
+      {/* ────────────── 06 MAPPING + RECONCILIATION ────────────── */}
+      <NarrativeSection
+        number={6}
+        question="Does It Tie Out?"
+        subtitle="Unmapped products · Stripe line items vs the manual workbook"
+      >
+        {!hasLineItems ? (
+          <LockedCard title="Reconciliation" reason="Needs the Stripe line-item extract." />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
+            {/* Unmapped products — shown, never folded into a total. */}
+            <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+              <div className="mb-3 flex items-baseline justify-between gap-3">
+                <span className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  Unmapped products
+                </span>
+                <span
+                  className={cn(
+                    'rounded-md px-2 py-0.5 font-sans text-[11px] font-medium',
+                    unmappedTotals.names === 0
+                      ? 'bg-status-green-light text-status-green'
+                      : 'bg-status-amber-light text-status-amber'
+                  )}
+                >
+                  {unmappedTotals.names === 0
+                    ? 'All mapped'
+                    : `${unmappedTotals.names} product${unmappedTotals.names === 1 ? '' : 's'}`}
+                </span>
+              </div>
+              {categoryLookup.isEmpty ? (
+                <p className="font-sans text-sm text-dash-text-muted">
+                  No product map uploaded yet. Upload the workbook&apos;s Mapping tab so revenue can be
+                  categorised — until then everything counts as unmapped.
+                </p>
+              ) : unmapped.length === 0 ? (
+                <p className="font-sans text-sm text-dash-text-muted">
+                  Every product in the feed maps to a category. Nothing is leaking out of the breakdown.
+                </p>
+              ) : (
+                <>
+                  <p className="mb-3 font-sans text-[12px] text-dash-text-secondary">
+                    {fmtCurrency(unmappedTotals.gross)} across {unmappedTotals.lines} line
+                    {unmappedTotals.lines === 1 ? '' : 's'}
+                    {unmappedTotals.share !== null && ` — ${(unmappedTotals.share * 100).toFixed(2)}% of all gross`}.
+                    Add these to the Mapping tab and re-upload to fold them into the breakdown.
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[420px] text-left">
+                      <thead>
+                        <tr className="border-b border-dash-border">
+                          <Th>Product</Th>
+                          <Th align="right">Lines</Th>
+                          <Th align="right">Gross</Th>
+                          <Th align="right">% of gross</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {unmapped.slice(0, 12).map(p => (
+                          <tr key={p.productName} className="border-b border-dash-border/60 last:border-0">
+                            <td className="py-2 pr-3 font-sans text-[12px] text-dash-text">{p.productName}</td>
+                            <Td>{p.lineCount}</Td>
+                            <Td>{fmtCurrency(p.gross)}</Td>
+                            <Td>{p.shareOfGross === null ? '—' : `${(p.shareOfGross * 100).toFixed(2)}%`}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {unmapped.length > 12 && (
+                    <p className="mt-2 font-sans text-[11px] text-dash-text-muted">
+                      + {unmapped.length - 12} more, smaller than the ones listed.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Reconciliation against the hand-maintained workbook. */}
+            <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+              <div className="mb-3 flex items-baseline justify-between gap-3">
+                <span className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  Stripe feed vs manual workbook
+                </span>
+                {comparableRecon.length > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-md px-2 py-0.5 font-sans text-[11px] font-medium',
+                      reconAllGood
+                        ? 'bg-status-green-light text-status-green'
+                        : 'bg-status-amber-light text-status-amber'
+                    )}
+                  >
+                    {reconAllGood ? 'Reconciled' : 'Investigate'}
+                  </span>
+                )}
+              </div>
+              {comparableRecon.length === 0 ? (
+                <p className="font-sans text-sm text-dash-text-muted">
+                  No overlapping months to compare yet. Upload both the Stripe line-item extract and the
+                  manual Net/Gross sheets to cross-check them.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-left">
+                    <thead>
+                      <tr className="border-b border-dash-border">
+                        <Th>Month</Th>
+                        <Th align="right">Stripe gross</Th>
+                        <Th align="right">Manual gross</Th>
+                        <Th align="right">Δ gross</Th>
+                        <Th align="right">Stripe net</Th>
+                        <Th align="right">Manual net</Th>
+                        <Th align="right">Δ net</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comparableRecon.map(r => (
+                        <tr key={r.month} className="border-b border-dash-border/60 last:border-0">
+                          <td className="py-2 pr-3 font-sans text-[12px] text-dash-text">{r.label}</td>
+                          <Td>{fmtCurrency(r.stripeGross)}</Td>
+                          <Td>{fmtCurrency(r.manualGross)}</Td>
+                          <Td className={Math.round(r.grossVariance) === 0 ? 'text-status-green' : 'text-status-amber'}>
+                            {fmtCurrency(r.grossVariance)}
+                          </Td>
+                          <Td>{fmtCurrency(r.stripeNet)}</Td>
+                          <Td>{fmtCurrency(r.manualNet)}</Td>
+                          <Td className={Math.round(r.netVariance) === 0 ? 'text-status-green' : 'text-status-amber'}>
+                            {fmtCurrency(r.netVariance)}
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p className="mt-3 font-sans text-[11px] text-dash-text-muted">
+                Mirrors the workbook&apos;s own Reconciliation tab. &ldquo;Stripe net&rdquo; is charged
+                (gross − discounts), the same basis as the workbook&apos;s Net row.
+              </p>
+            </div>
+          </div>
+        )}
+      </NarrativeSection>
+
+      {/* ────────────── 07 REVENUE BY MONTH ────────────── */}
+      <NarrativeSection number={7} question="Revenue by Month" subtitle="Gross (RRP) · Net">
         <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
             <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
@@ -562,7 +1145,7 @@ export default function FinancialPage() {
       </NarrativeSection>
 
       {/* ────────────── 04 DISCOUNT DISCIPLINE ────────────── */}
-      <NarrativeSection number={4} question="Discount Discipline" subtitle="Where are we leaking?">
+      <NarrativeSection number={8} question="Discount Discipline" subtitle="Where are we leaking?">
         <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
             <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
@@ -589,7 +1172,7 @@ export default function FinancialPage() {
 
       {/* ────────────── 05 CUMULATIVE MTD OVERLAY ────────────── */}
       <NarrativeSection
-        number={5}
+        number={9}
         question="Cumulative Month-to-Date"
         subtitle="Each month overlaid · current in bold"
         right={
@@ -672,7 +1255,7 @@ export default function FinancialPage() {
 
       {/* ────────────── 06 RECURRING REVENUE & ARR ────────────── */}
       <NarrativeSection
-        number={6}
+        number={10}
         question="Recurring Revenue & ARR"
         subtitle="ARR is a proxy"
         right={
@@ -750,7 +1333,7 @@ export default function FinancialPage() {
       </NarrativeSection>
 
       {/* ────────────── 07 NON-CORE REVENUE ────────────── */}
-      <NarrativeSection number={7} question="Non-Core Revenue" subtitle="Stacks · supplements · peptides · advanced tests">
+      <NarrativeSection number={11} question="Non-Core Revenue" subtitle="Stacks · supplements · peptides · advanced tests">
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
           <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
             Net Revenue from Non-Core Products
@@ -783,7 +1366,7 @@ export default function FinancialPage() {
 
       {/* ────────────── 08 ACTUAL VS FORECAST ────────────── */}
       <NarrativeSection
-        number={8}
+        number={12}
         question="Actual vs Forecast"
         subtitle="Where are we heading?"
         right={
@@ -815,7 +1398,7 @@ export default function FinancialPage() {
       </NarrativeSection>
 
       {/* ────────────── 09 REFUNDS & FAILURES ────────────── */}
-      <NarrativeSection number={9} question="Refunds & Failures" subtitle="Where revenue is leaking">
+      <NarrativeSection number={13} question="Refunds & Failures" subtitle="Where revenue is leaking">
         <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
           <LockedCard title="Failure Rate" reason="Stripe Invoices export has no failed-charge status. Needs Charges export." />
           <LockedCard title="Failure Codes (YTD)" reason="Drill-down enabled once Stripe Charges data lands." />
@@ -824,7 +1407,7 @@ export default function FinancialPage() {
 
       {/* ────────────── 10 UNIT ECONOMICS ────────────── */}
       <NarrativeSection
-        number={10}
+        number={14}
         question="Unit Economics"
         subtitle="LTV · CAC · payback"
         right={
@@ -843,7 +1426,7 @@ export default function FinancialPage() {
 
       {/* ────────────── 11 MONTHLY SUMMARY TABLE ────────────── */}
       <NarrativeSection
-        number={11}
+        number={15}
         question="Monthly Summary"
         subtitle="All key metrics · one view"
         right={
@@ -897,7 +1480,7 @@ export default function FinancialPage() {
       </NarrativeSection>
 
       {/* ────────────── 12 PARKED ────────────── */}
-      <NarrativeSection number={12} question="Parked" subtitle="What we can't show yet — and why">
+      <NarrativeSection number={16} question="Parked" subtitle="What we can't show yet — and why">
         <div className="overflow-x-auto rounded-lg border border-dash-border bg-dash-surface/40">
           <table className="w-full font-sans text-[13px]">
             <thead>
@@ -929,7 +1512,7 @@ export default function FinancialPage() {
 
       {/* ────────────── 13 CFO POV ────────────── */}
       <NarrativeSection
-        number={13}
+        number={17}
         question="CFO POV"
         subtitle="What keeps me up — read before the board meeting"
       >
