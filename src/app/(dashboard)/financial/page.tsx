@@ -13,15 +13,15 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts'
-import Link from 'next/link'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { StatusDot } from '@/components/dashboard/status-dot'
-import { TrendIndicator } from '@/components/dashboard/trend-indicator'
+import { MetricTile, LockedTile, LockedCard } from '@/components/dashboard/metric-tile'
+import { NarrativeSection } from '@/components/dashboard/narrative-section'
 import { TileChart } from '@/components/dashboard/tile-chart'
 import { useDashboardData } from '@/lib/context/data-context'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
-import { Lock, Star, ChevronDown } from 'lucide-react'
+import { Star, ChevronDown } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -30,124 +30,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-
-/* ─── Tile primitives (mirrors home-dashboard styling) ─────────────── */
-
-interface TileProps {
-  label: string
-  value: string
-  target?: string
-  delta?: { value: number; period?: string } | null
-  status: Status
-  direction?: 'higher-better' | 'lower-better'
-  href?: string
-  chart?: React.ReactNode
-  prominent?: boolean
-}
-
-function MetricTile({ label, value, target, delta, status, direction = 'higher-better', href, chart, prominent }: TileProps) {
-  const tileClass = cn(
-    'flex h-full flex-col rounded-lg border bg-dash-surface transition-all duration-150',
-    prominent
-      ? 'border-dash-border-strong p-4 md:p-5 shadow-sm'
-      : 'border-dash-border p-3 md:p-4',
-    href && 'hover:border-dash-border-strong hover:shadow-sm hover:-translate-y-px'
-  )
-  const inner = (
-    <div className={tileClass}>
-      <div className="flex items-start justify-between gap-2">
-        <span className={cn(
-          'font-ui font-medium uppercase tracking-[0.05em] text-dash-text-secondary',
-          prominent ? 'text-[11px] md:text-[12px]' : 'text-[10px] md:text-[11px]'
-        )}>
-          {label}
-        </span>
-        <StatusDot status={status} />
-      </div>
-      <div className="mt-1 md:mt-2 flex items-baseline gap-2">
-        <span className={cn(
-          'font-mono font-bold tracking-[-0.01em] text-dash-text',
-          prominent ? 'text-2xl md:text-3xl' : 'text-lg md:text-2xl'
-        )}>
-          {value}
-        </span>
-        {delta !== null && delta !== undefined && (
-          <TrendIndicator value={delta.value} direction={direction} />
-        )}
-      </div>
-      {chart && <div className="mt-3 mb-2">{chart}</div>}
-      <div className="mt-auto pt-3 flex items-center justify-between text-[10px] text-dash-text-muted md:text-[11px]">
-        {target ? <span>{target}</span> : <span />}
-        {delta?.period && <span className="font-sans">{delta.period}</span>}
-      </div>
-    </div>
-  )
-  return href ? <Link href={href} className="block h-full">{inner}</Link> : inner
-}
-
-function LockedTile({ label, reason, target }: { label: string; reason: string; target?: string }) {
-  return (
-    <div className="flex h-full flex-col rounded-lg border border-dashed border-dash-border bg-dash-surface/40 p-3 md:p-4 opacity-75">
-      <div className="flex items-start justify-between gap-2">
-        <span className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted md:text-[11px]">
-          {label}
-        </span>
-        <Lock size={11} className="text-dash-text-muted" />
-      </div>
-      <div className="mt-1 md:mt-2">
-        <span className="font-mono text-base text-dash-text-muted md:text-lg">—</span>
-      </div>
-      <p className="mt-auto pt-1.5 font-sans text-[10px] italic text-dash-text-muted md:text-[11px]">
-        {reason}
-      </p>
-      {target && (
-        <p className="font-sans text-[10px] text-dash-text-muted/80 md:text-[11px]">{target}</p>
-      )}
-    </div>
-  )
-}
-
-function LockedCard({ title, reason }: { title: string; reason: string }) {
-  return (
-    <div className="flex h-full min-h-[180px] flex-col items-center justify-center rounded-lg border border-dashed border-dash-border bg-dash-surface/40 p-6 text-center opacity-80">
-      <Lock size={16} className="mb-2 text-dash-text-muted" />
-      <p className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">{title}</p>
-      <p className="mt-1 max-w-md font-sans text-[11px] italic text-dash-text-muted">{reason}</p>
-    </div>
-  )
-}
-
-function NarrativeSection({
-  number, question, subtitle, right, children,
-}: {
-  number: number
-  question: string
-  subtitle: string
-  right?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <section>
-      <div className="mb-5 md:mb-7 flex items-end justify-between gap-4">
-        <div>
-          <div className="flex items-start gap-4 md:gap-6">
-            <span className="font-display text-4xl leading-none text-dash-text md:text-6xl">
-              {String(number).padStart(2, '0')}
-            </span>
-            <h2 className="font-display uppercase tracking-tight text-dash-text text-2xl leading-none pt-[0.2rem] md:text-4xl md:pt-[0.4rem]">
-              {question}
-            </h2>
-          </div>
-          <p className="mt-2 ml-[3.5rem] md:ml-[5.5rem] font-ui text-[11px] uppercase tracking-[0.12em] text-dash-text-muted md:text-xs">
-            {subtitle}
-          </p>
-        </div>
-        {right && <div>{right}</div>}
-      </div>
-      {children}
-    </section>
-  )
-}
 
 /* ─── Formatters / helpers ────────────────────────────────────────── */
 

@@ -14,6 +14,7 @@ import {
   type DateRangePickerValue,
 } from '@/components/dashboard/date-range-picker'
 import { TileChart, bucketByDay } from '@/components/dashboard/tile-chart'
+import { deltaPct } from '@/lib/utils/period'
 import { Lock } from 'lucide-react'
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
@@ -40,11 +41,6 @@ function inPeriod(value: unknown, start: Date, end: Date): boolean {
   const t = new Date(String(value)).getTime()
   if (isNaN(t)) return false
   return t >= start.getTime() && t <= end.getTime()
-}
-
-function deltaPct(current: number, previous: number): number | null {
-  if (previous === 0) return null
-  return ((current - previous) / previous) * 100
 }
 
 // Fallback LTV if no value has been entered in Settings → Plan Targets yet.
