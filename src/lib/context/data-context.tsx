@@ -53,6 +53,7 @@ export interface DashboardData {
   pelagonia: CanonicalRow[]
   tableau: CanonicalRow[]
   zendesk: CanonicalRow[]
+  zendesk_tickets: CanonicalRow[]
   hubspot_contacts: CanonicalRow[]
   ghl_opportunities: CanonicalRow[]
   operational_data: CanonicalRow[]
@@ -89,6 +90,7 @@ const emptyLastRefresh: Record<string, string | null> = {
   pelagonia: null,
   tableau: null,
   zendesk: null,
+  zendesk_tickets: null,
   hubspot_contacts: null,
   ghl_opportunities: null,
   operational_data: null,
@@ -117,6 +119,7 @@ const defaultData: DashboardData = {
   pelagonia: [],
   tableau: [],
   zendesk: [],
+  zendesk_tickets: [],
   hubspot_contacts: [],
   ghl_opportunities: [],
   operational_data: [],
@@ -202,6 +205,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         pelagonia: asRows(body.pelagonia),
         tableau: asRows(body.tableau),
         zendesk: asRows(body.zendesk),
+        zendesk_tickets: asRows(body.zendesk_tickets),
         hubspot_contacts: asRows(body.hubspot_contacts),
         ghl_opportunities: asRows(body.ghl_opportunities),
         operational_data: asRows(body.operational_data),

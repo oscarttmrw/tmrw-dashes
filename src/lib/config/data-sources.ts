@@ -460,6 +460,40 @@ export const financialRevenueGrossSchema: CsvSchema = {
   canonicalColumns: financialRevenueCanonical,
 };
 
+// Zendesk inbound tickets, warehouse extract. Distinct from the legacy `zendesk`
+// schema above, which requires Ticket ID + Satisfaction Score + reply-time
+// columns — none of which exist here, so detection can't confuse the two.
+export const zendeskTicketsSchema: CsvSchema = {
+  source: 'zendesk_tickets',
+  requiredColumns: [
+    ['CHANNEL', 'Channel'],
+    ['CREATED_AT', 'Created At'],
+    ['GROUP_NAME', 'Group Name'],
+  ],
+  optionalColumns: [
+    'STATUS',
+    'DIRECTION',
+    'UPDATED_AT',
+    'FIRST_REPLY_AT',
+    'FIRST_RESPONSE_HOURS',
+    'SOLVED_AT',
+    'RESOLUTION_HOURS',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'channel',
+    'status',
+    'direction',
+    'group_name',
+    'created_at',
+    'updated_at',
+    'first_reply_at',
+    'first_response_hours',
+    'solved_at',
+    'resolution_hours',
+  ],
+};
+
 // Stripe revenue at line-item granularity. Distinct from the `stripe` invoice
 // schema above — that one requires ID / AMOUNT_PAID / SUBSCRIPTION_ID, none of
 // which appear here, so header detection can't confuse the two.
@@ -566,6 +600,7 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   stripe_revenue: stripeRevenueSchema,
   product_category_map: productCategoryMapSchema,
   zendesk: zendeskSchema,
+  zendesk_tickets: zendeskTicketsSchema,
   tableau: tableauSchema,
   meta_ads: metaAdsSchema,
   social_followers: socialFollowersSchema,
@@ -678,6 +713,17 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
       'Drop the downloaded .xlsx file into the upload zone below.',
     ],
     poweredMetrics: getMetricsPoweredBy('zendesk'),
+  },
+  zendesk_tickets: {
+    name: 'Zendesk Tickets',
+    exportSteps: [
+      'Run the Zendesk inbound-ticket extract from the warehouse.',
+      'Required columns: CHANNEL, CREATED_AT, GROUP_NAME.',
+      'Recommended: also STATUS, DIRECTION, UPDATED_AT, FIRST_REPLY_AT, FIRST_RESPONSE_HOURS, SOLVED_AT, RESOLUTION_HOURS — resolution and first-response medians need the last four.',
+      'Timestamps should stay in UTC (the "2026-08-05 08:14:45.000 Z" form). The dashboard converts to Sydney time itself; pre-converting would double-shift every day boundary.',
+      'Export the full history rather than a window — the report compares against the same days last month and against full prior months.',
+    ],
+    poweredMetrics: [],
   },
   meta_ads: {
     name: 'Meta Ads',

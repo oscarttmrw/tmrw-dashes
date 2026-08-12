@@ -7,6 +7,7 @@ export type DataSourceName =
   | 'stripe_revenue'
   | 'product_category_map'
   | 'zendesk'
+  | 'zendesk_tickets'
   | 'tableau'
   | 'meta_ads'
   | 'social_followers'

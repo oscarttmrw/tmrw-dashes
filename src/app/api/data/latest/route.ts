@@ -15,6 +15,7 @@ type SourceKey =
   | 'pelagonia'
   | 'tableau'
   | 'zendesk'
+  | 'zendesk_tickets'
   | 'financial_revenue'
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
@@ -30,6 +31,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   pelagonia: 'pelagonia_data',
   tableau: 'tableau_data',
   zendesk: 'zendesk_data',
+  zendesk_tickets: 'zendesk_tickets',
   financial_revenue: 'financial_revenue',
 }
 
@@ -47,6 +49,7 @@ const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
   pelagonia: 'pelagonia_created_at',
   tableau: 'event_date',
   zendesk: 'zendesk_created_at',
+  zendesk_tickets: 'created_at',
   financial_revenue: 'date',
 }
 
@@ -72,6 +75,7 @@ export async function GET() {
     'pelagonia',
     'tableau',
     'zendesk',
+    'zendesk_tickets',
     'financial_revenue',
   ]
 

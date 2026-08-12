@@ -18,6 +18,7 @@ import { processOperationalDataToCanonical } from '@/lib/processors/operational-
 import { processPelagoniaToCanonical } from '@/lib/processors/pelagonia-processor'
 import { processTableauToCanonical } from '@/lib/processors/tableau-processor'
 import { processZendeskToCanonical } from '@/lib/processors/zendesk-processor'
+import { processZendeskTicketsToCanonical } from '@/lib/processors/zendesk-tickets-processor'
 import {
   processFinancialRevenueNetToCanonical,
   processFinancialRevenueGrossToCanonical,
@@ -33,6 +34,7 @@ type SourceKey =
   | 'stripe_revenue'
   | 'product_category_map'
   | 'zendesk'
+  | 'zendesk_tickets'
   | 'meta_ads'
   | 'social_followers'
   | 'social_views'
@@ -49,6 +51,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   stripe_revenue: 'stripe_revenue_lines',
   product_category_map: 'product_category_map',
   zendesk: 'zendesk_data',
+  zendesk_tickets: 'zendesk_tickets',
   meta_ads: 'meta_ads',
   social_followers: 'social_followers',
   social_views: 'social_views',
@@ -67,6 +70,7 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   // The map has no date dimension — it is a snapshot of the current product list.
   product_category_map: null,
   zendesk: null,
+  zendesk_tickets: 'created_at',
   meta_ads: 'date',
   social_followers: 'date',
   social_views: 'date',
@@ -88,6 +92,7 @@ const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => P
   pelagonia: processPelagoniaToCanonical,
   tableau: processTableauToCanonical,
   zendesk: processZendeskToCanonical,
+  zendesk_tickets: processZendeskTicketsToCanonical,
   financial_revenue_net: processFinancialRevenueNetToCanonical,
   financial_revenue_gross: processFinancialRevenueGrossToCanonical,
 }
@@ -127,6 +132,10 @@ async function applyWriteStrategy(
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'pelagonia_created_at')
     case 'zendesk':
       return upsertStrategy(supabase, table, batchId, rows, 'zendesk_ticket_id')
+    // No ticket ID in this extract, so nothing to upsert on. Replacing the
+    // uploaded created_at window keeps a re-upload of the same period idempotent.
+    case 'zendesk_tickets':
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created_at')
     case 'financial_revenue_net':
     case 'financial_revenue_gross': {
       // Snapshot-replace only this revenue_type's rows so uploading the Net

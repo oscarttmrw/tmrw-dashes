@@ -21,6 +21,7 @@ type SourceKey =
   | 'pelagonia'
   | 'tableau'
   | 'zendesk'
+  | 'zendesk_tickets'
   | 'financial_revenue_net'
   | 'financial_revenue_gross'
 
@@ -54,6 +55,7 @@ const VALID_SOURCES: SourceKey[] = [
   'pelagonia',
   'tableau',
   'zendesk',
+  'zendesk_tickets',
   'financial_revenue_net',
   'financial_revenue_gross',
 ]
@@ -70,6 +72,7 @@ const DATE_COL: Partial<Record<SourceKey, string>> = {
   operational_data: 'date',
   pelagonia: 'created at',
   zendesk: 'created at',
+  zendesk_tickets: 'created_at',
   financial_revenue_net: 'date',
   financial_revenue_gross: 'date',
 }
@@ -88,6 +91,7 @@ const REFRESH_KEY: Record<SourceKey, string> = {
   pelagonia: 'pelagonia',
   tableau: 'tableau',
   zendesk: 'zendesk',
+  zendesk_tickets: 'zendesk_tickets',
   // Both revenue sheets surface under the single financial_revenue read key.
   financial_revenue_net: 'financial_revenue',
   financial_revenue_gross: 'financial_revenue',
