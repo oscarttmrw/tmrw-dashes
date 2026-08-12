@@ -194,7 +194,7 @@ export function rollupByCategory(lines: Row[], lookup: CategoryLookup): Category
   const totalGross = lines.reduce((s, r) => s + n(r.gross_amount), 0)
 
   const out: CategoryRollup[] = []
-  for (const [category, g] of groups) {
+  Array.from(groups.entries()).forEach(([category, g]) => {
     const ladder = ladderFor(g.rows)
     out.push({
       category,
@@ -203,7 +203,7 @@ export function rollupByCategory(lines: Row[], lookup: CategoryLookup): Category
       ladder,
       shareOfGross: totalGross !== 0 ? ladder.gross / totalGross : null,
     })
-  }
+  })
 
   // Report order first, then anything unrecognised, then Unmapped last so it
   // reads as the residual it is.
@@ -253,7 +253,7 @@ export function rollupByMonth(lines: Row[], lookup: CategoryLookup): MonthRollup
   }
 
   const out: MonthRollup[] = []
-  for (const [month, rows] of groups) {
+  Array.from(groups.entries()).forEach(([month, rows]) => {
     let recurring = 0
     let oneOff = 0
     let unmapped = 0
@@ -279,7 +279,7 @@ export function rollupByMonth(lines: Row[], lookup: CategoryLookup): MonthRollup
       recurringPctOfClassified: classified !== 0 ? (recurring / classified) * 100 : null,
       byCategory,
     })
-  }
+  })
 
   return out.sort((a, b) => a.month.localeCompare(b.month))
 }
@@ -319,7 +319,7 @@ export function unmappedProducts(lines: Row[], lookup: CategoryLookup): Unmapped
     }
   }
 
-  const out = [...groups.values()]
+  const out = Array.from(groups.values())
   for (const p of out) {
     p.shareOfGross = totalGross !== 0 ? p.gross / totalGross : null
   }
@@ -363,15 +363,15 @@ export function reconcileAgainstManual(
     target.set(month, (target.get(month) ?? 0) + n(r.total))
   }
 
-  const months = new Set<string>([
-    ...monthly.map(m => m.month),
-    ...manualNet.keys(),
-    ...manualGross.keys(),
-  ])
+  const months = new Set<string>(
+    monthly.map(m => m.month)
+      .concat(Array.from(manualNet.keys()))
+      .concat(Array.from(manualGross.keys()))
+  )
 
   const byMonth = new Map(monthly.map(m => [m.month, m]))
 
-  return [...months].sort().map(month => {
+  return Array.from(months).sort().map(month => {
     const roll = byMonth.get(month)
     const stripeGross = roll?.ladder.gross ?? 0
     const stripeNet = roll?.ladder.charged ?? 0

@@ -70,7 +70,7 @@ for (const e of mapRes.errors.slice(0, 10)) console.log(`   row ${e.rowIndex}: $
 const lookup = buildCategoryLookup(mapRes.validRows)
 console.log(`   lookup keys: ${lookup.byId.size} by product id, ${lookup.byName.size} by name`)
 const cats = new Set(mapRes.validRows.map(r => String(r.category)))
-console.log(`   categories (${cats.size}): ${[...cats].sort().join(' | ')}`)
+console.log(`   categories (${cats.size}): ${Array.from(cats).sort().join(' | ')}`)
 
 /* ─── Shared reporting ──────────────────────────────────────────────────── */
 
