@@ -4,6 +4,7 @@ import { createClient as createServerSupabase } from '@/lib/supabase/server'
 
 type SourceKey =
   | 'meta_ads'
+  | 'marketing_daily'
   | 'social_followers'
   | 'social_views'
   | 'stripe'
@@ -20,6 +21,7 @@ type SourceKey =
 
 const SOURCE_TABLE: Record<SourceKey, string> = {
   meta_ads: 'meta_ads',
+  marketing_daily: 'marketing_daily',
   social_followers: 'social_followers',
   social_views: 'social_views',
   stripe: 'stripe_data',
@@ -37,6 +39,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
 
 const SOURCE_ORDER_COLUMN: Record<SourceKey, string> = {
   meta_ads: 'date',
+  marketing_daily: 'date',
   social_followers: 'date',
   social_views: 'date',
   stripe: 'created',
@@ -64,6 +67,7 @@ export async function GET() {
   const supabase = createServiceClient()
   const sources: SourceKey[] = [
     'meta_ads',
+    'marketing_daily',
     'social_followers',
     'social_views',
     'stripe',

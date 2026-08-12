@@ -10,6 +10,7 @@ export type DataSourceName =
   | 'zendesk_tickets'
   | 'tableau'
   | 'meta_ads'
+  | 'marketing_daily'
   | 'social_followers'
   | 'social_views'
   | 'pelagonia'

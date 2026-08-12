@@ -297,10 +297,15 @@ export const tableauSchema: CsvSchema = {
 
 export const metaAdsSchema: CsvSchema = {
   source: 'meta_ads',
-  // TMRW_MARKETING workbook → Meta Ads sheet. Daily aggregate. One row per day.
+  // Accepts both Meta export shapes:
+  //   - TMRW_MARKETING workbook → Meta Ads sheet, one row per day
+  //   - the warehouse extract, one row per ad per day (DATE_DAY / SPEND / ...)
+  // Both land in the same canonical columns, so existing tiles that sum over
+  // meta_ads are unaffected by the finer granularity; the warehouse extract just
+  // additionally fills the campaign columns.
   requiredColumns: [
-    'Date',
-    ['Spend ($)', 'Spend'],
+    ['Date', 'DATE_DAY'],
+    ['Spend ($)', 'Spend', 'SPEND'],
   ],
   optionalColumns: [
     'Impressions',
@@ -312,6 +317,21 @@ export const metaAdsSchema: CsvSchema = {
     'Cost per Conversion ($)',
     'Video Views',
     'Post Engagements',
+    // Warehouse extract.
+    'AD_ID',
+    'CAMPAIGN_NAME',
+    'AD_SET_NAME',
+    'AD_NAME',
+    'CAMPAIGN_OBJECTIVE',
+    'INLINE_LINK_CLICKS',
+    'INLINE_LINK_CLICK_CTR',
+    'LANDING_PAGE_VIEWS',
+    'REACH',
+    'LEADS',
+    'PIXEL_CUSTOM_CONVERSIONS',
+    'FREQUENCY',
+    'VIDEO_VIEWS',
+    'POST_ENGAGEMENTS',
   ],
   strippedColumns: [],
   canonicalColumns: [
@@ -326,6 +346,53 @@ export const metaAdsSchema: CsvSchema = {
     'cost_per_conversion',
     'video_views',
     'post_engagements',
+    'ad_id',
+    'campaign_name',
+    'ad_set_name',
+    'ad_name',
+    'campaign_objective',
+    'reach',
+    'pixel_custom_conversions',
+    'frequency',
+    'inline_link_click_ctr',
+  ],
+};
+
+// Integrated marketing daily metrics — the Slack- and PostHog-derived numbers
+// Meta cannot supply. Only `date` is required so columns can be filled in as
+// instrumentation lands.
+export const marketingDailySchema: CsvSchema = {
+  source: 'marketing_daily',
+  requiredColumns: [
+    'date',
+  ],
+  optionalColumns: [
+    'calls_booked_meta',
+    'calls_booked_slack',
+    'calls_held',
+    'closes',
+    'signups',
+    'signups_expected',
+    'landing_checkout_views',
+    'checkout_cart_views',
+    'cart_starts',
+    'checkout_abandonments',
+    'conversions',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'date',
+    'calls_booked_meta',
+    'calls_booked_slack',
+    'calls_held',
+    'closes',
+    'signups',
+    'signups_expected',
+    'landing_checkout_views',
+    'checkout_cart_views',
+    'cart_starts',
+    'checkout_abandonments',
+    'conversions',
   ],
 };
 
@@ -603,6 +670,7 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   zendesk_tickets: zendeskTicketsSchema,
   tableau: tableauSchema,
   meta_ads: metaAdsSchema,
+  marketing_daily: marketingDailySchema,
   social_followers: socialFollowersSchema,
   social_views: socialViewsSchema,
   pelagonia: pelagoniaSchema,
@@ -728,9 +796,23 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
   meta_ads: {
     name: 'Meta Ads',
     exportSteps: [
-      'Open the TMRW_MARKETING workbook.',
-      'Meta Ads sheet — Date, Spend ($), Impressions, CTR (%), Clicks, Landing Page Views, Cost per LPV ($), Conversions (Leads), Cost per Conversion ($), Video Views, Post Engagements.',
-      'Drop the .xlsx file into the upload zone below.',
+      'Either export works — the warehouse extract is preferred because it carries campaign detail.',
+      'Warehouse extract: DATE_DAY, SPEND at minimum. Also include CAMPAIGN_NAME, AD_SET_NAME, AD_NAME, IMPRESSIONS, INLINE_LINK_CLICKS, LANDING_PAGE_VIEWS, LEADS, REACH, CTR, PIXEL_CUSTOM_CONVERSIONS, VIDEO_VIEWS, POST_ENGAGEMENTS.',
+      'TMRW_MARKETING workbook alternative: Meta Ads sheet — Date, Spend ($), Impressions, CTR (%), Clicks, Landing Page Views, Cost per LPV ($), Conversions (Leads), Cost per Conversion ($), Video Views, Post Engagements.',
+      'Cost per LPV and cost per conversion are derived when the export omits them, so you do not need to add them.',
+      'Note LEADS is only populated on lead-objective campaigns, so campaign-level CPL is blank on the others by design.',
+    ],
+    poweredMetrics: [],
+  },
+  marketing_daily: {
+    name: 'Marketing Daily (integrated)',
+    exportSteps: [
+      'This is the integrated sheet for the numbers Meta cannot supply: calls off the Slack notifications, and the funnel counts off PostHog.',
+      'One row per day. Header row, exactly these names (only `date` is required):',
+      'date, calls_booked_meta, calls_booked_slack, calls_held, closes, signups, signups_expected, landing_checkout_views, checkout_cart_views, cart_starts, checkout_abandonments, conversions',
+      'Leave a cell blank rather than entering 0 when a metric is not instrumented yet — blank renders as "not instrumented", whereas 0 reads as a real measurement.',
+      'calls_booked_meta and calls_booked_slack are kept separate on purpose: Meta counts attributed bookings, Slack counts every call a clinician logged, and the gap between them is worth seeing.',
+      'Upload as .csv or .xlsx. Re-uploading a day overwrites it.',
     ],
     poweredMetrics: [],
   },

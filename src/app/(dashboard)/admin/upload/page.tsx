@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/client'
 
 type SourceKey =
   | 'meta_ads'
+  | 'marketing_daily'
   | 'social_followers'
   | 'social_views'
   | 'stripe'
@@ -31,6 +32,7 @@ type SourceKey =
 // they MUST route by name (signature matching can't tell them apart).
 const SHEET_NAME_TO_SOURCE: Record<string, SourceKey> = {
   'meta ads': 'meta_ads',
+  'marketing daily': 'marketing_daily',
   'social media followers': 'social_followers',
   'social followers': 'social_followers',
   'social media views': 'social_views',
@@ -44,6 +46,7 @@ const SHEET_NAME_TO_SOURCE: Record<string, SourceKey> = {
 
 const VALID_SOURCES: SourceKey[] = [
   'meta_ads',
+  'marketing_daily',
   'social_followers',
   'social_views',
   'stripe',
@@ -64,6 +67,7 @@ const VALID_SOURCES: SourceKey[] = [
 // pickers in the confirm modal.
 const DATE_COL: Partial<Record<SourceKey, string>> = {
   meta_ads: 'date',
+  marketing_daily: 'date',
   social_views: 'date',
   stripe: 'created',
   stripe_revenue: 'transaction_date',
@@ -80,6 +84,7 @@ const DATE_COL: Partial<Record<SourceKey, string>> = {
 // lastRefresh returns one key per source. Same snake_case keys context-side.
 const REFRESH_KEY: Record<SourceKey, string> = {
   meta_ads: 'meta_ads',
+  marketing_daily: 'marketing_daily',
   social_followers: 'social_followers',
   social_views: 'social_views',
   stripe: 'stripe',

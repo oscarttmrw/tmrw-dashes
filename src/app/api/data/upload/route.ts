@@ -7,6 +7,7 @@ import {
   upsertStrategy,
 } from '@/lib/upload-strategies'
 import { processMetaAdsToCanonical } from '@/lib/processors/meta-processor'
+import { processMarketingDailyToCanonical } from '@/lib/processors/marketing-daily-processor'
 import { processSocialFollowersToCanonical } from '@/lib/processors/social-followers-processor'
 import { processSocialViewsToCanonical } from '@/lib/processors/social-views-processor'
 import { processStripeToCanonical } from '@/lib/processors/stripe-processor'
@@ -36,6 +37,7 @@ type SourceKey =
   | 'zendesk'
   | 'zendesk_tickets'
   | 'meta_ads'
+  | 'marketing_daily'
   | 'social_followers'
   | 'social_views'
   | 'pelagonia'
@@ -53,6 +55,7 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   zendesk: 'zendesk_data',
   zendesk_tickets: 'zendesk_tickets',
   meta_ads: 'meta_ads',
+  marketing_daily: 'marketing_daily',
   social_followers: 'social_followers',
   social_views: 'social_views',
   pelagonia: 'pelagonia_data',
@@ -72,6 +75,7 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   zendesk: null,
   zendesk_tickets: 'created_at',
   meta_ads: 'date',
+  marketing_daily: 'date',
   social_followers: 'date',
   social_views: 'date',
   pelagonia: 'pelagonia_created_at',
@@ -81,6 +85,7 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
 
 const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => ProcessorResult> = {
   meta_ads: processMetaAdsToCanonical,
+  marketing_daily: processMarketingDailyToCanonical,
   social_followers: processSocialFollowersToCanonical,
   social_views: processSocialViewsToCanonical,
   stripe: processStripeToCanonical,
@@ -124,6 +129,8 @@ async function applyWriteStrategy(
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'transaction_date')
     case 'meta_ads':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'date')
+    case 'marketing_daily':
+      return upsertStrategy(supabase, table, batchId, rows, 'date')
     case 'social_followers':
       return upsertStrategy(supabase, table, batchId, rows, 'date,platform')
     case 'social_views':
