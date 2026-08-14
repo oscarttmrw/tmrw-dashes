@@ -54,7 +54,9 @@ create table if not exists marketing_daily (
 
 create index if not exists idx_marketing_daily_date on marketing_daily (date);
 
--- Match the RLS convention from migration 001
+-- Match the RLS convention from migration 001. The policy is dropped first so
+-- the whole migration is safe to re-run (create policy has no IF NOT EXISTS).
 alter table marketing_daily enable row level security;
+drop policy if exists "service role full access" on marketing_daily;
 create policy "service role full access" on marketing_daily
   for all using (true) with check (true);

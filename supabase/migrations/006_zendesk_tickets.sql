@@ -32,7 +32,9 @@ create index if not exists idx_zendesk_tickets_created_at on zendesk_tickets (cr
 create index if not exists idx_zendesk_tickets_channel on zendesk_tickets (channel);
 create index if not exists idx_zendesk_tickets_group on zendesk_tickets (group_name);
 
--- Match the RLS convention from migration 001
+-- Match the RLS convention from migration 001. The policy is dropped first so
+-- the whole migration is safe to re-run (create policy has no IF NOT EXISTS).
 alter table zendesk_tickets enable row level security;
+drop policy if exists "service role full access" on zendesk_tickets;
 create policy "service role full access" on zendesk_tickets
   for all using (true) with check (true);

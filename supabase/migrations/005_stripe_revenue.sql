@@ -65,11 +65,14 @@ create table if not exists product_category_map (
 create index if not exists idx_product_category_map_product_id on product_category_map (product_id);
 create index if not exists idx_product_category_map_name_key on product_category_map (product_name_key);
 
--- Match the RLS convention from migration 001
+-- Match the RLS convention from migration 001. The policy is dropped first so
+-- the whole migration is safe to re-run (create policy has no IF NOT EXISTS).
 alter table stripe_revenue_lines enable row level security;
+drop policy if exists "service role full access" on stripe_revenue_lines;
 create policy "service role full access" on stripe_revenue_lines
   for all using (true) with check (true);
 
 alter table product_category_map enable row level security;
+drop policy if exists "service role full access" on product_category_map;
 create policy "service role full access" on product_category_map
   for all using (true) with check (true);
