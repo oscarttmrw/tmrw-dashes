@@ -201,15 +201,24 @@ count different things.
 
 ## Verification
 
-Four `tsx` scripts run the **real** processors, analytics and page components over an actual export
-and assert the results. 81 numeric checks + 32 render checks, all passing against the 6 Aug 2026 files.
+Five `tsx` scripts run the **real** processors, analytics, source matching and page components over
+an actual export and assert the results. 81 numeric + 5 detection + 32 render checks, all passing
+against the 6 Aug 2026 files.
 
 ```bash
 npm run verify:revenue   -- --dir <folder>   # or --no-assert for a newer export
 npm run verify:support   -- --dir <folder>
 npm run verify:marketing -- --dir <folder>
+npm run verify:detection -- --dir <folder>   # which SOURCE each file routes to
 npm run verify:render    -- --dir <folder>   # server-renders the pages with real rows
 ```
+
+`verify:detection` exists because a real upload failed on **source selection**, not parsing: the
+right file was uploaded against an older sibling schema (`stripe` instead of `stripe_revenue`,
+`zendesk` instead of `zendesk_tickets`), producing a wall of missing-column errors that read like a
+bug. Nothing else here covers that step — the other scripts call processors and context directly. It
+asserts each file matches its intended source **and nothing else**, because
+`detectSourceByHeaders` returns null on two matches and silently demotes the user to a manual pick.
 
 `verify:render` matters because of a gap the other checks leave: `tsc` proves the types line up and
 `next build` prerenders every page, but **only ever with empty data** — so a crash that appears once

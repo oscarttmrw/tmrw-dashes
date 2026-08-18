@@ -635,7 +635,13 @@ export const productCategoryMapSchema: CsvSchema = {
   source: 'product_category_map',
   requiredColumns: [
     ['Product ID', 'PRODUCT_ID'],
-    ['MAPPING', 'MAPPING_CATEGORY', 'Mapping Category'],
+    // Deliberately NOT accepting 'MAPPING_CATEGORY' here. That is the helper
+    // column on the workbook's Line Items sheet, which also carries PRODUCT_ID
+    // and PRODUCT_NAME — accepting it made a standalone Line Items CSV satisfy
+    // both this schema and stripe_revenue, so auto-detection saw two matches and
+    // fell back to a manual pick. The Mapping tab's own header is 'MAPPING '
+    // (the trailing space is stripped by the lc-normalise on both sides).
+    ['MAPPING', 'Mapping Category'],
     ['Product Name', 'PRODUCT_NAME'],
   ],
   optionalColumns: [

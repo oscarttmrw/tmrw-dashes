@@ -10,6 +10,7 @@
     "verify:revenue": "tsx scripts/verify-revenue-pipeline.ts",
     "verify:support": "tsx scripts/verify-support-pipeline.ts",
     "verify:marketing": "tsx scripts/verify-marketing-pipeline.ts",
+    "verify:detection": "tsx scripts/verify-source-detection.ts",
     "verify:render": "tsx --tsconfig tsconfig.smoke.json scripts/smoke-render-pages.tsx"
   },
   "devDependencies": {
