@@ -358,18 +358,39 @@ export async function POST(request: NextRequest) {
 
     await applyWriteStrategy(supabase, source, batchId!, validRows)
 
-    await supabase
+    // Confirm the rows are actually in the table before claiming success.
+    // `validRows.length` is only what was SENT; reporting it as what landed
+    // means a partial write reads as a clean one.
+    const targetTable = SOURCE_TABLE[source]
+    const { count: writtenCount, error: countErr } = await supabase
+      .from(targetTable)
+      .select('*', { count: 'exact', head: true })
+      .eq('batch_id', batchId)
+    if (countErr) throw countErr
+    if ((writtenCount ?? 0) === 0 && validRows.length > 0) {
+      throw new Error(
+        `Write reported no error but no rows landed in ${targetTable} for this batch`
+      )
+    }
+
+    // This update was previously fire-and-forget. If it failed, the route still
+    // returned success while upload_log stayed 'in_progress' — and every
+    // dashboard derives "last uploaded" from status = 'complete', so the source
+    // would read "Never uploaded" forever despite the data being present.
+    const { error: completeErr } = await supabase
       .from('upload_log')
       .update({
         status: 'complete',
-        record_count: validRows.length,
+        record_count: writtenCount ?? validRows.length,
       })
       .eq('id', batchId)
+    if (completeErr) throw completeErr
 
     return NextResponse.json({
       success: true,
       batchId,
-      rowCount: validRows.length,
+      rowCount: writtenCount ?? validRows.length,
+      submittedCount: validRows.length,
       errorCount: errors.length,
       errors: errors.slice(0, 50),
       timestamp: new Date().toISOString(),
