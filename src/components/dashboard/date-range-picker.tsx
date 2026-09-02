@@ -3,19 +3,46 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Calendar } from 'lucide-react'
+import {
+  type DateRange,
+  atDayStart,
+  atDayEnd,
+  dayCount,
+  samePeriodLastMonth,
+  samePeriodLastYear,
+  weekToDate,
+  fullWeek,
+} from '@/lib/utils/period'
 
-export interface DateRange {
-  start: Date
-  end: Date
-}
+// DateRange now lives in lib/utils/period so server-safe utils can use it without
+// importing this client component. Re-exported here so existing call sites keep
+// working unchanged.
+export type { DateRange }
+
+/** How the comparison window is derived from the selected period. */
+export type ComparisonMode =
+  | 'previous'
+  | 'same-period-last-month'
+  | 'same-period-last-year'
+  | 'custom'
 
 export interface DateRangePickerValue {
   /** Primary period currently displayed in tiles + charts. */
   period: DateRange
   /** Comparison period. Tiles compute delta against this. */
   comparison: DateRange
-  /** 'previous' = derived from period; 'custom' = user-picked. */
-  comparisonMode: 'previous' | 'custom'
+  /** How `comparison` was derived. 'custom' = user-picked. */
+  comparisonMode: ComparisonMode
+}
+
+/** Derive the comparison window for a period under a given mode. */
+export function comparisonFor(period: DateRange, mode: ComparisonMode, current?: DateRange): DateRange {
+  switch (mode) {
+    case 'previous': return previousPeriod(period)
+    case 'same-period-last-month': return samePeriodLastMonth(period)
+    case 'same-period-last-year': return samePeriodLastYear(period)
+    case 'custom': return current ?? previousPeriod(period)
+  }
 }
 
 interface Props {
@@ -26,9 +53,11 @@ interface Props {
 
 /* ─── Presets ──────────────────────────────────────────────────────── */
 
-type PresetKey =
+export type PresetKey =
   | 'today'
   | 'yesterday'
+  | 'this-week'
+  | 'last-week'
   | 'last-7'
   | 'last-14'
   | 'last-28'
@@ -44,6 +73,8 @@ type PresetKey =
 const PRESETS: { key: PresetKey; label: string }[] = [
   { key: 'today', label: 'Today' },
   { key: 'yesterday', label: 'Yesterday' },
+  { key: 'this-week', label: 'This week (WTD)' },
+  { key: 'last-week', label: 'Last week' },
   { key: 'last-7', label: 'Last 7 days' },
   { key: 'last-14', label: 'Last 14 days' },
   { key: 'last-28', label: 'Last 28 days' },
@@ -57,7 +88,7 @@ const PRESETS: { key: PresetKey; label: string }[] = [
   { key: 'custom', label: 'Custom' },
 ]
 
-function presetToRange(preset: PresetKey, today = new Date()): DateRange {
+export function presetToRange(preset: PresetKey, today = new Date()): DateRange {
   switch (preset) {
     case 'today':
       return { start: atDayStart(today), end: atDayEnd(today) }
@@ -65,6 +96,13 @@ function presetToRange(preset: PresetKey, today = new Date()): DateRange {
       const d = new Date(today)
       d.setDate(today.getDate() - 1)
       return { start: atDayStart(d), end: atDayEnd(d) }
+    }
+    case 'this-week':
+      return weekToDate(today)
+    case 'last-week': {
+      const d = new Date(today)
+      d.setDate(today.getDate() - 7)
+      return fullWeek(d)
     }
     case 'last-7':  return shiftedDays(today, 6)
     case 'last-14': return shiftedDays(today, 13)
@@ -112,18 +150,6 @@ function shiftedDays(today: Date, daysBack: number): DateRange {
   return { start: atDayStart(start), end: atDayEnd(today) }
 }
 
-function atDayStart(d: Date): Date {
-  const x = new Date(d)
-  x.setHours(0, 0, 0, 0)
-  return x
-}
-
-function atDayEnd(d: Date): Date {
-  const x = new Date(d)
-  x.setHours(23, 59, 59, 999)
-  return x
-}
-
 /** Previous period for comparison. See PR C.5 — month-aligned ranges get a
  * calendar-month shift; everything else gets equal-length shifted back. */
 export function previousPeriod(period: DateRange): DateRange {
@@ -149,12 +175,32 @@ export function previousPeriod(period: DateRange): DateRange {
   return { start: atDayStart(start), end: atDayEnd(end) }
 }
 
+const COMPARISON_MODES: { key: ComparisonMode; label: string }[] = [
+  { key: 'previous', label: 'Previous period' },
+  { key: 'same-period-last-month', label: 'Same period last month' },
+  { key: 'same-period-last-year', label: 'Same period last year' },
+  { key: 'custom', label: 'Custom range' },
+]
+
 export function defaultDateRangePicker(): DateRangePickerValue {
   const period = presetToRange('this-month')
   return {
     period,
     comparison: previousPeriod(period),
     comparisonMode: 'previous',
+  }
+}
+
+/**
+ * Default for pages whose headline question is "how does this window compare with
+ * the same window last month" — Dan's Zendesk report and the weekly marketing
+ * table both read that way.
+ */
+export function defaultDateRangePickerSPLM(period = presetToRange('this-month')): DateRangePickerValue {
+  return {
+    period,
+    comparison: samePeriodLastMonth(period),
+    comparisonMode: 'same-period-last-month',
   }
 }
 
@@ -170,11 +216,6 @@ function fmtRangeShort(r: DateRange): string {
 function fmtRangeArrow(r: DateRange): string {
   const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }
   return `${r.start.toLocaleDateString('en-AU', opts)} → ${r.end.toLocaleDateString('en-AU', opts)}`
-}
-
-function dayCount(r: DateRange): number {
-  const ms = atDayStart(r.end).getTime() - atDayStart(r.start).getTime()
-  return Math.round(ms / 86_400_000) + 1
 }
 
 function dayCountLabel(r: DateRange): string {
@@ -249,7 +290,7 @@ export function DateRangePicker({ value, onChange, className }: Props) {
     setDraft(d => ({
       ...d,
       period,
-      comparison: d.comparisonMode === 'previous' ? previousPeriod(period) : d.comparison,
+      comparison: comparisonFor(period, d.comparisonMode, d.comparison),
     }))
   }
 
@@ -261,15 +302,15 @@ export function DateRangePicker({ value, onChange, className }: Props) {
     setDraft(d => ({
       ...d,
       period,
-      comparison: d.comparisonMode === 'previous' ? previousPeriod(period) : d.comparison,
+      comparison: comparisonFor(period, d.comparisonMode, d.comparison),
     }))
   }
 
-  const setComparisonMode = (mode: 'previous' | 'custom') => {
+  const setComparisonMode = (mode: ComparisonMode) => {
     setDraft(d => ({
       ...d,
       comparisonMode: mode,
-      comparison: mode === 'previous' ? previousPeriod(d.period) : d.comparison,
+      comparison: comparisonFor(d.period, mode, d.comparison),
     }))
   }
 
@@ -353,19 +394,16 @@ export function DateRangePicker({ value, onChange, className }: Props) {
 
               {tab === 'compare' && (
                 <div className="space-y-4">
-                  <div className="flex gap-2">
-                    <ModeButton
-                      active={draft.comparisonMode === 'previous'}
-                      onClick={() => setComparisonMode('previous')}
-                    >
-                      Previous period
-                    </ModeButton>
-                    <ModeButton
-                      active={draft.comparisonMode === 'custom'}
-                      onClick={() => setComparisonMode('custom')}
-                    >
-                      Custom range
-                    </ModeButton>
+                  <div className="flex flex-wrap gap-2">
+                    {COMPARISON_MODES.map(m => (
+                      <ModeButton
+                        key={m.key}
+                        active={draft.comparisonMode === m.key}
+                        onClick={() => setComparisonMode(m.key)}
+                      >
+                        {m.label}
+                      </ModeButton>
+                    ))}
                   </div>
 
                   {draft.comparisonMode === 'custom' ? (
@@ -375,7 +413,9 @@ export function DateRangePicker({ value, onChange, className }: Props) {
                     />
                   ) : (
                     <div>
-                      <p className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted">Auto — previous period</p>
+                      <p className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted">
+                        Auto — {COMPARISON_MODES.find(m => m.key === draft.comparisonMode)?.label.toLowerCase()}
+                      </p>
                       <p className="mt-2 font-mono text-sm text-dash-text">{fmtRangeArrow(draft.comparison)}</p>
                       <p className="mt-1 font-mono text-[11px] text-dash-text-muted">{dayCount(draft.comparison)} days</p>
                     </div>

@@ -44,13 +44,17 @@ export interface DashboardData {
 
   // Canonical Supabase row arrays — the source of truth going forward.
   meta_ads: CanonicalRow[]
+  marketing_daily: CanonicalRow[]
   social_followers: CanonicalRow[]
   social_views: CanonicalRow[]
   stripe: CanonicalRow[]
+  stripe_revenue: CanonicalRow[]
+  product_category_map: CanonicalRow[]
   hubspot: CanonicalRow[]
   pelagonia: CanonicalRow[]
   tableau: CanonicalRow[]
   zendesk: CanonicalRow[]
+  zendesk_tickets: CanonicalRow[]
   hubspot_contacts: CanonicalRow[]
   ghl_opportunities: CanonicalRow[]
   operational_data: CanonicalRow[]
@@ -78,13 +82,17 @@ interface DataContextValue extends DashboardData {
 
 const emptyLastRefresh: Record<string, string | null> = {
   meta_ads: null,
+  marketing_daily: null,
   social_followers: null,
   social_views: null,
   stripe: null,
+  stripe_revenue: null,
+  product_category_map: null,
   hubspot: null,
   pelagonia: null,
   tableau: null,
   zendesk: null,
+  zendesk_tickets: null,
   hubspot_contacts: null,
   ghl_opportunities: null,
   operational_data: null,
@@ -104,13 +112,17 @@ const defaultData: DashboardData = {
   isUsingMockData: false,
   dataMode: 'actual',
   meta_ads: [],
+  marketing_daily: [],
   social_followers: [],
   social_views: [],
   stripe: [],
+  stripe_revenue: [],
+  product_category_map: [],
   hubspot: [],
   pelagonia: [],
   tableau: [],
   zendesk: [],
+  zendesk_tickets: [],
   hubspot_contacts: [],
   ghl_opportunities: [],
   operational_data: [],
@@ -187,13 +199,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
         isUsingMockData: false,
         dataMode: 'actual',
         meta_ads: asRows(body.meta_ads),
+        marketing_daily: asRows(body.marketing_daily),
         social_followers: asRows(body.social_followers),
         social_views: asRows(body.social_views),
         stripe: asRows(body.stripe),
+        stripe_revenue: asRows(body.stripe_revenue),
+        product_category_map: asRows(body.product_category_map),
         hubspot: asRows(body.hubspot),
         pelagonia: asRows(body.pelagonia),
         tableau: asRows(body.tableau),
         zendesk: asRows(body.zendesk),
+        zendesk_tickets: asRows(body.zendesk_tickets),
         hubspot_contacts: asRows(body.hubspot_contacts),
         ghl_opportunities: asRows(body.ghl_opportunities),
         operational_data: asRows(body.operational_data),

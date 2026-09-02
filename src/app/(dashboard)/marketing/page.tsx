@@ -14,6 +14,22 @@ import {
   type DateRangePickerValue,
 } from '@/components/dashboard/date-range-picker'
 import { TileChart, bucketByDay } from '@/components/dashboard/tile-chart'
+import { TmrwBarChart } from '@/components/dashboard/tmrw-bar-chart'
+import {
+  deltaPct,
+  fullWeek,
+  previousWeekSameSpan,
+  samePeriodLastMonth,
+  weekToDate,
+} from '@/lib/utils/period'
+import {
+  campaignBreakdown,
+  marketingWindow,
+  monthlyMarketing,
+  SOURCE_LABELS,
+  type MarketingWindow,
+  type MonthlyMarketingRow,
+} from '@/lib/analytics/marketing-metrics'
 import { Lock } from 'lucide-react'
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
@@ -40,11 +56,6 @@ function inPeriod(value: unknown, start: Date, end: Date): boolean {
   const t = new Date(String(value)).getTime()
   if (isNaN(t)) return false
   return t >= start.getTime() && t <= end.getTime()
-}
-
-function deltaPct(current: number, previous: number): number | null {
-  if (previous === 0) return null
-  return ((current - previous) / previous) * 100
 }
 
 // Fallback LTV if no value has been entered in Settings → Plan Targets yet.
@@ -116,6 +127,132 @@ function LockedKpiTile({ label, reason }: { label: string; reason: string }) {
       </div>
       <p className="mt-auto pt-3 font-sans text-[11px] italic text-dash-text-muted">{reason}</p>
     </div>
+  )
+}
+
+/* ─── Weekly comparison tile ──────────────────────────────────────── */
+
+/**
+ * A metric read three ways: week to date, the same span last week, and the same
+ * span last month. `null` renders as an explicit "not instrumented" rather than a
+ * zero, because the two mean very different things.
+ */
+function WeeklyTile({
+  label,
+  wtd,
+  lastWeek,
+  splm,
+  format,
+  direction = 'higher-better',
+  note,
+  missingReason,
+}: {
+  label: string
+  wtd: number | null
+  lastWeek: number | null
+  splm: number | null
+  format: (v: number) => string
+  direction?: 'higher-better' | 'lower-better'
+  note?: string
+  missingReason?: string
+}) {
+  if (wtd === null) {
+    return (
+      <div className="flex h-full flex-col rounded-lg border border-dashed border-dash-border bg-dash-surface/40 p-4 opacity-80">
+        <div className="flex items-start justify-between gap-2">
+          <p className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted">{label}</p>
+          <Lock size={11} className="text-dash-text-muted" />
+        </div>
+        <p className="mt-2 font-mono text-2xl font-bold text-dash-text-muted">—</p>
+        <p className="mt-auto pt-3 font-sans text-[11px] italic text-dash-text-muted">
+          {missingReason ?? 'Not instrumented.'}
+        </p>
+      </div>
+    )
+  }
+
+  const vsLastWeek = lastWeek === null ? null : deltaPct(wtd, lastWeek)
+  const vsSplm = splm === null ? null : deltaPct(wtd, splm)
+
+  return (
+    <div className="flex h-full flex-col rounded-lg border border-dash-border bg-dash-surface p-4">
+      <p className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-secondary">{label}</p>
+      <div className="mt-2 flex items-baseline gap-2">
+        <p className="font-mono text-2xl font-bold text-dash-text">{format(wtd)}</p>
+        {vsLastWeek !== null && <TrendIndicator value={Math.round(vsLastWeek)} direction={direction} />}
+      </div>
+      {note && <p className="mt-1 font-sans text-[11px] italic text-dash-text-muted">{note}</p>}
+      <div className="mt-auto space-y-1 pt-3">
+        <div className="flex items-baseline justify-between font-sans text-[11px]">
+          <span className="text-dash-text-muted">Last week</span>
+          <span className="font-mono text-dash-text-secondary">{lastWeek === null ? '—' : format(lastWeek)}</span>
+        </div>
+        <div className="flex items-baseline justify-between font-sans text-[11px]">
+          <span className="text-dash-text-muted">Same wk last mth</span>
+          <span className="font-mono text-dash-text-secondary">
+            {splm === null ? '—' : format(splm)}
+            {vsSplm !== null && (
+              <span className={vsSplm > 0 ? ' text-status-amber' : ' text-status-green'}>
+                {' '}({vsSplm > 0 ? '+' : ''}{vsSplm.toFixed(0)}%)
+              </span>
+            )}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Monthly detail table cells ──────────────────────────────────── */
+
+function MTh({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
+  return (
+    <th
+      className={
+        'pb-2 font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted '
+        + (align === 'right' ? 'pl-3 text-right' : 'pr-3 text-left')
+      }
+    >
+      {children}
+    </th>
+  )
+}
+
+function MTd({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <td className={'py-2 pl-3 text-right font-mono text-[12px] text-dash-text ' + (className ?? '')}>
+      {children}
+    </td>
+  )
+}
+
+/**
+ * One row of the monthly detail table. A null value prints "not instr." in
+ * italics, never a zero — the distinction Dan's own report makes for cart starts.
+ */
+function MetricRow({
+  label,
+  rows,
+  get,
+  format,
+}: {
+  label: string
+  rows: MonthlyMarketingRow[]
+  get: (w: MarketingWindow) => number | null
+  format: (v: number) => string
+}) {
+  return (
+    <tr className="border-b border-dash-border/60 last:border-0">
+      <td className="py-2 pr-3 font-sans text-[12px] text-dash-text">{label}</td>
+      {rows.map(r => {
+        const v = get(r.window)
+        return (
+          <MTd key={r.month} className={v === null ? 'text-dash-text-muted' : undefined}>
+            {v === null ? <span className="italic">not instr.</span> : format(v)}
+          </MTd>
+        )
+      })}
+    </tr>
   )
 }
 
@@ -215,13 +352,97 @@ function NarrativeSection({
 /* ─── Page ────────────────────────────────────────────────────────── */
 
 export default function MarketingPage() {
-  const { meta_ads, social_followers, social_views, operational_data, ghl_opportunities, plan_targets } = useDashboardData()
+  const {
+    meta_ads,
+    marketing_daily,
+    social_followers,
+    social_views,
+    operational_data,
+    ghl_opportunities,
+    plan_targets,
+  } = useDashboardData()
 
   const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() => defaultDateRangePicker())
   const periodStart = pickerValue.period.start
   const periodEnd = pickerValue.period.end
   const prevStart = pickerValue.comparison.start
   const prevEnd = pickerValue.comparison.end
+
+  /* ── Weekly comparison windows (Dan's summary table) ──
+   * Anchored on the latest day of Meta data rather than today, so the strip
+   * doesn't read as a collapse to zero when an upload is a day or two behind. */
+  const dataAsOf = useMemo(() => {
+    let latest = ''
+    for (const r of meta_ads) {
+      const d = String(r.date ?? '').slice(0, 10)
+      if (d > latest) latest = d
+    }
+    for (const r of marketing_daily) {
+      const d = String(r.date ?? '').slice(0, 10)
+      if (d > latest) latest = d
+    }
+    if (!latest) return new Date()
+    const [y, m, d] = latest.split('-').map(Number)
+    return new Date(y, m - 1, d)
+  }, [meta_ads, marketing_daily])
+
+  const wtdRange = useMemo(() => weekToDate(dataAsOf), [dataAsOf])
+  const lastWeekRange = useMemo(() => previousWeekSameSpan(wtdRange), [wtdRange])
+  const splmRange = useMemo(() => samePeriodLastMonth(wtdRange), [wtdRange])
+
+  const wtd = useMemo(
+    () => marketingWindow(meta_ads, marketing_daily, ghl_opportunities, wtdRange),
+    [meta_ads, marketing_daily, ghl_opportunities, wtdRange]
+  )
+  const lastWeek = useMemo(
+    () => marketingWindow(meta_ads, marketing_daily, ghl_opportunities, lastWeekRange),
+    [meta_ads, marketing_daily, ghl_opportunities, lastWeekRange]
+  )
+  const splm = useMemo(
+    () => marketingWindow(meta_ads, marketing_daily, ghl_opportunities, splmRange),
+    [meta_ads, marketing_daily, ghl_opportunities, splmRange]
+  )
+
+  const monthlyDetail = useMemo(
+    () => monthlyMarketing(meta_ads, marketing_daily, ghl_opportunities),
+    [meta_ads, marketing_daily, ghl_opportunities]
+  )
+
+  const campaigns = useMemo(
+    () => campaignBreakdown(meta_ads, pickerValue.period),
+    [meta_ads, pickerValue.period]
+  )
+
+  const hasMarketingDaily = marketing_daily.length > 0
+
+  // CPL and cost-per-call trends over the last 12 weeks, so the weekly strip has
+  // context rather than being three numbers in isolation.
+  const weeklyTrend = useMemo(() => {
+    const out: { w: string; cpl: number | null; costPerCall: number | null; callsBooked: number | null }[] = []
+    for (let i = 11; i >= 0; i--) {
+      const anchor = new Date(dataAsOf)
+      anchor.setDate(anchor.getDate() - i * 7)
+      const range = i === 0 ? wtdRange : fullWeek(anchor)
+      const w = marketingWindow(meta_ads, marketing_daily, ghl_opportunities, range)
+      out.push({
+        w: `${range.start.getDate()}/${range.start.getMonth() + 1}`,
+        cpl: w.costPerLead,
+        costPerCall: w.costPerCallBooked,
+        callsBooked: w.callsBooked.value,
+      })
+    }
+    return out
+  }, [dataAsOf, wtdRange, meta_ads, marketing_daily, ghl_opportunities])
+
+  // Calls booked across the three windows Dan compares — one grouped bar chart.
+  const callsComparisonData = useMemo(
+    () => [
+      { w: 'This wk WTD', booked: wtd.callsBooked.value ?? 0, held: wtd.callsHeld.value ?? 0 },
+      { w: 'Last week', booked: lastWeek.callsBooked.value ?? 0, held: lastWeek.callsHeld.value ?? 0 },
+      { w: 'Same wk last mth', booked: splm.callsBooked.value ?? 0, held: splm.callsHeld.value ?? 0 },
+    ],
+    [wtd, lastWeek, splm]
+  )
 
   /* ── Meta ads — period aggregates ── */
   const metaInPeriod = useMemo(
@@ -526,8 +747,229 @@ export default function MarketingPage() {
         <DateRangePicker value={pickerValue} onChange={setPickerValue} />
       </div>
 
-      {/* ── Section 1 — Spend ── */}
-      <NarrativeSection number={1} question="Spend" subtitle="Every dollar · every outcome">
+      {/* ── Section 1 — This week ── */}
+      <NarrativeSection
+        number={1}
+        question="This Week"
+        subtitle={`Week to date · vs last week · vs the same week last month · data to ${dataAsOf.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`}
+      >
+        <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-3 xl:grid-cols-6">
+          <WeeklyTile
+            label="Cost per Lead"
+            wtd={wtd.costPerLead}
+            lastWeek={lastWeek.costPerLead}
+            splm={splm.costPerLead}
+            format={(v) => fmtCurrency(v)}
+            direction="lower-better"
+          />
+          <WeeklyTile
+            label="Cost per Call Booked"
+            wtd={wtd.costPerCallBooked}
+            lastWeek={lastWeek.costPerCallBooked}
+            splm={splm.costPerCallBooked}
+            format={(v) => fmtCurrency(v)}
+            direction="lower-better"
+            note={wtd.callsBooked.source ? `calls from ${SOURCE_LABELS[wtd.callsBooked.source]}` : undefined}
+          />
+          <WeeklyTile
+            label="Calls Booked (Meta)"
+            wtd={wtd.callsBookedMeta.value}
+            lastWeek={lastWeek.callsBookedMeta.value}
+            splm={splm.callsBookedMeta.value}
+            format={fmtNum}
+            missingReason="Meta attributed bookings not available. Add calls_booked_meta to the marketing daily sheet."
+          />
+          <WeeklyTile
+            label="Calls Booked (Slack)"
+            wtd={wtd.callsBookedSlack.value}
+            lastWeek={lastWeek.callsBookedSlack.value}
+            splm={splm.callsBookedSlack.value}
+            format={fmtNum}
+            missingReason="Not instrumented. Add calls_booked_slack to the marketing daily sheet."
+          />
+          <WeeklyTile
+            label="Call Show Rate"
+            wtd={wtd.showRate}
+            lastWeek={lastWeek.showRate}
+            splm={splm.showRate}
+            format={(v) => fmtPct(v * 100, 1)}
+            missingReason="Needs calls_held alongside calls booked."
+          />
+          <WeeklyTile
+            label="Signups"
+            wtd={wtd.signups.value}
+            lastWeek={lastWeek.signups.value}
+            splm={splm.signups.value}
+            format={fmtNum}
+            note={
+              wtd.signups.value !== null && wtd.signupsExpected.value !== null
+                ? `${wtd.signups.value} of ${wtd.signupsExpected.value} expected`
+                : undefined
+            }
+            missingReason="Not instrumented. Add signups to the marketing daily sheet."
+          />
+        </div>
+
+        {!hasMarketingDaily && (
+          <p className="mt-3 font-sans text-[12px] text-dash-text-muted">
+            Calls, show rate and signups come from the integrated marketing daily sheet, which hasn&apos;t been
+            uploaded yet. Until then, calls booked falls back to Meta&apos;s pixel conversions — a different
+            number from the calls a clinician logs, which is why the tile says where it came from.
+          </p>
+        )}
+      </NarrativeSection>
+
+      {/* ── Section 2 — Weekly trends ── */}
+      <NarrativeSection
+        number={2}
+        question="Which Way Is It Moving?"
+        subtitle="Cost per lead and cost per call booked · last 12 weeks"
+      >
+        <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-3">
+          <div className="rounded-lg border border-dash-border bg-dash-surface p-4 lg:col-span-2">
+            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+              Cost per lead vs cost per call booked
+            </div>
+            <div className="h-[260px]">
+              <ResponsiveContainer>
+                <LineChart data={weeklyTrend as object[]} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid {...gridStyle} vertical={false} />
+                  <XAxis dataKey="w" tick={axisTickStyle} axisLine={axisLineStyle} />
+                  <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={52} tickFormatter={v => fmtCurrency(v, { compact: true, digits: 0 })} />
+                  <Tooltip formatter={(v: unknown) => (v === null ? '—' : fmtCurrency(Number(v)))} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Line type="monotone" dataKey="cpl" name="Cost per lead" stroke={TMRW_COLORS.red} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  <Line type="monotone" dataKey="costPerCall" name="Cost per call booked" stroke={TMRW_COLORS.blue} strokeWidth={2} strokeDasharray="4 3" dot={{ r: 3 }} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+            <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+              Calls booked vs held
+            </div>
+            <TmrwBarChart
+              data={callsComparisonData as Record<string, unknown>[]}
+              index="w"
+              series={[
+                { dataKey: 'booked', name: 'Booked', color: TMRW_COLORS.red },
+                { dataKey: 'held', name: 'Held', color: TMRW_COLORS.blue },
+              ]}
+              height={260}
+              yAxisWidth={36}
+              valueFormatter={fmtNum}
+            />
+            {wtd.callsHeld.value === null && (
+              <p className="mt-2 font-sans text-[11px] italic text-dash-text-muted">
+                Held is not instrumented — the second bar reads zero because there is no data, not because
+                nobody showed.
+              </p>
+            )}
+          </div>
+        </div>
+      </NarrativeSection>
+
+      {/* ── Section 3 — Monthly detail + campaigns ── */}
+      <NarrativeSection
+        number={3}
+        question="The Monthly Detail"
+        subtitle="Spend through to conversion, month by month"
+      >
+        <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[880px] text-left">
+              <thead>
+                <tr className="border-b border-dash-border">
+                  <MTh>Metric</MTh>
+                  {monthlyDetail.map(m => (
+                    <MTh key={m.month} align="right">{m.label}</MTh>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <MetricRow label="Spend" rows={monthlyDetail} get={w => w.spend} format={v => fmtCurrency(v, { compact: true, digits: 0 })} />
+                <MetricRow label="Impressions" rows={monthlyDetail} get={w => w.impressions} format={fmtNum} />
+                <MetricRow label="Link CTR" rows={monthlyDetail} get={w => w.linkCtr} format={v => fmtPct(v, 2)} />
+                <MetricRow label="Leads" rows={monthlyDetail} get={w => w.leads} format={fmtNum} />
+                <MetricRow label="Cost per lead" rows={monthlyDetail} get={w => w.costPerLead} format={v => fmtCurrency(v)} />
+                <MetricRow label="Landing page views" rows={monthlyDetail} get={w => w.landingPageViews} format={fmtNum} />
+                <MetricRow label="Landing + checkout views" rows={monthlyDetail} get={w => w.landingCheckoutViews.value} format={fmtNum} />
+                <MetricRow label="Cost per landing/checkout view" rows={monthlyDetail} get={w => w.costPerLandingCheckoutView} format={v => fmtCurrency(v)} />
+                <MetricRow label="Calls booked" rows={monthlyDetail} get={w => w.callsBooked.value} format={fmtNum} />
+                <MetricRow label="Cost per call booked" rows={monthlyDetail} get={w => w.costPerCallBooked} format={v => fmtCurrency(v)} />
+                <MetricRow label="Calls held" rows={monthlyDetail} get={w => w.callsHeld.value} format={fmtNum} />
+                <MetricRow label="Show rate" rows={monthlyDetail} get={w => w.showRate} format={v => fmtPct(v * 100, 1)} />
+                <MetricRow label="Closes off calls" rows={monthlyDetail} get={w => w.closes.value} format={fmtNum} />
+                <MetricRow label="Close rate of held" rows={monthlyDetail} get={w => w.closeRateOfHeld} format={v => fmtPct(v * 100, 1)} />
+                <MetricRow label="Cart starts" rows={monthlyDetail} get={w => w.cartStarts.value} format={fmtNum} />
+                <MetricRow label="Checkout abandonments" rows={monthlyDetail} get={w => w.checkoutAbandonments.value} format={fmtNum} />
+                <MetricRow label="Conversions" rows={monthlyDetail} get={w => w.conversions.value} format={fmtNum} />
+                <MetricRow label="Blended cost per conversion" rows={monthlyDetail} get={w => w.blendedCostPerConversion} format={v => fmtCurrency(v)} />
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 font-sans text-[11px] text-dash-text-muted">
+            <span className="italic">not instr.</span> means the source doesn&apos;t carry that metric yet —
+            distinct from a real zero. Rows below &ldquo;landing + checkout views&rdquo; need the integrated
+            marketing daily sheet.
+          </p>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-dash-border bg-dash-surface p-4">
+          <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+            By campaign · {pickerValue.period.start.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} – {pickerValue.period.end.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
+          </div>
+          {campaigns.length === 0 ? (
+            <p className="font-sans text-sm text-dash-text-muted">
+              No campaign detail in this window. Campaign-level reporting needs the warehouse Meta extract
+              (with CAMPAIGN_NAME) rather than the day-level sheet.
+            </p>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] text-left">
+                  <thead>
+                    <tr className="border-b border-dash-border">
+                      <MTh>Campaign</MTh>
+                      <MTh align="right">Spend</MTh>
+                      <MTh align="right">Share</MTh>
+                      <MTh align="right">Impressions</MTh>
+                      <MTh align="right">Clicks</MTh>
+                      <MTh align="right">CTR</MTh>
+                      <MTh align="right">Leads</MTh>
+                      <MTh align="right">CPL</MTh>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {campaigns.map(c => (
+                      <tr key={c.campaign} className="border-b border-dash-border/60 last:border-0">
+                        <td className="py-2 pr-3 font-sans text-[12px] text-dash-text">{c.campaign}</td>
+                        <MTd>{fmtCurrency(c.spend, { compact: true, digits: 0 })}</MTd>
+                        <MTd>{c.shareOfSpend === null ? '—' : fmtPct(c.shareOfSpend * 100, 0)}</MTd>
+                        <MTd>{fmtNum(c.impressions)}</MTd>
+                        <MTd>{fmtNum(c.clicks)}</MTd>
+                        <MTd>{c.ctr === null ? '—' : fmtPct(c.ctr, 2)}</MTd>
+                        <MTd>{fmtNum(c.leads)}</MTd>
+                        <MTd className={c.leads < 5 ? 'text-dash-text-muted' : undefined}>
+                          {c.costPerLead === null ? '—' : fmtCurrency(c.costPerLead)}
+                        </MTd>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 font-sans text-[11px] text-dash-text-muted">
+                Meta only records LEADS on lead-objective campaigns, so CPL is greyed where the lead count is
+                too low to be meaningful — those campaigns are optimising for something else, not failing at
+                A$11k a lead.
+              </p>
+            </>
+          )}
+        </div>
+      </NarrativeSection>
+
+      {/* ── Section 4 — Spend ── */}
+      <NarrativeSection number={4} question="Spend" subtitle="Every dollar · every outcome">
         <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
           <KpiTile
             label="Total Meta Ad Spend"
@@ -587,7 +1029,7 @@ export default function MarketingPage() {
       </NarrativeSection>
 
       {/* ── Section 2 — Paid — Meta Ads (funnel + tiles) ── */}
-      <NarrativeSection number={2} question="Paid — Meta Ads" subtitle="From impression to closed member">
+      <NarrativeSection number={5} question="Paid — Meta Ads" subtitle="From impression to closed member">
         <div className="mb-3 rounded-lg border border-dash-border bg-dash-surface p-4 md:mb-4">
           <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
             The Funnel · period selected
@@ -647,7 +1089,7 @@ export default function MarketingPage() {
       </NarrativeSection>
 
       {/* ── Section 3 — CAC trend ── */}
-      <NarrativeSection number={3} question="Customer Acquisition Cost" subtitle="Spend per member acquired · day by day">
+      <NarrativeSection number={6} question="Customer Acquisition Cost" subtitle="Spend per member acquired · day by day">
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={sparkCac} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
@@ -665,7 +1107,7 @@ export default function MarketingPage() {
       </NarrativeSection>
 
       {/* ── Section 4 — Organic Followers ── */}
-      <NarrativeSection number={4} question="Organic — Followers" subtitle="Audience size by platform">
+      <NarrativeSection number={7} question="Organic — Followers" subtitle="Audience size by platform">
         <div className="grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
           {FOLLOWER_PLATFORMS.map(p => {
             const hit = lookupFollowers(p.aliases)
@@ -689,7 +1131,7 @@ export default function MarketingPage() {
       </NarrativeSection>
 
       {/* ── Section 5 — Social Views by Platform ── */}
-      <NarrativeSection number={5} question="Organic — Social Views" subtitle="Eyeballs by platform">
+      <NarrativeSection number={8} question="Organic — Social Views" subtitle="Eyeballs by platform">
         <div className="grid grid-cols-1 gap-2 md:gap-3 lg:grid-cols-3">
           <KpiTile
             label="Page Views (total)"
@@ -742,7 +1184,7 @@ export default function MarketingPage() {
       </NarrativeSection>
 
       {/* ── Section 6 — Engagement Trend (all platforms combined) ── */}
-      <NarrativeSection number={6} question="Engagement Trend" subtitle="All platforms combined · page views · post engagements · video views">
+      <NarrativeSection number={9} question="Engagement Trend" subtitle="All platforms combined · page views · post engagements · video views">
         <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
           {trendData.length === 0 ? (
             <p className="py-12 text-center text-sm italic text-dash-text-muted">

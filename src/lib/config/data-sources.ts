@@ -297,10 +297,15 @@ export const tableauSchema: CsvSchema = {
 
 export const metaAdsSchema: CsvSchema = {
   source: 'meta_ads',
-  // TMRW_MARKETING workbook → Meta Ads sheet. Daily aggregate. One row per day.
+  // Accepts both Meta export shapes:
+  //   - TMRW_MARKETING workbook → Meta Ads sheet, one row per day
+  //   - the warehouse extract, one row per ad per day (DATE_DAY / SPEND / ...)
+  // Both land in the same canonical columns, so existing tiles that sum over
+  // meta_ads are unaffected by the finer granularity; the warehouse extract just
+  // additionally fills the campaign columns.
   requiredColumns: [
-    'Date',
-    ['Spend ($)', 'Spend'],
+    ['Date', 'DATE_DAY'],
+    ['Spend ($)', 'Spend', 'SPEND'],
   ],
   optionalColumns: [
     'Impressions',
@@ -312,6 +317,21 @@ export const metaAdsSchema: CsvSchema = {
     'Cost per Conversion ($)',
     'Video Views',
     'Post Engagements',
+    // Warehouse extract.
+    'AD_ID',
+    'CAMPAIGN_NAME',
+    'AD_SET_NAME',
+    'AD_NAME',
+    'CAMPAIGN_OBJECTIVE',
+    'INLINE_LINK_CLICKS',
+    'INLINE_LINK_CLICK_CTR',
+    'LANDING_PAGE_VIEWS',
+    'REACH',
+    'LEADS',
+    'PIXEL_CUSTOM_CONVERSIONS',
+    'FREQUENCY',
+    'VIDEO_VIEWS',
+    'POST_ENGAGEMENTS',
   ],
   strippedColumns: [],
   canonicalColumns: [
@@ -326,6 +346,53 @@ export const metaAdsSchema: CsvSchema = {
     'cost_per_conversion',
     'video_views',
     'post_engagements',
+    'ad_id',
+    'campaign_name',
+    'ad_set_name',
+    'ad_name',
+    'campaign_objective',
+    'reach',
+    'pixel_custom_conversions',
+    'frequency',
+    'inline_link_click_ctr',
+  ],
+};
+
+// Integrated marketing daily metrics — the Slack- and PostHog-derived numbers
+// Meta cannot supply. Only `date` is required so columns can be filled in as
+// instrumentation lands.
+export const marketingDailySchema: CsvSchema = {
+  source: 'marketing_daily',
+  requiredColumns: [
+    'date',
+  ],
+  optionalColumns: [
+    'calls_booked_meta',
+    'calls_booked_slack',
+    'calls_held',
+    'closes',
+    'signups',
+    'signups_expected',
+    'landing_checkout_views',
+    'checkout_cart_views',
+    'cart_starts',
+    'checkout_abandonments',
+    'conversions',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'date',
+    'calls_booked_meta',
+    'calls_booked_slack',
+    'calls_held',
+    'closes',
+    'signups',
+    'signups_expected',
+    'landing_checkout_views',
+    'checkout_cart_views',
+    'cart_starts',
+    'checkout_abandonments',
+    'conversions',
   ],
 };
 
@@ -460,6 +527,141 @@ export const financialRevenueGrossSchema: CsvSchema = {
   canonicalColumns: financialRevenueCanonical,
 };
 
+// Zendesk inbound tickets, warehouse extract. Distinct from the legacy `zendesk`
+// schema above, which requires Ticket ID + Satisfaction Score + reply-time
+// columns — none of which exist here, so detection can't confuse the two.
+export const zendeskTicketsSchema: CsvSchema = {
+  source: 'zendesk_tickets',
+  requiredColumns: [
+    ['CHANNEL', 'Channel'],
+    ['CREATED_AT', 'Created At'],
+    ['GROUP_NAME', 'Group Name'],
+  ],
+  optionalColumns: [
+    'STATUS',
+    'DIRECTION',
+    'UPDATED_AT',
+    'FIRST_REPLY_AT',
+    'FIRST_RESPONSE_HOURS',
+    'SOLVED_AT',
+    'RESOLUTION_HOURS',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'channel',
+    'status',
+    'direction',
+    'group_name',
+    'created_at',
+    'updated_at',
+    'first_reply_at',
+    'first_response_hours',
+    'solved_at',
+    'resolution_hours',
+  ],
+};
+
+// Stripe revenue at line-item granularity. Distinct from the `stripe` invoice
+// schema above — that one requires ID / AMOUNT_PAID / SUBSCRIPTION_ID, none of
+// which appear here, so header detection can't confuse the two.
+//
+// Required columns are the intersection of the 8-column "integrated" CSV and the
+// 57-column "Line Items" export, so either shape validates and the processor
+// reads whichever optional columns are present.
+export const stripeRevenueSchema: CsvSchema = {
+  source: 'stripe_revenue',
+  requiredColumns: [
+    ['TRANSACTION_DATE', 'Transaction Date'],
+    ['PRODUCT_NAME', 'Product Name'],
+    ['GROSS_LINE_AMOUNT', 'Gross Line Amount'],
+  ],
+  optionalColumns: [
+    'DISCOUNT_LINE_AMOUNT',
+    'CHARGED_LINE_AMOUNT',
+    'ALLOCATED_STRIPE_FEE',
+    'NET_LINE_AMOUNT',
+    'COUPON_NAME',
+    // Line Items export only.
+    'PRODUCT_ID',
+    'REVENUE_PRODUCT_LINE_ID',
+    'TRANSACTION_ID',
+    'RECORD_TYPE',
+    'IS_REFUND',
+    'IS_SUBSCRIPTION_CHARGE',
+    'BILLING_REASON',
+    'INVOICE_STATUS',
+    'QUANTITY',
+    'CURRENCY',
+    'SUBSCRIPTION_ID',
+    'SUBSCRIPTION_STATUS',
+    'CURRENT_JOURNEY_PHASE',
+  ],
+  strippedColumns: [
+    // MEMBER_EMAIL is kept (needed for member-level revenue later) but the
+    // Line Items export also carries these, which the dashboard never uses.
+    'CUSTOMER_ID',
+    'INVOICE_ID',
+    'BILLING_COUNTRY',
+    'BILLING_STATE',
+    'PAYMENT_METHOD_TYPE',
+  ],
+  canonicalColumns: [
+    'transaction_date',
+    'product_id',
+    'product_name',
+    'gross_amount',
+    'discount_amount',
+    'charged_amount',
+    'stripe_fee',
+    'net_after_fee',
+    'coupon_name',
+    'line_id',
+    'transaction_id',
+    'record_type',
+    'is_refund',
+    'is_subscription_charge',
+    'billing_reason',
+    'quantity',
+    'currency',
+    'member_email',
+    'subscription_id',
+    'subscription_status',
+  ],
+};
+
+// The workbook's Mapping tab. Routes by sheet name ('mapping') as well as by
+// header signature.
+export const productCategoryMapSchema: CsvSchema = {
+  source: 'product_category_map',
+  requiredColumns: [
+    ['Product ID', 'PRODUCT_ID'],
+    // Deliberately NOT accepting 'MAPPING_CATEGORY' here. That is the helper
+    // column on the workbook's Line Items sheet, which also carries PRODUCT_ID
+    // and PRODUCT_NAME — accepting it made a standalone Line Items CSV satisfy
+    // both this schema and stripe_revenue, so auto-detection saw two matches and
+    // fell back to a manual pick. The Mapping tab's own header is 'MAPPING '
+    // (the trailing space is stripped by the lc-normalise on both sides).
+    ['MAPPING', 'Mapping Category'],
+    ['Product Name', 'PRODUCT_NAME'],
+  ],
+  optionalColumns: [
+    // Optional override for the recurring/one-off split, so the classification
+    // can change in the sheet without a code change.
+    'Revenue Class',
+    'Currency',
+    'Price ID',
+    'Price Nickname',
+  ],
+  strippedColumns: [],
+  canonicalColumns: [
+    'product_id',
+    'product_name_key',
+    'product_name',
+    'category',
+    'revenue_class',
+  ],
+};
+
 /**
  * All schemas indexed by source name for easy lookup.
  */
@@ -468,9 +670,13 @@ export const dataSourceSchemas: Record<string, CsvSchema> = {
   ghl_opportunities: ghlOpportunitiesSchema,
   operational_data: operationalDataSchema,
   stripe: stripeSchema,
+  stripe_revenue: stripeRevenueSchema,
+  product_category_map: productCategoryMapSchema,
   zendesk: zendeskSchema,
+  zendesk_tickets: zendeskTicketsSchema,
   tableau: tableauSchema,
   meta_ads: metaAdsSchema,
+  marketing_daily: marketingDailySchema,
   social_followers: socialFollowersSchema,
   social_views: socialViewsSchema,
   pelagonia: pelagoniaSchema,
@@ -582,12 +788,37 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
     ],
     poweredMetrics: getMetricsPoweredBy('zendesk'),
   },
+  zendesk_tickets: {
+    name: 'Zendesk Tickets',
+    exportSteps: [
+      'Run the Zendesk inbound-ticket extract from the warehouse.',
+      'Required columns: CHANNEL, CREATED_AT, GROUP_NAME.',
+      'Recommended: also STATUS, DIRECTION, UPDATED_AT, FIRST_REPLY_AT, FIRST_RESPONSE_HOURS, SOLVED_AT, RESOLUTION_HOURS — resolution and first-response medians need the last four.',
+      'Timestamps should stay in UTC (the "2026-08-05 08:14:45.000 Z" form). The dashboard converts to Sydney time itself; pre-converting would double-shift every day boundary.',
+      'Export the full history rather than a window — the report compares against the same days last month and against full prior months.',
+    ],
+    poweredMetrics: [],
+  },
   meta_ads: {
     name: 'Meta Ads',
     exportSteps: [
-      'Open the TMRW_MARKETING workbook.',
-      'Meta Ads sheet — Date, Spend ($), Impressions, CTR (%), Clicks, Landing Page Views, Cost per LPV ($), Conversions (Leads), Cost per Conversion ($), Video Views, Post Engagements.',
-      'Drop the .xlsx file into the upload zone below.',
+      'Either export works — the warehouse extract is preferred because it carries campaign detail.',
+      'Warehouse extract: DATE_DAY, SPEND at minimum. Also include CAMPAIGN_NAME, AD_SET_NAME, AD_NAME, IMPRESSIONS, INLINE_LINK_CLICKS, LANDING_PAGE_VIEWS, LEADS, REACH, CTR, PIXEL_CUSTOM_CONVERSIONS, VIDEO_VIEWS, POST_ENGAGEMENTS.',
+      'TMRW_MARKETING workbook alternative: Meta Ads sheet — Date, Spend ($), Impressions, CTR (%), Clicks, Landing Page Views, Cost per LPV ($), Conversions (Leads), Cost per Conversion ($), Video Views, Post Engagements.',
+      'Cost per LPV and cost per conversion are derived when the export omits them, so you do not need to add them.',
+      'Note LEADS is only populated on lead-objective campaigns, so campaign-level CPL is blank on the others by design.',
+    ],
+    poweredMetrics: [],
+  },
+  marketing_daily: {
+    name: 'Marketing Daily (integrated)',
+    exportSteps: [
+      'This is the integrated sheet for the numbers Meta cannot supply: calls off the Slack notifications, and the funnel counts off PostHog.',
+      'One row per day. Header row, exactly these names (only `date` is required):',
+      'date, calls_booked_meta, calls_booked_slack, calls_held, closes, signups, signups_expected, landing_checkout_views, checkout_cart_views, cart_starts, checkout_abandonments, conversions',
+      'Leave a cell blank rather than entering 0 when a metric is not instrumented yet — blank renders as "not instrumented", whereas 0 reads as a real measurement.',
+      'calls_booked_meta and calls_booked_slack are kept separate on purpose: Meta counts attributed bookings, Slack counts every call a clinician logged, and the gap between them is worth seeing.',
+      'Upload as .csv or .xlsx. Re-uploading a day overwrites it.',
     ],
     poweredMetrics: [],
   },
@@ -620,6 +851,28 @@ export const dataSourceConfigs: Record<string, DataSourceConfig> = {
       'Drop the file into the upload zone below.',
     ],
     poweredMetrics: getMetricsPoweredBy('pelagonia'),
+  },
+  stripe_revenue: {
+    name: 'Stripe Revenue (line items)',
+    exportSteps: [
+      'Run the Stripe revenue line-item extract from the warehouse.',
+      'Either export shape works. Minimum columns: TRANSACTION_DATE, PRODUCT_NAME, GROSS_LINE_AMOUNT.',
+      'Recommended (the full "Line Items" export): also include PRODUCT_ID, DISCOUNT_LINE_AMOUNT, CHARGED_LINE_AMOUNT, ALLOCATED_STRIPE_FEE, NET_LINE_AMOUNT, COUPON_NAME, RECORD_TYPE, IS_REFUND, IS_SUBSCRIPTION_CHARGE, BILLING_REASON, MEMBER_EMAIL, SUBSCRIPTION_ID, SUBSCRIPTION_STATUS.',
+      'PRODUCT_ID is what makes category mapping exact — without it products are matched on name, and any renamed or new product falls into the Unmapped bucket until the Mapping tab catches up.',
+      'Upload the Mapping tab (below) whenever a new product appears, so nothing sits unmapped.',
+    ],
+    poweredMetrics: [],
+  },
+  product_category_map: {
+    name: 'Product Category Map',
+    exportSteps: [
+      'Open the Stripe revenue workbook and go to the Mapping tab (the last one).',
+      'Required columns: Product ID, MAPPING, Product Name.',
+      'Optional: Revenue Class — set to "recurring" or "one_off" to override the default for a product. Default treats Joining Fee Revenue, Attach products - Off-the-shelf supplements and Attach products - Advanced tests as one-off; everything else recurring.',
+      'Make sure every MAPPING cell holds literal category text, not a formula referencing another row — upload rejects those rows and names them.',
+      'Drop the .xlsx in; the Mapping sheet routes by name. Re-uploading re-categorises all revenue history immediately.',
+    ],
+    poweredMetrics: [],
   },
   financial_revenue_net: {
     name: 'Financial Revenue — Net',

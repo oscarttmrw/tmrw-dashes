@@ -10,15 +10,19 @@ import { createClient } from '@/lib/supabase/client'
 
 type SourceKey =
   | 'meta_ads'
+  | 'marketing_daily'
   | 'social_followers'
   | 'social_views'
   | 'stripe'
+  | 'stripe_revenue'
+  | 'product_category_map'
   | 'hubspot_contacts'
   | 'ghl_opportunities'
   | 'operational_data'
   | 'pelagonia'
   | 'tableau'
   | 'zendesk'
+  | 'zendesk_tickets'
   | 'financial_revenue_net'
   | 'financial_revenue_gross'
 
@@ -28,10 +32,13 @@ type SourceKey =
 // they MUST route by name (signature matching can't tell them apart).
 const SHEET_NAME_TO_SOURCE: Record<string, SourceKey> = {
   'meta ads': 'meta_ads',
+  'marketing daily': 'marketing_daily',
   'social media followers': 'social_followers',
   'social followers': 'social_followers',
   'social media views': 'social_views',
   'social views': 'social_views',
+  'mapping': 'product_category_map',
+  'line items': 'stripe_revenue',
   'net revenue': 'financial_revenue_net',
   'gross revenue (rrp)': 'financial_revenue_gross',
   'gross revenue': 'financial_revenue_gross',
@@ -39,15 +46,19 @@ const SHEET_NAME_TO_SOURCE: Record<string, SourceKey> = {
 
 const VALID_SOURCES: SourceKey[] = [
   'meta_ads',
+  'marketing_daily',
   'social_followers',
   'social_views',
   'stripe',
+  'stripe_revenue',
+  'product_category_map',
   'hubspot_contacts',
   'ghl_opportunities',
   'operational_data',
   'pelagonia',
   'tableau',
   'zendesk',
+  'zendesk_tickets',
   'financial_revenue_net',
   'financial_revenue_gross',
 ]
@@ -56,13 +67,16 @@ const VALID_SOURCES: SourceKey[] = [
 // pickers in the confirm modal.
 const DATE_COL: Partial<Record<SourceKey, string>> = {
   meta_ads: 'date',
+  marketing_daily: 'date',
   social_views: 'date',
   stripe: 'created',
+  stripe_revenue: 'transaction_date',
   hubspot_contacts: 'create date',
   ghl_opportunities: 'created on',
   operational_data: 'date',
   pelagonia: 'created at',
   zendesk: 'created at',
+  zendesk_tickets: 'created_at',
   financial_revenue_net: 'date',
   financial_revenue_gross: 'date',
 }
@@ -70,15 +84,19 @@ const DATE_COL: Partial<Record<SourceKey, string>> = {
 // lastRefresh returns one key per source. Same snake_case keys context-side.
 const REFRESH_KEY: Record<SourceKey, string> = {
   meta_ads: 'meta_ads',
+  marketing_daily: 'marketing_daily',
   social_followers: 'social_followers',
   social_views: 'social_views',
   stripe: 'stripe',
+  stripe_revenue: 'stripe_revenue',
+  product_category_map: 'product_category_map',
   hubspot_contacts: 'hubspot_contacts',
   ghl_opportunities: 'ghl_opportunities',
   operational_data: 'operational_data',
   pelagonia: 'pelagonia',
   tableau: 'tableau',
   zendesk: 'zendesk',
+  zendesk_tickets: 'zendesk_tickets',
   // Both revenue sheets surface under the single financial_revenue read key.
   financial_revenue_net: 'financial_revenue',
   financial_revenue_gross: 'financial_revenue',
@@ -189,9 +207,17 @@ export default function UploadPage() {
     }
     setResults(out)
     setSubmitting(false)
-    setModalOpen(false)
-    setSheets(null)
     refresh()
+
+    // Only dismiss on a clean run. Closing the modal regardless was the whole
+    // problem: a vanishing modal reads as "accepted", while the real outcome sat
+    // in a small list further down the page — directly under a "Source status"
+    // panel still correctly reporting "Never uploaded". Keep the sheets staged on
+    // failure so the file doesn't have to be picked again.
+    if (out.every(r => r.success)) {
+      setModalOpen(false)
+      setSheets(null)
+    }
   }
 
   return (
@@ -268,6 +294,25 @@ export default function UploadPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-dash-bg p-6">
             <h2 className="mb-4 font-sans text-base font-semibold text-dash-text">Confirm upload</h2>
+
+            {results.some(r => !r.success) && (
+              <div className="mb-4 rounded-md border border-status-red bg-status-red-light p-3">
+                <p className="font-sans text-xs font-semibold text-status-red">
+                  Upload failed — nothing was written
+                </p>
+                <ul className="mt-1.5 space-y-1">
+                  {results.filter(r => !r.success).map((r, i) => (
+                    <li key={i} className="font-sans text-xs text-status-red">
+                      <span className="font-mono">{r.source}</span>: {r.message}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 font-sans text-[11px] text-status-red/80">
+                  If this mentions a missing relation, the Supabase migration for this source
+                  hasn&apos;t been run yet.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-3">
               {sheets.map((s, idx) => (
@@ -500,5 +545,15 @@ async function submitSheet(sheet: SheetSubmissionState, source: SourceKey, metad
   fd.append('file_name', `${sheet.file.name} :: ${sheet.sheetName}`)
 
   const res = await fetch('/api/data/upload', { method: 'POST', body: fd })
-  return res.json()
+  // Never hand a non-2xx body back as if it were a result. A 500 differs from a
+  // 200 only by the absence of `success`, and a gateway/timeout page isn't JSON
+  // at all — res.json() would throw a bare SyntaxError with no useful context.
+  const body = await res.json().catch(() => ({} as Record<string, unknown>))
+  if (!res.ok) {
+    return {
+      success: false,
+      error: (body as { error?: string }).error ?? `Upload failed (HTTP ${res.status} ${res.statusText})`,
+    }
+  }
+  return body
 }

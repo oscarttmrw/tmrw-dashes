@@ -1,21 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient as createClient } from '@/lib/supabase/service'
-import { getSchema, validateRequiredColumns } from '@/lib/config/data-sources'
+import {
+  dataSourceConfigs,
+  dataSourceSchemas,
+  getSchema,
+  validateRequiredColumns,
+} from '@/lib/config/data-sources'
 import {
   fullReplaceStrategy,
   dateRangeReplaceStrategy,
   upsertStrategy,
 } from '@/lib/upload-strategies'
 import { processMetaAdsToCanonical } from '@/lib/processors/meta-processor'
+import { processMarketingDailyToCanonical } from '@/lib/processors/marketing-daily-processor'
 import { processSocialFollowersToCanonical } from '@/lib/processors/social-followers-processor'
 import { processSocialViewsToCanonical } from '@/lib/processors/social-views-processor'
 import { processStripeToCanonical } from '@/lib/processors/stripe-processor'
+import { processStripeRevenueToCanonical } from '@/lib/processors/stripe-revenue-processor'
+import { processProductCategoryMapToCanonical } from '@/lib/processors/product-category-map-processor'
 import { processHubspotContactsToCanonical } from '@/lib/processors/hubspot-contacts-processor'
 import { processGhlToCanonical } from '@/lib/processors/ghl-processor'
 import { processOperationalDataToCanonical } from '@/lib/processors/operational-data-processor'
 import { processPelagoniaToCanonical } from '@/lib/processors/pelagonia-processor'
 import { processTableauToCanonical } from '@/lib/processors/tableau-processor'
 import { processZendeskToCanonical } from '@/lib/processors/zendesk-processor'
+import { processZendeskTicketsToCanonical } from '@/lib/processors/zendesk-tickets-processor'
 import {
   processFinancialRevenueNetToCanonical,
   processFinancialRevenueGrossToCanonical,
@@ -28,8 +37,12 @@ type SourceKey =
   | 'ghl_opportunities'
   | 'operational_data'
   | 'stripe'
+  | 'stripe_revenue'
+  | 'product_category_map'
   | 'zendesk'
+  | 'zendesk_tickets'
   | 'meta_ads'
+  | 'marketing_daily'
   | 'social_followers'
   | 'social_views'
   | 'pelagonia'
@@ -42,8 +55,12 @@ const SOURCE_TABLE: Record<SourceKey, string> = {
   ghl_opportunities: 'ghl_opportunities',
   operational_data: 'operational_data',
   stripe: 'stripe_data',
+  stripe_revenue: 'stripe_revenue_lines',
+  product_category_map: 'product_category_map',
   zendesk: 'zendesk_data',
+  zendesk_tickets: 'zendesk_tickets',
   meta_ads: 'meta_ads',
+  marketing_daily: 'marketing_daily',
   social_followers: 'social_followers',
   social_views: 'social_views',
   pelagonia: 'pelagonia_data',
@@ -57,8 +74,13 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
   ghl_opportunities: 'created_on',
   operational_data: 'date',
   stripe: 'created',
+  stripe_revenue: 'transaction_date',
+  // The map has no date dimension — it is a snapshot of the current product list.
+  product_category_map: null,
   zendesk: null,
+  zendesk_tickets: 'created_at',
   meta_ads: 'date',
+  marketing_daily: 'date',
   social_followers: 'date',
   social_views: 'date',
   pelagonia: 'pelagonia_created_at',
@@ -68,15 +90,19 @@ const SOURCE_DATE_COLUMN: Record<SourceKey, string | null> = {
 
 const SOURCE_PROCESSOR: Record<SourceKey, (data: Record<string, unknown>[]) => ProcessorResult> = {
   meta_ads: processMetaAdsToCanonical,
+  marketing_daily: processMarketingDailyToCanonical,
   social_followers: processSocialFollowersToCanonical,
   social_views: processSocialViewsToCanonical,
   stripe: processStripeToCanonical,
+  stripe_revenue: processStripeRevenueToCanonical,
+  product_category_map: processProductCategoryMapToCanonical,
   hubspot_contacts: processHubspotContactsToCanonical,
   ghl_opportunities: processGhlToCanonical,
   operational_data: processOperationalDataToCanonical,
   pelagonia: processPelagoniaToCanonical,
   tableau: processTableauToCanonical,
   zendesk: processZendeskToCanonical,
+  zendesk_tickets: processZendeskTicketsToCanonical,
   financial_revenue_net: processFinancialRevenueNetToCanonical,
   financial_revenue_gross: processFinancialRevenueGrossToCanonical,
 }
@@ -91,6 +117,9 @@ async function applyWriteStrategy(
   switch (source) {
     case 'tableau':
     case 'hubspot_contacts':
+    // Full-replaced so removing a product from the Mapping tab removes it here
+    // too, rather than leaving a stale category behind.
+    case 'product_category_map':
       return fullReplaceStrategy(supabase, table, batchId, rows)
     case 'ghl_opportunities':
       return upsertStrategy(supabase, table, batchId, rows, 'opportunity_id')
@@ -98,8 +127,15 @@ async function applyWriteStrategy(
       return upsertStrategy(supabase, table, batchId, rows, 'date')
     case 'stripe':
       return upsertStrategy(supabase, table, batchId, rows, 'stripe_invoice_id')
+    // dateRangeReplace rather than upsert: the 8-column export carries no line
+    // ID, so there is no stable key to conflict on. Replacing the uploaded date
+    // window keeps a re-upload of the same period idempotent.
+    case 'stripe_revenue':
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'transaction_date')
     case 'meta_ads':
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'date')
+    case 'marketing_daily':
+      return upsertStrategy(supabase, table, batchId, rows, 'date')
     case 'social_followers':
       return upsertStrategy(supabase, table, batchId, rows, 'date,platform')
     case 'social_views':
@@ -108,6 +144,10 @@ async function applyWriteStrategy(
       return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'pelagonia_created_at')
     case 'zendesk':
       return upsertStrategy(supabase, table, batchId, rows, 'zendesk_ticket_id')
+    // No ticket ID in this extract, so nothing to upsert on. Replacing the
+    // uploaded created_at window keeps a re-upload of the same period idempotent.
+    case 'zendesk_tickets':
+      return dateRangeReplaceStrategy(supabase, table, batchId, rows, 'created_at')
     case 'financial_revenue_net':
     case 'financial_revenue_gross': {
       // Snapshot-replace only this revenue_type's rows so uploading the Net
@@ -126,6 +166,42 @@ async function applyWriteStrategy(
       return
     }
   }
+}
+
+/** Human label for a source key, falling back to the key itself. */
+function sourceLabel(key: string): string {
+  return dataSourceConfigs[key]?.name ?? key
+}
+
+/**
+ * Build an actionable message for a column-validation failure.
+ *
+ * The bare "Missing required columns: ..." was a dead end — it told you what the
+ * chosen source wanted but not that the file was fine and the source was wrong.
+ * That is the single most likely mistake here, because several exports cover the
+ * same system at different granularities (Stripe invoices vs Stripe line items,
+ * the Zendesk Explore report vs the warehouse ticket extract), so picking the
+ * older sibling produces a wall of missing columns that reads like a bug.
+ *
+ * So: after failing, probe every other registered schema against the same
+ * headers. Exactly one match is almost certainly what the user meant, so name
+ * it. No match means the file, sheet or header row is wrong rather than the
+ * source, so show the headers actually found.
+ */
+function describeColumnMismatch(source: string, missing: string[], headers: string[]): string {
+  const base = `Missing required columns for ${sourceLabel(source)}: ${missing.join(', ')}.`
+
+  const alternatives = Object.keys(dataSourceSchemas).filter(
+    key => key !== source && validateRequiredColumns(dataSourceSchemas[key], headers).length === 0
+  )
+
+  if (alternatives.length === 1) {
+    return `${base} This file's headers match ${sourceLabel(alternatives[0])} — pick that source instead.`
+  }
+  if (alternatives.length > 1) {
+    return `${base} These headers match more than one other source (${alternatives.map(sourceLabel).join(', ')}) — pick the intended one.`
+  }
+  return `${base} No registered source matches these headers: ${headers.join(', ')}. Check the file, the sheet, and that the header row is the first row.`
 }
 
 function dataPeriodBounds(
@@ -236,10 +312,11 @@ export async function POST(request: NextRequest) {
 
     const schema = getSchema(source)
     if (schema) {
-      const missing = validateRequiredColumns(schema, Object.keys(rawRows[0]))
+      const headers = Object.keys(rawRows[0])
+      const missing = validateRequiredColumns(schema, headers)
       if (missing.length > 0) {
         return NextResponse.json(
-          { error: `Missing required columns: ${missing.join(', ')}` },
+          { error: describeColumnMismatch(source, missing, headers) },
           { status: 422 }
         )
       }
@@ -281,18 +358,39 @@ export async function POST(request: NextRequest) {
 
     await applyWriteStrategy(supabase, source, batchId!, validRows)
 
-    await supabase
+    // Confirm the rows are actually in the table before claiming success.
+    // `validRows.length` is only what was SENT; reporting it as what landed
+    // means a partial write reads as a clean one.
+    const targetTable = SOURCE_TABLE[source]
+    const { count: writtenCount, error: countErr } = await supabase
+      .from(targetTable)
+      .select('*', { count: 'exact', head: true })
+      .eq('batch_id', batchId)
+    if (countErr) throw countErr
+    if ((writtenCount ?? 0) === 0 && validRows.length > 0) {
+      throw new Error(
+        `Write reported no error but no rows landed in ${targetTable} for this batch`
+      )
+    }
+
+    // This update was previously fire-and-forget. If it failed, the route still
+    // returned success while upload_log stayed 'in_progress' — and every
+    // dashboard derives "last uploaded" from status = 'complete', so the source
+    // would read "Never uploaded" forever despite the data being present.
+    const { error: completeErr } = await supabase
       .from('upload_log')
       .update({
         status: 'complete',
-        record_count: validRows.length,
+        record_count: writtenCount ?? validRows.length,
       })
       .eq('id', batchId)
+    if (completeErr) throw completeErr
 
     return NextResponse.json({
       success: true,
       batchId,
-      rowCount: validRows.length,
+      rowCount: writtenCount ?? validRows.length,
+      submittedCount: validRows.length,
       errorCount: errors.length,
       errors: errors.slice(0, 50),
       timestamp: new Date().toISOString(),

@@ -1,12 +1,12 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import Link from 'next/link'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { AlertCard } from '@/components/dashboard/alert-card'
 import { SectionHeading } from '@/components/dashboard/section-heading'
 import { StatusDot } from '@/components/dashboard/status-dot'
-import { TrendIndicator } from '@/components/dashboard/trend-indicator'
+import { MetricTile, LockedTile, Column } from '@/components/dashboard/metric-tile'
+import { NarrativeSection } from '@/components/dashboard/narrative-section'
 import {
   DateRangePicker,
   defaultDateRangePicker,
@@ -14,130 +14,9 @@ import {
 } from '@/components/dashboard/date-range-picker'
 import { TileChart, bucketByDay, toCumulative, buildCytdRunningSum } from '@/components/dashboard/tile-chart'
 import { useDashboardData } from '@/lib/context/data-context'
+import { deltaPct } from '@/lib/utils/period'
 import { cn } from '@/lib/utils'
 import type { Status } from '@/lib/types'
-import { Lock } from 'lucide-react'
-
-/* ─── Tile primitives ─────────────────────────────────────────────── */
-
-interface TileProps {
-  label: string
-  value: string
-  target?: string
-  delta?: { value: number; period?: string } | null
-  status: Status
-  direction?: 'higher-better' | 'lower-better'
-  href?: string
-  chart?: React.ReactNode
-  prominent?: boolean
-}
-
-function MetricTile({ label, value, target, delta, status, direction = 'higher-better', href, chart, prominent }: TileProps) {
-  const tileClass = cn(
-    'flex h-full flex-col rounded-lg border bg-dash-surface transition-all duration-150',
-    prominent
-      ? 'border-dash-border-strong p-4 md:p-5 shadow-sm'
-      : 'border-dash-border p-3 md:p-4',
-    href && 'hover:border-dash-border-strong hover:shadow-sm hover:-translate-y-px'
-  )
-  const inner = (
-    <div className={tileClass}>
-      <div className="flex items-start justify-between gap-2">
-        <span className={cn(
-          'font-ui font-medium uppercase tracking-[0.05em] text-dash-text-secondary',
-          prominent ? 'text-[11px] md:text-[12px]' : 'text-[10px] md:text-[11px]'
-        )}>
-          {label}
-        </span>
-        <StatusDot status={status} />
-      </div>
-      <div className="mt-1 md:mt-2 flex items-baseline gap-2">
-        <span className={cn(
-          'font-mono font-bold tracking-[-0.01em] text-dash-text',
-          prominent ? 'text-2xl md:text-3xl' : 'text-lg md:text-2xl'
-        )}>
-          {value}
-        </span>
-        {delta !== null && delta !== undefined && (
-          <TrendIndicator value={delta.value} direction={direction} />
-        )}
-      </div>
-      {chart && <div className="mt-3 mb-2">{chart}</div>}
-      <div className="mt-auto pt-3 flex items-center justify-between text-[10px] text-dash-text-muted md:text-[11px]">
-        {target ? <span>{target}</span> : <span />}
-        {delta?.period && <span className="font-sans">{delta.period}</span>}
-      </div>
-    </div>
-  )
-
-  return href ? <Link href={href} className="block h-full">{inner}</Link> : inner
-}
-
-function LockedTile({ label, target, reason }: { label: string; target?: string; reason: string }) {
-  return (
-    <div className="flex h-full flex-col rounded-lg border border-dashed border-dash-border bg-dash-surface/40 p-3 md:p-4 opacity-75">
-      <div className="flex items-start justify-between gap-2">
-        <span className="font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted md:text-[11px]">
-          {label}
-        </span>
-        <Lock size={11} className="text-dash-text-muted" />
-      </div>
-      <div className="mt-1 md:mt-2">
-        <span className="font-mono text-base text-dash-text-muted md:text-lg">—</span>
-      </div>
-      <p className="mt-auto pt-1.5 font-sans text-[10px] italic text-dash-text-muted md:text-[11px]">
-        {reason}
-      </p>
-      {target && (
-        <p className="font-sans text-[10px] text-dash-text-muted/80 md:text-[11px]">{target}</p>
-      )}
-    </div>
-  )
-}
-
-function Column({ heading, children }: { heading: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-2 md:space-y-3">
-      <h3 className="font-ui text-[10px] font-medium uppercase tracking-[0.08em] text-dash-text-secondary">
-        {heading}
-      </h3>
-      {children}
-    </div>
-  )
-}
-
-/* ─── Section wrapper ─────────────────────────────────────────────── */
-
-function NarrativeSection({
-  number,
-  question,
-  subtitle,
-  children,
-}: {
-  number: number
-  question: string
-  subtitle: string
-  children: React.ReactNode
-}) {
-  return (
-    <section>
-      <div className="mb-5 md:mb-7">
-        <div className="flex items-start gap-4 md:gap-6">
-          <span className="font-display text-4xl leading-none text-dash-text md:text-6xl">
-            {String(number).padStart(2, '0')}
-          </span>
-          <h2 className="font-display uppercase tracking-tight text-dash-text text-2xl leading-none pt-[0.2rem] md:text-4xl md:pt-[0.4rem]">
-            {question}
-          </h2>
-        </div>
-        <p className="mt-2 ml-[3.5rem] md:ml-[5.5rem] font-ui text-[11px] uppercase tracking-[0.12em] text-dash-text-muted md:text-xs">
-          {subtitle}
-        </p>
-      </div>
-      {children}
-    </section>
-  )
-}
 
 /* ─── Formatters / helpers ────────────────────────────────────────── */
 
@@ -163,11 +42,6 @@ function inPeriod(value: unknown, start: Date, end: Date): boolean {
   const t = new Date(String(value)).getTime()
   if (isNaN(t)) return false
   return t >= start.getTime() && t <= end.getTime()
-}
-
-function deltaPct(current: number, previous: number): number | null {
-  if (previous === 0) return null
-  return ((current - previous) / previous) * 100
 }
 
 /* ─── Page ────────────────────────────────────────────────────────── */

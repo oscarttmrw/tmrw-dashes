@@ -65,7 +65,10 @@ export function processZendeskCSV(data: Record<string, unknown>[]): ProcessorRes
     const lc = Object.fromEntries(
       Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), v])
     )
-    const ticketId = txt(lc['id'])
+    // Honour every header variant the schema accepts. Reading only `id` meant a
+    // file headed "Ticket ID" passed column validation and then failed every
+    // single row, surfacing as a bare "No valid rows after processing".
+    const ticketId = txt(lc['id'] ?? lc['ticket id'] ?? lc['zendesk ticket id'])
     if (!ticketId) {
       errors.push({ rowIndex: i, reason: `Row ${i}: missing ticket ID` })
       return
@@ -91,7 +94,9 @@ export function processZendeskCSV(data: Record<string, unknown>[]): ProcessorRes
         ?? lc['full resolution time (min)']
         ?? lc['full resolution time']
       ),
-      satisfaction_score: parseSatisfaction(lc['satisfaction score'] ?? lc['satisfaction']),
+      satisfaction_score: parseSatisfaction(
+        lc['satisfaction score'] ?? lc['satisfaction_score'] ?? lc['satisfaction']
+      ),
     })
   })
 

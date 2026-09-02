@@ -1,722 +1,589 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import Link from 'next/link'
+import { FileText } from 'lucide-react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
-import { MetricCard } from '@/components/dashboard/metric-card'
-import { DataSourceBadge } from '@/components/dashboard/data-source-badge'
-import { AlertCard } from '@/components/dashboard/alert-card'
-import { SectionHeading } from '@/components/dashboard/section-heading'
-import { StatusDot } from '@/components/dashboard/status-dot'
-import { TicketDetailPanel } from '@/components/panels/ticket-detail-panel'
-import { ChartPeriodToggle } from '@/components/dashboard/chart-period-toggle'
-import { TmrwLineChart } from '@/components/dashboard/tmrw-line-chart'
-import { TmrwAreaChart } from '@/components/dashboard/tmrw-area-chart'
+import { MetricTile, LockedTile, LockedCard } from '@/components/dashboard/metric-tile'
+import { NarrativeSection } from '@/components/dashboard/narrative-section'
+import { TmrwBarChart } from '@/components/dashboard/tmrw-bar-chart'
 import {
-  ResponsiveContainer,
-  BarChart as RechartBarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-} from 'recharts'
-import { axisTickStyle, axisLineStyle, gridProps, tooltipStyle, TMRW_COLORS } from '@/lib/utils/chart-styles'
+  DateRangePicker,
+  defaultDateRangePickerSPLM,
+  presetToRange,
+  type DateRangePickerValue,
+} from '@/components/dashboard/date-range-picker'
 import { useDashboardData } from '@/lib/context/data-context'
-import type { Ticket, Status } from '@/lib/types'
+import { cn } from '@/lib/utils'
+import { deltaPct, previousWeekSameSpan, samePeriodLastMonth, fullMonth } from '@/lib/utils/period'
+import {
+  channelComparison,
+  CHANNEL_GROUP_LABELS,
+  dailyVolume,
+  fmtHours,
+  latestTicketAt,
+  monthlyVolume,
+  openBacklogByAge,
+  responseComparison,
+  windowMetrics,
+} from '@/lib/analytics/support-metrics'
 
-function ticketStatusDot(status: Ticket['status']): Status {
-  if (status === 'Open') return 'red'
-  if (status === 'Pending') return 'amber'
-  return 'green'
+/* ─── Helpers ─────────────────────────────────────────────────────────── */
+
+const fmtNum = (n: number): string => n.toLocaleString('en-AU', { maximumFractionDigits: 0 })
+const fmtPct = (n: number | null, digits = 0): string => (n === null ? '—' : `${(n * 100).toFixed(digits)}%`)
+
+const CHANNEL_COLORS: Record<string, string> = {
+  whatsapp: '#25D366',
+  sms: '#3676C9',
+  native_messaging: '#7C3AED',
+  instagram_dm: '#E4405F',
+  sunshine_conversations_facebook_messenger: '#1877F2',
+  email: '#E61317',
+  web: '#E5A04A',
+  phone: '#0891B2',
+  api: '#9CA3AF',
+}
+const channelColor = (c: string) => CHANNEL_COLORS[c] ?? '#737373'
+
+/** Short day label for the volume chart: "3 Aug". */
+function dayLabel(isoDay: string): string {
+  const [y, m, d] = isoDay.split('-').map(Number)
+  if (!y || !m || !d) return isoDay
+  return new Date(y, m - 1, d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
 }
 
-// ---------------------------------------------------------------------------
-// 01. Support as Business Signal
-// ---------------------------------------------------------------------------
-const categoryTrendDataMonthly = [
-  { month: 'Sep 2025', billing: 5, 'kit-issue': 3, 'results-query': 2, scheduling: 6, 'supplement-question': 3 },
-  { month: 'Oct 2025', billing: 6, 'kit-issue': 4, 'results-query': 3, scheduling: 5, 'supplement-question': 4 },
-  { month: 'Nov 2025', billing: 5, 'kit-issue': 5, 'results-query': 4, scheduling: 4, 'supplement-question': 3 },
-  { month: 'Dec 2025', billing: 6, 'kit-issue': 6, 'results-query': 5, scheduling: 3, 'supplement-question': 4 },
-  { month: 'Jan 2026', billing: 5, 'kit-issue': 7, 'results-query': 7, scheduling: 3, 'supplement-question': 3 },
-  { month: 'Feb 2026', billing: 6, 'kit-issue': 8, 'results-query': 8, scheduling: 2, 'supplement-question': 4 },
-]
+function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
+  return (
+    <th
+      className={cn(
+        'pb-2 font-ui text-[10px] font-medium uppercase tracking-[0.05em] text-dash-text-muted',
+        align === 'right' ? 'pl-3 text-right' : 'pr-3 text-left'
+      )}
+    >
+      {children}
+    </th>
+  )
+}
 
-const categoryTrendDataWeekly = [
-  { month: 'W1 Feb', billing: 1, 'kit-issue': 2, 'results-query': 2, scheduling: 1, 'supplement-question': 1 },
-  { month: 'W2 Feb', billing: 2, 'kit-issue': 3, 'results-query': 1, scheduling: 0, 'supplement-question': 1 },
-  { month: 'W3 Feb', billing: 1, 'kit-issue': 1, 'results-query': 3, scheduling: 1, 'supplement-question': 1 },
-  { month: 'W4 Feb', billing: 2, 'kit-issue': 2, 'results-query': 2, scheduling: 0, 'supplement-question': 1 },
-]
+function Td({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <td className={cn('py-2 pl-3 text-right font-mono text-[12px] text-dash-text', className)}>{children}</td>
+  )
+}
 
-const categoryTrendDataQuarterly = [
-  { month: 'Q3 2025', billing: 16, 'kit-issue': 12, 'results-query': 9, scheduling: 15, 'supplement-question': 10 },
-  { month: 'Q4 2025', billing: 17, 'kit-issue': 15, 'results-query': 12, scheduling: 12, 'supplement-question': 11 },
-  { month: 'Q1 2026', billing: 11, 'kit-issue': 15, 'results-query': 15, scheduling: 5, 'supplement-question': 7 },
-]
-
-// ---------------------------------------------------------------------------
-// 02. Support Cost Model
-// ---------------------------------------------------------------------------
-const ticketsPerMemberTrend = [
-  { month: 'Sep 2025', 'tickets/member': 0.08 },
-  { month: 'Oct 2025', 'tickets/member': 0.09 },
-  { month: 'Nov 2025', 'tickets/member': 0.10 },
-  { month: 'Dec 2025', 'tickets/member': 0.11 },
-  { month: 'Jan 2026', 'tickets/member': 0.12 },
-  { month: 'Feb 2026', 'tickets/member': 0.13 },
-]
-
-// ---------------------------------------------------------------------------
-// 04. Operational Health
-// ---------------------------------------------------------------------------
-const slaTrendDataThisMonth = [
-  { month: 'Sep 2025', 'First Reply SLA %': 92, 'Resolution SLA %': 85 },
-  { month: 'Oct 2025', 'First Reply SLA %': 90, 'Resolution SLA %': 83 },
-  { month: 'Nov 2025', 'First Reply SLA %': 88, 'Resolution SLA %': 80 },
-  { month: 'Dec 2025', 'First Reply SLA %': 86, 'Resolution SLA %': 78 },
-  { month: 'Jan 2026', 'First Reply SLA %': 84, 'Resolution SLA %': 75 },
-  { month: 'Feb 2026', 'First Reply SLA %': 82, 'Resolution SLA %': 72 },
-]
-
-const slaTrendDataThisWeek = [
-  { month: 'Mon', 'First Reply SLA %': 80, 'Resolution SLA %': 68 },
-  { month: 'Tue', 'First Reply SLA %': 78, 'Resolution SLA %': 70 },
-  { month: 'Wed', 'First Reply SLA %': 84, 'Resolution SLA %': 74 },
-  { month: 'Thu', 'First Reply SLA %': 82, 'Resolution SLA %': 71 },
-  { month: 'Fri', 'First Reply SLA %': 85, 'Resolution SLA %': 73 },
-]
-
-const slaTrendDataQuarter = [
-  { month: 'Dec 2025', 'First Reply SLA %': 86, 'Resolution SLA %': 78 },
-  { month: 'Jan 2026', 'First Reply SLA %': 84, 'Resolution SLA %': 75 },
-  { month: 'Feb 2026', 'First Reply SLA %': 82, 'Resolution SLA %': 72 },
-]
-
-const slaTrendData6mo = [
-  { month: 'Sep 2025', 'First Reply SLA %': 92, 'Resolution SLA %': 85 },
-  { month: 'Oct 2025', 'First Reply SLA %': 90, 'Resolution SLA %': 83 },
-  { month: 'Nov 2025', 'First Reply SLA %': 88, 'Resolution SLA %': 80 },
-  { month: 'Dec 2025', 'First Reply SLA %': 86, 'Resolution SLA %': 78 },
-  { month: 'Jan 2026', 'First Reply SLA %': 84, 'Resolution SLA %': 75 },
-  { month: 'Feb 2026', 'First Reply SLA %': 82, 'Resolution SLA %': 72 },
-]
-
-const csatVolumeTrendMonthly = [
-  { month: 'Sep 2025', 'CSAT %': 88, 'Ticket Volume': 20 },
-  { month: 'Oct 2025', 'CSAT %': 86, 'Ticket Volume': 25 },
-  { month: 'Nov 2025', 'CSAT %': 85, 'Ticket Volume': 30 },
-  { month: 'Dec 2025', 'CSAT %': 84, 'Ticket Volume': 35 },
-  { month: 'Jan 2026', 'CSAT %': 83, 'Ticket Volume': 40 },
-  { month: 'Feb 2026', 'CSAT %': 82, 'Ticket Volume': 50 },
-]
-
-const csatVolumeTrendQuarterly = [
-  { month: 'Q3 2025', 'CSAT %': 87, 'Ticket Volume': 65 },
-  { month: 'Q4 2025', 'CSAT %': 85, 'Ticket Volume': 95 },
-  { month: 'Q1 2026', 'CSAT %': 82, 'Ticket Volume': 130 },
-]
-
-const csatVolumeTrendRolling90d = [
-  { month: 'Dec 2025', 'CSAT %': 85, 'Ticket Volume': 30 },
-  { month: 'Jan 2026', 'CSAT %': 84, 'Ticket Volume': 40 },
-  { month: 'Feb 2026', 'CSAT %': 82, 'Ticket Volume': 50 },
-]
-
-const agents = [
-  { name: 'Nina Gibbias', tickets: 80, avgFirstReply: '2.2h', avgResolution: '16h', csat: '85%', fcr: '72%' },
-  { name: 'Tom Watts', tickets: 60, avgFirstReply: '2.8h', avgResolution: '19h', csat: '80%', fcr: '65%' },
-  { name: 'Sarah Chen', tickets: 40, avgFirstReply: '2.4h', avgResolution: '17h', csat: '84%', fcr: '70%' },
-  { name: 'Alex Park', tickets: 20, avgFirstReply: '3.1h', avgResolution: '22h', csat: '78%', fcr: '58%' },
-]
-
-const backlogTrend = [
-  { month: 'Sep 2025', 'Open Tickets': 12 },
-  { month: 'Oct 2025', 'Open Tickets': 15 },
-  { month: 'Nov 2025', 'Open Tickets': 18 },
-  { month: 'Dec 2025', 'Open Tickets': 23 },
-  { month: 'Jan 2026', 'Open Tickets': 30 },
-  { month: 'Feb 2026', 'Open Tickets': 42 },
-]
-
-// ---------------------------------------------------------------------------
-// Channel Trend (stacked area)
-// ---------------------------------------------------------------------------
-const channelTrend = [
-  { month: 'Sep 2025', Email: 14, Web: 4, Chat: 1, Phone: 1 },
-  { month: 'Oct 2025', Email: 17, Web: 5, Chat: 2, Phone: 1 },
-  { month: 'Nov 2025', Email: 20, Web: 6, Chat: 3, Phone: 1 },
-  { month: 'Dec 2025', Email: 22, Web: 7, Chat: 4, Phone: 2 },
-  { month: 'Jan 2026', Email: 24, Web: 9, Chat: 5, Phone: 2 },
-  { month: 'Feb 2026', Email: 30, Web: 12, Chat: 5, Phone: 3 },
-]
-
-// ---------------------------------------------------------------------------
-// Tag Frequency Trend
-// ---------------------------------------------------------------------------
-const tagTrendData = [
-  { month: 'Oct 2025', billing: 8, 'kit-issue': 6, 'results-query': 5, supplement: 4, scheduling: 3 },
-  { month: 'Nov 2025', billing: 10, 'kit-issue': 8, 'results-query': 6, supplement: 5, scheduling: 4 },
-  { month: 'Dec 2025', billing: 12, 'kit-issue': 10, 'results-query': 8, supplement: 6, scheduling: 5 },
-  { month: 'Jan 2026', billing: 16, 'kit-issue': 12, 'results-query': 10, supplement: 8, scheduling: 7 },
-  { month: 'Feb 2026', billing: 32, 'kit-issue': 28, 'results-query': 24, supplement: 20, scheduling: 18 },
-]
-
-// ---------------------------------------------------------------------------
-// 05. Upstream Root Causes
-// ---------------------------------------------------------------------------
-const rootCauses = [
-  { cause: 'Results query', tickets: 24, upstream: 'Dead zone communication gap', owner: 'Marketing' },
-  { cause: 'Kit issue', tickets: 28, upstream: 'QC failure rate / instruction clarity', owner: 'Clinical' },
-  { cause: 'Billing', tickets: 32, upstream: 'Pricing confusion at checkout', owner: 'Product' },
-  { cause: 'Supplement question', tickets: 20, upstream: 'Protocol clarity in dashboard', owner: 'Clinical' },
-  { cause: 'Scheduling', tickets: 18, upstream: 'Consultation booking friction', owner: 'Product' },
-]
-
-// ---------------------------------------------------------------------------
-// Chart period options
-// ---------------------------------------------------------------------------
-const ticketVolumeOptions = [
-  { label: 'Weekly', value: 'weekly' },
-  { label: 'Monthly', value: 'monthly' },
-  { label: 'Quarterly', value: 'quarterly' },
-]
-
-const responseTimeOptions = [
-  { label: 'This Week', value: 'this-week' },
-  { label: 'This Month', value: 'this-month' },
-  { label: 'Quarter', value: 'quarter' },
-  { label: '6mo', value: '6mo' },
-]
-
-const csatOptions = [
-  { label: 'Monthly', value: 'monthly' },
-  { label: 'Quarterly', value: 'quarterly' },
-  { label: 'Rolling 90d', value: 'rolling-90d' },
-]
-
-const tagsOptions = [
-  { label: 'MTD', value: 'mtd' },
-  { label: 'QTD', value: 'qtd' },
-  { label: 'YTD', value: 'ytd' },
-]
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-export default function SupportPage() {
-  const { tickets, members } = useDashboardData()
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
-  const recentTickets = tickets.slice(0, 10)
-
-  // Chart period state
-  const [ticketVolumePeriod, setTicketVolumePeriod] = useState('monthly')
-  const [responseTimePeriod, setResponseTimePeriod] = useState('this-month')
-  const [csatPeriod, setCsatPeriod] = useState('monthly')
-  const [tagsPeriod, setTagsPeriod] = useState('mtd')
-
-  // Derived chart data based on toggle state
-  const categoryTrendData = ticketVolumePeriod === 'weekly'
-    ? categoryTrendDataWeekly
-    : ticketVolumePeriod === 'quarterly'
-      ? categoryTrendDataQuarterly
-      : categoryTrendDataMonthly
-
-  const slaTrendData = responseTimePeriod === 'this-week'
-    ? slaTrendDataThisWeek
-    : responseTimePeriod === 'quarter'
-      ? slaTrendDataQuarter
-      : responseTimePeriod === '6mo'
-        ? slaTrendData6mo
-        : slaTrendDataThisMonth
-
-  const csatVolumeTrend = csatPeriod === 'quarterly'
-    ? csatVolumeTrendQuarterly
-    : csatPeriod === 'rolling-90d'
-      ? csatVolumeTrendRolling90d
-      : csatVolumeTrendMonthly
-
-  // Build member lookup map
-  const memberMap = useMemo(() => {
-    const map = new Map<string, (typeof members)[number]>()
-    for (const m of members) {
-      map.set(m.id, m)
-    }
-    return map
-  }, [members])
-
-  // 03: Tickets by Journey Stage data
-  const journeyStageData = useMemo(() => {
-    const counts: Record<string, number> = {}
-    for (const t of tickets) {
-      const member = t.memberId ? memberMap.get(t.memberId) : undefined
-      const stage = member?.journeyStage ?? 'Unknown'
-      counts[stage] = (counts[stage] || 0) + 1
-    }
-    // Scale counts based on selected period
-    const scale = tagsPeriod === 'qtd' ? 2.8 : tagsPeriod === 'ytd' ? 8.5 : 1
-    return Object.entries(counts)
-      .map(([stage, count]) => ({ stage, Tickets: Math.round(count * scale) }))
-      .sort((a, b) => b.Tickets - a.Tickets)
-  }, [tickets, memberMap, tagsPeriod])
-
-  // Helper: look up journey stage for a ticket
-  function getJourneyStage(memberId?: string | null): string {
-    if (!memberId) return 'Unlinked'
-    const member = memberMap.get(memberId)
-    return member?.journeyStage ?? 'Unlinked'
+function DeltaCell({ value }: { value: number | null }) {
+  if (value === null) {
+    return <Td className="text-dash-text-muted">—</Td>
   }
+  const up = value > 0
+  return (
+    <Td className={up ? 'text-status-amber' : value < 0 ? 'text-status-green' : 'text-dash-text-muted'}>
+      {up ? '+' : ''}
+      {value.toFixed(0)}%
+    </Td>
+  )
+}
+
+/* ─── Page ────────────────────────────────────────────────────────────── */
+
+export default function SupportPage() {
+  const { zendesk_tickets, lastRefresh, loading, error, refresh } = useDashboardData()
+
+  // Defaults to comparing against the same period last month — the comparison
+  // Dan called out as the important one for this report.
+  const [pickerValue, setPickerValue] = useState<DateRangePickerValue>(() =>
+    defaultDateRangePickerSPLM(presetToRange('this-month'))
+  )
+  const period = pickerValue.period
+  const comparison = pickerValue.comparison
+
+  const hasTickets = zendesk_tickets.length > 0
+
+  const current = useMemo(() => windowMetrics(zendesk_tickets, period), [zendesk_tickets, period])
+  const prior = useMemo(() => windowMetrics(zendesk_tickets, comparison), [zendesk_tickets, comparison])
+
+  // A third reading: the same span one week back. Volume moves week to week, and
+  // the report quotes a prior-week per-day figure alongside the monthly one.
+  const priorWeek = useMemo(
+    () => windowMetrics(zendesk_tickets, previousWeekSameSpan(period)),
+    [zendesk_tickets, period]
+  )
+
+  const splmRange = useMemo(() => samePeriodLastMonth(period), [period])
+  const splmLabel = useMemo(
+    () => `vs ${fmtRangeShort(splmRange.start, splmRange.end)}`,
+    [splmRange]
+  )
+  const comparisonLabel = useMemo(
+    () => `vs ${fmtRangeShort(comparison.start, comparison.end)}`,
+    [comparison]
+  )
+
+  // When the picker is already set to same-period-last-month, the primary delta
+  // *is* that comparison — don't print it twice.
+  const showSecondary = pickerValue.comparisonMode !== 'same-period-last-month'
+  const splm = useMemo(
+    () => (showSecondary ? windowMetrics(zendesk_tickets, splmRange) : prior),
+    [showSecondary, zendesk_tickets, splmRange, prior]
+  )
+
+  const daily = useMemo(() => dailyVolume(zendesk_tickets, period), [zendesk_tickets, period])
+  const monthly = useMemo(() => monthlyVolume(zendesk_tickets), [zendesk_tickets])
+
+  const chCmp = useMemo(() => channelComparison(current, prior), [current, prior])
+  const respCmp = useMemo(() => responseComparison(current, prior), [current, prior])
+
+  const asOf = useMemo(() => latestTicketAt(zendesk_tickets), [zendesk_tickets])
+  const backlog = useMemo(
+    () => (asOf ? openBacklogByAge(zendesk_tickets, asOf) : []),
+    [zendesk_tickets, asOf]
+  )
+
+  // Full prior months for the volume strip, so the daily chart has context.
+  const thisMonth = useMemo(() => windowMetrics(zendesk_tickets, fullMonth(period.end)), [zendesk_tickets, period.end])
+  const lastMonth = useMemo(() => {
+    const d = new Date(period.end.getFullYear(), period.end.getMonth() - 1, 1)
+    return windowMetrics(zendesk_tickets, fullMonth(d))
+  }, [zendesk_tickets, period.end])
+
+  const volumeDelta = deltaPct(current.total, prior.total)
+  const perDayDelta = deltaPct(current.perDay, priorWeek.perDay)
+
+  // Channel-share chart: one stacked column per day, normalised to 100%.
+  const channelShareData = useMemo(() => {
+    const channels = current.byChannel.map(c => c.channel)
+    if (channels.length === 0) return []
+    return monthly.slice(-8).map(m => {
+      const inMonth = windowMetrics(zendesk_tickets, {
+        start: new Date(Number(m.month.slice(0, 4)), Number(m.month.slice(5, 7)) - 1, 1),
+        end: new Date(Number(m.month.slice(0, 4)), Number(m.month.slice(5, 7)), 0, 23, 59, 59, 999),
+      })
+      const row: Record<string, unknown> = { m: m.label }
+      for (const ch of channels) {
+        row[ch] = inMonth.byChannel.find(c => c.channel === ch)?.count ?? 0
+      }
+      return row
+    })
+  }, [monthly, zendesk_tickets, current.byChannel])
 
   return (
-    <div className="space-y-4 md:space-y-10">
-      {/* Breadcrumb */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Breadcrumb items={[{ label: 'Home', href: '/' }, { label: 'Support' }]} />
+    <div className="space-y-6 md:space-y-10">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <Breadcrumb items={[{ label: 'Support' }]} />
+          <p className="mt-1 font-sans text-[12px] text-dash-text-muted">
+            Zendesk inbound tickets · Sydney time
+            {asOf && ` · latest ticket ${asOf.toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Sydney' })} AEST`}
+            {lastRefresh?.zendesk_tickets && ` · uploaded ${new Date(lastRefresh.zendesk_tickets).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`}
+          </p>
+        </div>
         <div className="flex items-center gap-2">
-          <DataSourceBadge source="zendesk" />
-          <DataSourceBadge source="manual" />
-          <DataSourceBadge source="tableau" />
+          <Link
+            href="/support/report"
+            className="inline-flex items-center gap-1.5 rounded-full border border-dash-border bg-dash-surface px-4 py-2 font-ui text-[11px] uppercase tracking-[0.05em] text-dash-text-secondary transition-colors hover:border-dash-text-muted hover:text-dash-text"
+          >
+            <FileText size={13} />
+            Report view
+          </Link>
+          <DateRangePicker value={pickerValue} onChange={setPickerValue} />
         </div>
       </div>
 
-      {/* ================================================================= */}
-      {/* 01 — Support as Business Signal                                   */}
-      {/* ================================================================= */}
-      <section>
-        <SectionHeading number={1} title="Support as Business Signal" />
-
-        {/* Support Headlines */}
-        <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 mb-6">
-          <MetricCard label="Cost per Ticket" value="$18.50" status="red" target="<$15" />
-          <MetricCard label="CX Minutes per Patient" value="14 min" status="amber" target="10 min" />
-          <MetricCard label="Churn w/ Open Ticket" value="42%" status="red" target="<20%" direction="lower-better" />
-        </div>
-
-        {/* Ticket category trend */}
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5 mb-6">
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h3 className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-              Ticket Category Trend (6 months)
-            </h3>
-            <ChartPeriodToggle
-              options={ticketVolumeOptions}
-              selected={ticketVolumePeriod}
-              onChange={setTicketVolumePeriod}
-            />
-          </div>
-          <TmrwLineChart
-            data={categoryTrendData}
-            index="month"
-            series={[
-              { dataKey: 'billing', color: TMRW_COLORS.blue },
-              { dataKey: 'kit-issue', color: TMRW_COLORS.red },
-              { dataKey: 'results-query', color: TMRW_COLORS.amber },
-              { dataKey: 'scheduling', color: TMRW_COLORS.green },
-              { dataKey: 'supplement-question', color: TMRW_COLORS.purple },
-            ]}
-            yAxisWidth={30}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/* Support-triggered churn */}
-          <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
-            <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-              Support-Triggered Churn
-            </h3>
-            <p className="text-sm leading-relaxed text-dash-text">
-              Of <span className="font-mono font-semibold">54</span> churned members,{' '}
-              <span className="font-mono font-semibold text-status-red">31 (57%)</span> had open support
-              tickets. Most common:{' '}
-              <span className="font-medium">results-query (14)</span>,{' '}
-              <span className="font-medium">kit-issue (9)</span>,{' '}
-              <span className="font-medium">billing (8)</span>.
-            </p>
-          </div>
-
-          {/* First-contact resolution impact */}
-          <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
-            <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-              First-Contact Resolution Impact
-            </h3>
-            <p className="text-sm leading-relaxed text-dash-text">
-              FCR members retain at <span className="font-mono font-semibold text-status-green">88%</span> vs{' '}
-              <span className="font-mono font-semibold text-status-red">71%</span> for multi-contact.
-              Investing in agent training has{' '}
-              <span className="font-mono font-semibold">17pp</span> retention ROI.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* ================================================================= */}
-      {/* 02 — Support Cost Model                                           */}
-      {/* ================================================================= */}
-      <section>
-        <SectionHeading number={2} title="Support Cost Model" />
-
-        {/* Tickets per member trend */}
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5 mb-6">
-          <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-            Tickets per Member (Trend)
-          </h3>
-          <TmrwLineChart
-            data={ticketsPerMemberTrend}
-            index="month"
-            series={[
-              { dataKey: 'tickets/member', color: TMRW_COLORS.red },
-            ]}
-            yAxisWidth={40}
-            showLegend={false}
-            valueFormatter={(v) => v.toFixed(2)}
-          />
-          <AlertCard
-            severity="medium"
-            title="Tickets per member rising steadily (0.08 to 0.13). If trend continues, support costs will outpace revenue growth."
-          />
-        </div>
-
-        {/* Support capacity model */}
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
-          <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-            Support Capacity Model
-          </h3>
-          <p className="text-sm leading-relaxed text-dash-text mb-4">
-            At current <span className="font-mono font-semibold">0.13</span> tickets/member:
-          </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-dash-border">
-                  <th className="px-4 py-2 font-medium text-dash-text-secondary">Members</th>
-                  <th className="px-4 py-2 font-medium text-dash-text-secondary">Tickets/Week</th>
-                  <th className="px-4 py-2 font-medium text-dash-text-secondary">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-dash-border">
-                <tr>
-                  <td className="px-4 py-2 font-mono text-dash-text">500</td>
-                  <td className="px-4 py-2 font-mono text-dash-text">65</td>
-                  <td className="px-4 py-2 text-status-green font-medium">Within capacity</td>
-                </tr>
-                <tr>
-                  <td className="px-4 py-2 font-mono text-dash-text">1,000</td>
-                  <td className="px-4 py-2 font-mono text-dash-text">130</td>
-                  <td className="px-4 py-2 text-status-red font-medium">Exceeds capacity</td>
-                </tr>
-                <tr>
-                  <td className="px-4 py-2 font-mono text-dash-text">2,000</td>
-                  <td className="px-4 py-2 font-mono text-dash-text">260</td>
-                  <td className="px-4 py-2 text-status-red font-medium">Exceeds capacity</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-3 text-xs text-dash-text-muted">
-            Current team capacity: ~80 tickets/week. Exceeds at ~615 members.
+      {error && (
+        <div className="rounded-lg border border-status-red bg-status-red-light px-4 py-3">
+          <p className="font-sans text-[13px] text-status-red">
+            Couldn&apos;t load data: {error}{' '}
+            <button onClick={() => refresh()} className="underline">Retry</button>
           </p>
         </div>
-      </section>
+      )}
+      {loading && !hasTickets && (
+        <p className="font-sans text-[13px] text-dash-text-muted">Loading tickets…</p>
+      )}
 
-      {/* ================================================================= */}
-      {/* 03 — Tickets by Journey Stage (NEW)                               */}
-      {/* ================================================================= */}
-      <section>
-        <SectionHeading number={3} title="Tickets by Journey Stage" />
-
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5 mb-6">
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h3 className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-              Ticket Count by Member Journey Stage
-            </h3>
-            <ChartPeriodToggle
-              options={tagsOptions}
-              selected={tagsPeriod}
-              onChange={setTagsPeriod}
-            />
-          </div>
-          <ResponsiveContainer width="100%" height={224} className="h-44 md:h-56">
-            <RechartBarChart data={journeyStageData as object[]}>
-              <CartesianGrid {...gridProps} />
-              <XAxis dataKey="stage" tick={axisTickStyle} axisLine={axisLineStyle} />
-              <YAxis tick={axisTickStyle} axisLine={axisLineStyle} width={40} />
-              <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="Tickets" fill={TMRW_COLORS.red} radius={[4, 4, 0, 0]} />
-            </RechartBarChart>
-          </ResponsiveContainer>
-          <p className="mt-4 rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            42% of tickets come from members in &lsquo;Awaiting Results&rsquo; stage.
-          </p>
-        </div>
-      </section>
-
-      {/* ================================================================= */}
-      {/* 04 — Operational Health                                           */}
-      {/* ================================================================= */}
-      <section>
-        <SectionHeading number={4} title="Operational Health" />
-
-        {/* Operational KPI cards */}
-        <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4 mb-6">
-          <MetricCard label="Open Tickets" value="50" status="red" sparkline={[35, 38, 40, 42, 45, 48, 49, 50]} />
-          <MetricCard label="Avg First Reply" value="2.5h" status="amber" target="<2h" sparkline={[3.2, 3.0, 2.8, 2.6, 2.5, 2.5]} />
-          <MetricCard label="Avg Resolution" value="18h" status="amber" target="<12h" sparkline={[24, 22, 20, 19, 18, 18]} />
-          <MetricCard label="CSAT Score" value="82%" status="amber" target=">85%" sparkline={[78, 79, 80, 80, 81, 82]} />
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 mb-6">
-          <MetricCard label="Tickets/Week" value="8.3" status="red" sparkline={[5.5, 6.0, 6.5, 7.0, 7.8, 8.3]} />
-          <MetricCard label="SLA % First Reply <4h" value="85%" status="amber" target=">90%" sparkline={[92, 90, 88, 87, 86, 85]} />
-          <MetricCard label="SLA % Resolved <24h" value="72%" status="red" target=">80%" sparkline={[80, 78, 76, 74, 73, 72]} />
-        </div>
-
-        {/* SLA compliance trend */}
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5 mb-6">
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h3 className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-              SLA Compliance Trend
-            </h3>
-            <ChartPeriodToggle
-              options={responseTimeOptions}
-              selected={responseTimePeriod}
-              onChange={setResponseTimePeriod}
-            />
-          </div>
-          <TmrwLineChart
-            data={slaTrendData}
-            index="month"
-            series={[
-              { dataKey: 'First Reply SLA %', color: TMRW_COLORS.blue },
-              { dataKey: 'Resolution SLA %', color: TMRW_COLORS.amber },
-            ]}
-            yAxisWidth={40}
-            valueFormatter={(v) => `${v}%`}
-          />
-        </div>
-
-        {/* CSAT trend with volume overlay */}
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5 mb-6">
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h3 className="text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-              CSAT Trend with Ticket Volume
-            </h3>
-            <ChartPeriodToggle
-              options={csatOptions}
-              selected={csatPeriod}
-              onChange={setCsatPeriod}
-            />
-          </div>
-          <TmrwLineChart
-            data={csatVolumeTrend}
-            index="month"
-            series={[
-              { dataKey: 'CSAT %', color: TMRW_COLORS.green },
-              { dataKey: 'Ticket Volume', color: TMRW_COLORS.grey },
-            ]}
-            yAxisWidth={40}
-          />
-        </div>
-
-        {/* Agent performance table */}
-        <div className="mb-6">
-          <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-            Agent Performance
-          </h3>
-          <div className="overflow-x-auto rounded-lg border border-dash-border">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-dash-border bg-dash-surface">
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">Name</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">Tickets</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">First Reply</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">Resolution Time</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">CSAT</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">FCR Rate</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-dash-border">
-                {agents.map(a => (
-                  <tr key={a.name} className="bg-dash-surface/50">
-                    <td className="px-4 py-2 font-medium text-dash-text">{a.name}</td>
-                    <td className="px-4 py-2 font-mono text-dash-text">{a.tickets}</td>
-                    <td className="px-4 py-2 font-mono text-dash-text">{a.avgFirstReply}</td>
-                    <td className="px-4 py-2 font-mono text-dash-text">{a.avgResolution}</td>
-                    <td className="px-4 py-2 font-mono text-dash-text">{a.csat}</td>
-                    <td className="px-4 py-2 font-mono text-dash-text">{a.fcr}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Recent Tickets (with detail panel) */}
-        <div className="mb-6">
-          <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-            Recent Tickets
-          </h3>
-          <div className="overflow-x-auto rounded-lg border border-dash-border">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-dash-border bg-dash-surface">
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">ID</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">Status</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">Priority</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">Assignee</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">Channel</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">Journey Stage</th>
-                  <th className="px-4 py-3 font-medium text-dash-text-secondary">Created</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-dash-border">
-                {recentTickets.map(t => (
-                  <tr
-                    key={t.id}
-                    className="cursor-pointer bg-dash-surface/50 transition-colors hover:bg-dash-surface"
-                    onClick={() => setSelectedTicket(t)}
-                  >
-                    <td className="px-4 py-2 font-mono text-dash-text">{t.id}</td>
-                    <td className="px-4 py-2">
-                      <div className="flex items-center gap-1.5">
-                        <StatusDot status={ticketStatusDot(t.status)} size="sm" />
-                        <span className="text-dash-text">{t.status}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-2 text-dash-text">{t.priority}</td>
-                    <td className="px-4 py-2 text-dash-text">{t.assignee}</td>
-                    <td className="px-4 py-2 text-dash-text">{t.channel}</td>
-                    <td className="px-4 py-2 text-dash-text">{getJourneyStage(t.memberId)}</td>
-                    <td className="px-4 py-2 font-mono text-dash-text-secondary">
-                      {new Date(t.createdAt).toLocaleDateString('en-AU')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Backlog trend */}
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5">
-          <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-            Backlog Trend
-          </h3>
-          <TmrwLineChart
-            data={backlogTrend}
-            index="month"
-            series={[
-              { dataKey: 'Open Tickets', color: TMRW_COLORS.red },
-            ]}
-            yAxisWidth={30}
-            showLegend={false}
-          />
-          <AlertCard
-            severity="high"
-            title="Open ticket backlog growing 3.5x over 6 months (12 to 42). Current trajectory is unsustainable."
-          />
-        </div>
-
-        {/* Channel breakdown — stacked area trend */}
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5 mt-6">
-          <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-            Channel Volume Trend
-          </h3>
-          <TmrwAreaChart
-            data={channelTrend}
-            index="month"
-            series={[
-              { dataKey: 'Email', color: TMRW_COLORS.red },
-              { dataKey: 'Web', color: TMRW_COLORS.blue },
-              { dataKey: 'Chat', color: TMRW_COLORS.amber },
-              { dataKey: 'Phone', color: TMRW_COLORS.green },
-            ]}
-            height={224}
-            className="h-56 md:h-72"
-            yAxisWidth={40}
-          />
-        </div>
-      </section>
-
-      {/* ================================================================= */}
-      {/* 05 — Upstream Root Causes                                         */}
-      {/* ================================================================= */}
-      <section>
-        <SectionHeading number={5} title="Upstream Root Causes" />
-
-        {/* Root causes table */}
-        <div className="overflow-x-auto rounded-lg border border-dash-border mb-6">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-dash-border bg-dash-surface">
-                <th className="px-4 py-3 font-medium text-dash-text-secondary">Root Cause</th>
-                <th className="px-4 py-3 font-medium text-dash-text-secondary">Tickets (period)</th>
-                <th className="px-4 py-3 font-medium text-dash-text-secondary">Upstream Cause</th>
-                <th className="px-4 py-3 font-medium text-dash-text-secondary">Owner</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-dash-border">
-              {rootCauses.map(rc => (
-                <tr key={rc.cause} className="bg-dash-surface/50">
-                  <td className="px-4 py-2 font-medium text-dash-text">{rc.cause}</td>
-                  <td className="px-4 py-2 font-mono text-dash-text">{rc.tickets}</td>
-                  <td className="px-4 py-2 text-dash-text">{rc.upstream}</td>
-                  <td className="px-4 py-2">
-                    <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                        rc.owner === 'Clinical'
-                          ? 'bg-amber-100 text-amber-800'
-                          : rc.owner === 'Product'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-purple-100 text-purple-800'
-                      }`}
-                    >
-                      {rc.owner}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Tag frequency trend */}
-        <div className="rounded-lg border border-dash-border bg-dash-surface p-4 md:p-5 mb-6">
-          <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-dash-text-secondary">
-            Tag Frequency Trend
-          </h3>
-          <TmrwLineChart
-            data={tagTrendData}
-            index="month"
-            series={[
-              { dataKey: 'billing', color: TMRW_COLORS.red },
-              { dataKey: 'kit-issue', color: TMRW_COLORS.blue },
-              { dataKey: 'results-query', color: TMRW_COLORS.green },
-              { dataKey: 'supplement', color: TMRW_COLORS.amber },
-              { dataKey: 'scheduling', color: TMRW_COLORS.purple },
-            ]}
-            yAxisWidth={40}
-          />
-          <p className="mt-4 rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            All tag categories spiking in Feb — correlates with member growth acceleration.
-          </p>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 mb-6">
-          <MetricCard label="Repeat Contact Rate" value="18%" status="red" target="<10%" />
-        </div>
-
-        <AlertCard
-          severity="high"
-          title="3 of 5 root causes trace to Clinical operations — kit-issue, results-query, and supplement-question all originate upstream."
-          link={{ label: 'View Clinical', href: '/clinical' }}
+      {!hasTickets && !loading ? (
+        <LockedCard
+          title="Support"
+          reason="No Zendesk ticket data yet. Upload the Zendesk inbound-ticket extract (Admin → Data Upload → Zendesk Tickets) to unlock volume, channel mix, response times and backlog."
         />
-      </section>
+      ) : (
+        <>
+          {/* ────────────── 01 VOLUME ────────────── */}
+          <NarrativeSection
+            number={1}
+            question="How Much Is Coming In?"
+            subtitle={`${fmtRangeShort(period.start, period.end)} · inbound tickets by creation date`}
+          >
+            <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
+              <MetricTile
+                prominent
+                label="Inbound Tickets"
+                value={fmtNum(current.total)}
+                target={`${fmtRangeShort(period.start, period.end)}`}
+                status={volumeDelta === null ? 'grey' : volumeDelta > 50 ? 'red' : volumeDelta > 0 ? 'amber' : 'green'}
+                direction="lower-better"
+                delta={volumeDelta === null ? null : { value: volumeDelta, period: comparisonLabel }}
+                secondaryDelta={
+                  showSecondary && splm.total > 0
+                    ? { value: deltaPct(current.total, splm.total), period: splmLabel }
+                    : null
+                }
+              />
+              <MetricTile
+                label="Tickets Per Day"
+                value={current.perDay.toFixed(0)}
+                target={`over ${current.dayCount} day${current.dayCount === 1 ? '' : 's'}`}
+                status="grey"
+                direction="lower-better"
+                delta={perDayDelta === null ? null : { value: perDayDelta, period: 'vs prior week' }}
+              />
+              <MetricTile
+                label="Still Open"
+                value={fmtNum(current.stillOpen)}
+                target={current.total > 0 ? `${fmtPct(current.stillOpen / current.total)} of the window` : '—'}
+                status={current.total > 0 && current.stillOpen / current.total > 0.25 ? 'amber' : 'green'}
+                direction="lower-better"
+                delta={null}
+              />
+              <MetricTile
+                label="Median Resolution"
+                value={fmtHours(current.response.medianResolutionHours)}
+                target={`p90 ${fmtHours(current.response.p90ResolutionHours)} · ${current.response.resolved} resolved`}
+                status={
+                  current.response.medianResolutionHours === null ? 'grey'
+                    : current.response.medianResolutionHours <= 12 ? 'green'
+                    : current.response.medianResolutionHours <= 24 ? 'amber'
+                    : 'red'
+                }
+                direction="lower-better"
+                delta={
+                  current.response.medianResolutionHours !== null && prior.response.medianResolutionHours !== null
+                    ? { value: deltaPct(current.response.medianResolutionHours, prior.response.medianResolutionHours), period: comparisonLabel }
+                    : null
+                }
+              />
+            </div>
 
-      {/* Ticket Detail Panel */}
-      <TicketDetailPanel
-        ticket={selectedTicket}
-        open={selectedTicket !== null}
-        onOpenChange={(open) => { if (!open) setSelectedTicket(null) }}
-      />
+            <div className="mt-4 grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-3">
+              <div className="rounded-lg border border-dash-border bg-dash-surface p-4 lg:col-span-2">
+                <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  Tickets per day
+                </div>
+                <TmrwBarChart
+                  data={daily.map(d => ({ d: dayLabel(d.date), value: d.value })) as Record<string, unknown>[]}
+                  index="d"
+                  series={[{ dataKey: 'value', name: 'Tickets', color: '#E61317' }]}
+                  height={240}
+                  yAxisWidth={36}
+                  showLegend={false}
+                  valueFormatter={fmtNum}
+                />
+              </div>
+              <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+                <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  Full months
+                </div>
+                <div className="space-y-1.5">
+                  {monthly.slice(-8).map(m => {
+                    const max = Math.max(...monthly.slice(-8).map(x => x.value), 1)
+                    return (
+                      <div key={m.month} className="flex items-center gap-2">
+                        <span className="w-14 shrink-0 font-ui text-[10px] uppercase tracking-[0.05em] text-dash-text-muted">
+                          {m.label}
+                        </span>
+                        <div className="h-4 flex-1 rounded-sm bg-dash-surface-alt">
+                          <div
+                            className="h-full rounded-sm bg-dash-red"
+                            style={{ width: `${(m.value / max) * 100}%` }}
+                          />
+                        </div>
+                        <span className="w-12 shrink-0 text-right font-mono text-[11px] text-dash-text">
+                          {fmtNum(m.value)}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="mt-3 font-sans text-[11px] text-dash-text-muted">
+                  {thisMonth.total > 0 && lastMonth.total > 0
+                    ? `${fmtNum(thisMonth.total)} so far this month against ${fmtNum(lastMonth.total)} last month.`
+                    : 'Whole-month totals, for context against the window above.'}
+                </p>
+              </div>
+            </div>
+          </NarrativeSection>
+
+          {/* ────────────── 02 CHANNEL ────────────── */}
+          <NarrativeSection
+            number={2}
+            question="Where Is It Coming From?"
+            subtitle="Channel mix · messaging vs email vs web"
+          >
+            <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
+              {(['messaging', 'email', 'web_other'] as const).map(g => (
+                <MetricTile
+                  key={g}
+                  label={CHANNEL_GROUP_LABELS[g]}
+                  value={fmtNum(current.byGroup[g])}
+                  target={current.total > 0 ? `${fmtPct(current.byGroup[g] / current.total)} of inbound` : '—'}
+                  status="grey"
+                  delta={
+                    prior.byGroup[g] > 0
+                      ? { value: deltaPct(current.byGroup[g], prior.byGroup[g]), period: comparisonLabel }
+                      : null
+                  }
+                />
+              ))}
+              <MetricTile
+                label="Messaging Share"
+                value={fmtPct(current.messagingShare)}
+                target="WhatsApp · SMS · native · IG · Messenger"
+                status="grey"
+                delta={
+                  current.messagingShare !== null && prior.messagingShare !== null && prior.messagingShare > 0
+                    ? { value: deltaPct(current.messagingShare, prior.messagingShare), period: comparisonLabel }
+                    : null
+                }
+              />
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+                <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  Share of inbound by month
+                </div>
+                <TmrwBarChart
+                  data={channelShareData}
+                  index="m"
+                  percentStacked
+                  series={current.byChannel.map(c => ({
+                    dataKey: c.channel,
+                    name: c.label,
+                    color: channelColor(c.channel),
+                  }))}
+                  height={260}
+                  yAxisWidth={40}
+                />
+              </div>
+              <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+                <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  Channel vs {fmtRangeShort(comparison.start, comparison.end)}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[420px] text-left">
+                    <thead>
+                      <tr className="border-b border-dash-border">
+                        <Th>Channel</Th>
+                        <Th align="right">Current</Th>
+                        <Th align="right">Prior</Th>
+                        <Th align="right">Δ</Th>
+                        <Th align="right">Share</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {chCmp.map(c => (
+                        <tr key={c.channel} className="border-b border-dash-border/60 last:border-0">
+                          <td className="py-2 pr-3 font-sans text-[12px] text-dash-text">
+                            <span
+                              className="mr-2 inline-block h-2 w-2 rounded-full align-middle"
+                              style={{ backgroundColor: channelColor(c.channel) }}
+                            />
+                            {c.label}
+                          </td>
+                          <Td>{fmtNum(c.current)}</Td>
+                          <Td className="text-dash-text-muted">{fmtNum(c.comparison)}</Td>
+                          <DeltaCell value={c.deltaPct} />
+                          <Td>{current.total > 0 ? fmtPct(c.current / current.total, 1) : '—'}</Td>
+                        </tr>
+                      ))}
+                      <tr className="border-t border-dash-border-strong">
+                        <td className="py-2 pr-3 font-sans text-[12px] font-medium text-dash-text">All inbound</td>
+                        <Td className="font-medium">{fmtNum(current.total)}</Td>
+                        <Td className="text-dash-text-muted">{fmtNum(prior.total)}</Td>
+                        <DeltaCell value={volumeDelta} />
+                        <Td>100%</Td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </NarrativeSection>
+
+          {/* ────────────── 03 RESPONSE TIME ────────────── */}
+          <NarrativeSection
+            number={3}
+            question="How Fast Do We Answer?"
+            subtitle="Median + p90 hours to resolve, by channel"
+          >
+            <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] text-left">
+                  <thead>
+                    <tr className="border-b border-dash-border">
+                      <Th>Channel</Th>
+                      <Th align="right">Tickets</Th>
+                      <Th align="right">Median</Th>
+                      <Th align="right">Prior median</Th>
+                      <Th align="right">p90</Th>
+                      <Th align="right">Resolved</Th>
+                      <Th align="right">Still open</Th>
+                      <Th align="right">Median 1st reply</Th>
+                      <Th align="right">1st reply n</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {respCmp.map(r => {
+                      const improved =
+                        r.current.medianResolutionHours !== null
+                        && r.comparison.medianResolutionHours !== null
+                        && r.current.medianResolutionHours < r.comparison.medianResolutionHours
+                      return (
+                        <tr key={r.channel} className="border-b border-dash-border/60 last:border-0">
+                          <td className="py-2 pr-3 font-sans text-[12px] text-dash-text">
+                            <span
+                              className="mr-2 inline-block h-2 w-2 rounded-full align-middle"
+                              style={{ backgroundColor: channelColor(r.channel) }}
+                            />
+                            {r.label}
+                          </td>
+                          <Td>{fmtNum(r.current.tickets)}</Td>
+                          <Td className={improved ? 'text-status-green' : undefined}>
+                            {fmtHours(r.current.medianResolutionHours)}
+                          </Td>
+                          <Td className="text-dash-text-muted">{fmtHours(r.comparison.medianResolutionHours)}</Td>
+                          <Td>{fmtHours(r.current.p90ResolutionHours)}</Td>
+                          <Td>{fmtNum(r.current.resolved)}</Td>
+                          <Td className={r.current.stillOpen > 0 ? 'text-status-amber' : undefined}>
+                            {fmtNum(r.current.stillOpen)}
+                          </Td>
+                          <Td>{fmtHours(r.current.medianFirstResponseHours)}</Td>
+                          <Td className="text-dash-text-muted">{fmtNum(r.current.firstResponseCount)}</Td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 font-sans text-[11px] text-dash-text-muted">
+                Medians are computed on resolved tickets only. First-response time is recorded on just{' '}
+                {fmtPct(current.response.firstResponseCoverage, 1)} of tickets in this window
+                ({current.response.firstResponseCount} of {current.response.tickets}), so treat the
+                first-reply columns as indicative rather than representative.
+              </p>
+            </div>
+          </NarrativeSection>
+
+          {/* ────────────── 04 QUEUE ────────────── */}
+          <NarrativeSection
+            number={4}
+            question="Who Is Carrying It?"
+            subtitle="Volume and resolution speed by Zendesk group"
+          >
+            <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+                <div className="mb-3 font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                  By group
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[420px] text-left">
+                    <thead>
+                      <tr className="border-b border-dash-border">
+                        <Th>Group</Th>
+                        <Th align="right">Tickets</Th>
+                        <Th align="right">Share</Th>
+                        <Th align="right">Median</Th>
+                        <Th align="right">Still open</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {current.byQueue.map(q => (
+                        <tr key={q.queue} className="border-b border-dash-border/60 last:border-0">
+                          <td className="py-2 pr-3 font-sans text-[12px] text-dash-text">{q.queue}</td>
+                          <Td>{fmtNum(q.count)}</Td>
+                          <Td>{fmtPct(q.share, 1)}</Td>
+                          <Td>{fmtHours(q.medianResolutionHours)}</Td>
+                          <Td className={q.stillOpen > 0 ? 'text-status-amber' : undefined}>{fmtNum(q.stillOpen)}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="rounded-lg border border-dash-border bg-dash-surface p-4">
+                <div className="mb-3 flex items-baseline justify-between gap-3">
+                  <span className="font-ui text-[11px] uppercase tracking-[0.08em] text-dash-text-muted">
+                    Open backlog by age
+                  </span>
+                  <span className="font-sans text-[11px] text-dash-text-muted">whole export, not just this window</span>
+                </div>
+                {backlog.length === 0 ? (
+                  <p className="font-sans text-sm text-dash-text-muted">No open tickets.</p>
+                ) : (
+                  <>
+                    <TmrwBarChart
+                      data={backlog.map(b => ({ b: b.label, value: b.count })) as Record<string, unknown>[]}
+                      index="b"
+                      series={[{ dataKey: 'value', name: 'Open tickets', color: '#F5A623' }]}
+                      height={220}
+                      yAxisWidth={36}
+                      showLegend={false}
+                      valueFormatter={fmtNum}
+                    />
+                    <p className="mt-2 font-sans text-[11px] text-dash-text-muted">
+                      {fmtNum(backlog.reduce((s, b) => s + b.count, 0))} open in total
+                      {backlog[backlog.length - 1].count > 0
+                        && `, of which ${fmtNum(backlog[backlog.length - 1].count)} have been open more than two weeks`}
+                      .
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          </NarrativeSection>
+
+          {/* ────────────── 05 NOT IN THIS EXPORT ────────────── */}
+          <NarrativeSection
+            number={5}
+            question="What We Still Can't See"
+            subtitle="Needs columns the current Zendesk extract doesn't carry"
+          >
+            <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
+              <LockedTile
+                label="CSAT"
+                reason="No satisfaction score in this extract. Add SATISFACTION_SCORE to unlock."
+              />
+              <LockedTile
+                label="Per-Agent Load"
+                reason="No assignee column. Add ASSIGNEE_NAME to unlock."
+              />
+              <LockedTile
+                label="Ticket Tags / Topics"
+                reason="No tags or subject. Add TAGS to see what people are actually asking about."
+              />
+              <LockedTile
+                label="Reopens & Replies"
+                reason="No reopen or reply counts in this extract."
+              />
+            </div>
+            <p className="mt-3 font-sans text-[12px] text-dash-text-muted">
+              These four are the difference between knowing how much support costs and knowing why.
+              Each needs one extra column on the existing extract — no new integration.
+            </p>
+          </NarrativeSection>
+        </>
+      )}
     </div>
   )
+}
+
+/** "1 – 5 Aug 2026" / "28 Jul – 5 Aug 2026". */
+function fmtRangeShort(start: Date, end: Date): string {
+  const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()
+  const s = sameMonth
+    ? start.toLocaleDateString('en-AU', { day: 'numeric' })
+    : start.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+  const e = end.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+  return `${s} – ${e}`
 }

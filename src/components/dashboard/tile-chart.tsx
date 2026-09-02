@@ -171,6 +171,14 @@ function SparkTooltip({ active, payload, formatValue }: SparkTooltipProps) {
 /* ─── Bucketing helpers ────────────────────────────────────────────── */
 
 /**
+ * Assigns a raw cell value to a `YYYY-MM-DD` bucket. Pass `sydneyDayKey` from
+ * `lib/utils/period` for UTC timestamps that must land on the Sydney calendar
+ * day the business booked them on; omit it to keep the historic behaviour of
+ * bucketing by the viewer's local calendar day.
+ */
+export type DayKeyFn = (value: unknown) => string
+
+/**
  * Build a daily series from a row set, summing a numeric field per day in
  * the given range. Days with no rows produce 0.
  */
@@ -180,10 +188,11 @@ export function bucketSumByDay<T extends Record<string, unknown>>(
   valueField: keyof T,
   start: Date,
   end: Date,
+  dayKey?: DayKeyFn,
 ): { date: string; value: number }[] {
   return bucketByDay(rows, dateField, start, end, (group) =>
     group.reduce((s, r) => s + numeric(r[valueField]), 0)
-  )
+  , dayKey)
 }
 
 /**
@@ -195,8 +204,9 @@ export function bucketCountByDay<T extends Record<string, unknown>>(
   start: Date,
   end: Date,
   predicate: (r: T) => boolean = () => true,
+  dayKey?: DayKeyFn,
 ): { date: string; value: number }[] {
-  return bucketByDay(rows, dateField, start, end, (group) => group.filter(predicate).length)
+  return bucketByDay(rows, dateField, start, end, (group) => group.filter(predicate).length, dayKey)
 }
 
 /** General-purpose: group rows by day in range, then apply a reducer. */
@@ -206,15 +216,28 @@ export function bucketByDay<T extends Record<string, unknown>>(
   start: Date,
   end: Date,
   reducer: (rowsOnDay: T[]) => number,
+  dayKey?: DayKeyFn,
 ): { date: string; value: number }[] {
+  // With an explicit dayKey the range test compares calendar days too, not
+  // instants — otherwise a ticket at 00:30 Sydney on the first day of the window
+  // could fall outside it whenever the viewer's clock isn't on Sydney time.
+  const startKey = isoDay(start)
+  const endKey = isoDay(end)
+
   const byDay = new Map<string, T[]>()
   for (const r of rows) {
     const raw = r[dateField]
     if (!raw) continue
-    const t = new Date(String(raw)).getTime()
-    if (isNaN(t)) continue
-    if (t < start.getTime() || t > end.getTime()) continue
-    const key = isoDay(new Date(t))
+    let key: string
+    if (dayKey) {
+      key = dayKey(raw)
+      if (!key || key < startKey || key > endKey) continue
+    } else {
+      const t = new Date(String(raw)).getTime()
+      if (isNaN(t)) continue
+      if (t < start.getTime() || t > end.getTime()) continue
+      key = isoDay(new Date(t))
+    }
     const arr = byDay.get(key)
     if (arr) arr.push(r)
     else byDay.set(key, [r])
